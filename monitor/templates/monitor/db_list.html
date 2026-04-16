@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>数据库配置管理 - DB-AIOps</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh;
+            padding: 20px;
+        }
+        .header { text-align: center; color: white; margin-bottom: 30px; }
+        .header h1 { font-size: 28px; margin-bottom: 8px; text-shadow: 2px 2px 4px rgba(0,0,0,.3); }
+        .header .subtitle { font-size: 14px; opacity: .8; }
+        .nav { display: flex; gap: 12px; justify-content: center; margin-bottom: 24px; flex-wrap: wrap; }
+        .nav a {
+            color: white; text-decoration: none; padding: 8px 20px;
+            border: 1px solid rgba(255,255,255,.5); border-radius: 20px;
+            font-size: 14px; transition: background .2s;
+        }
+        .nav a:hover, .nav a.active { background: rgba(255,255,255,.2); }
+        .card {
+            background: white; border-radius: 12px;
+            box-shadow: 0 4px 20px rgba(0,0,0,.15); overflow: hidden;
+            max-width: 1200px; margin: 0 auto;
+        }
+        .card-header {
+            display: flex; justify-content: space-between; align-items: center;
+            padding: 20px 24px; border-bottom: 1px solid #f0f0f0;
+        }
+        .card-header h2 { font-size: 18px; color: #333; }
+        .btn {
+            padding: 8px 18px; border-radius: 6px; border: none;
+            cursor: pointer; font-size: 14px; text-decoration: none;
+            display: inline-block; transition: opacity .2s;
+        }
+        .btn:hover { opacity: .85; }
+        .btn-primary { background: #667eea; color: white; }
+        .btn-success { background: #10b981; color: white; }
+        .btn-warning { background: #f59e0b; color: white; }
+        .btn-danger  { background: #ef4444; color: white; }
+        .btn-sm { padding: 5px 12px; font-size: 12px; }
+        table { width: 100%; border-collapse: collapse; }
+        th {
+            background: #f8f9fa; padding: 12px 16px; text-align: left;
+            font-size: 13px; color: #666; font-weight: 600;
+            border-bottom: 2px solid #e9ecef;
+        }
+        td { padding: 14px 16px; border-bottom: 1px solid #f0f0f0; font-size: 14px; vertical-align: middle; }
+        tr:last-child td { border-bottom: none; }
+        tr:hover td { background: #fafbff; }
+        .badge {
+            display: inline-block; padding: 3px 10px; border-radius: 12px;
+            font-size: 12px; font-weight: 600;
+        }
+        .badge-up     { background: #d1fae5; color: #065f46; }
+        .badge-down   { background: #fee2e2; color: #991b1b; }
+        .badge-unknown{ background: #f3f4f6; color: #6b7280; }
+        .badge-alert  { background: #fef3c7; color: #92400e; }
+        .status-dot {
+            display: inline-block; width: 8px; height: 8px;
+            border-radius: 50%; margin-right: 6px;
+        }
+        .dot-up    { background: #10b981; }
+        .dot-down  { background: #ef4444; }
+        .dot-unknown { background: #9ca3af; }
+        .inactive-row td { opacity: .55; }
+        .toggle-btn {
+            position: relative; display: inline-block;
+            width: 40px; height: 22px; cursor: pointer;
+        }
+        .toggle-btn input { opacity: 0; width: 0; height: 0; }
+        .slider {
+            position: absolute; top: 0; left: 0; right: 0; bottom: 0;
+            background: #ccc; border-radius: 22px; transition: .3s;
+        }
+        .slider:before {
+            content: ''; position: absolute;
+            height: 16px; width: 16px; left: 3px; bottom: 3px;
+            background: white; border-radius: 50%; transition: .3s;
+        }
+        input:checked + .slider { background: #667eea; }
+        input:checked + .slider:before { transform: translateX(18px); }
+        .actions { display: flex; gap: 6px; align-items: center; }
+        .empty-state { text-align: center; padding: 60px 20px; color: #9ca3af; }
+        .empty-state .icon { font-size: 48px; margin-bottom: 12px; }
+        .total-info { color: #666; font-size: 14px; }
+    </style>
+</head>
+<body>
+<div class="header">
+    <h1>数据库配置管理</h1>
+    <div class="subtitle">DB-AIOps v0.1.0 · 共 {{ total }} 个实例</div>
+</div>
+
+<div class="nav">
+    <a href="{% url 'dashboard' %}">监控大屏</a>
+    <a href="{% url 'db_list' %}" class="active">配置管理</a>
+    <a href="{% url 'remediation_list' %}">运维工单</a>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>数据库实例列表</h2>
+        <a href="{% url 'db_create' %}" class="btn btn-primary">+ 新增数据库</a>
+    </div>
+
+    {% if db_data %}
+    <table>
+        <thead>
+        <tr>
+            <th>连接别名</th>
+            <th>类型</th>
+            <th>地址</th>
+            <th>当前状态</th>
+            <th>活跃告警</th>
+            <th>最后巡检</th>
+            <th>监控开关</th>
+            <th>操作</th>
+        </tr>
+        </thead>
+        <tbody>
+        {% for item in db_data %}
+        <tr class="{% if not item.db.is_active %}inactive-row{% endif %}">
+            <td><strong>{{ item.db.name }}</strong></td>
+            <td>{{ item.db.get_db_type_display }}</td>
+            <td style="font-family:monospace;font-size:13px;">{{ item.db.host }}:{{ item.db.port }}</td>
+            <td>
+                {% if item.latest_status == 'UP' %}
+                    <span class="badge badge-up"><span class="status-dot dot-up"></span>UP</span>
+                {% elif item.latest_status == 'DOWN' %}
+                    <span class="badge badge-down"><span class="status-dot dot-down"></span>DOWN</span>
+                {% else %}
+                    <span class="badge badge-unknown"><span class="status-dot dot-unknown"></span>暂无数据</span>
+                {% endif %}
+            </td>
+            <td>
+                {% if item.active_alerts > 0 %}
+                    <span class="badge badge-alert">{{ item.active_alerts }} 条</span>
+                {% else %}
+                    <span style="color:#9ca3af;font-size:13px;">无</span>
+                {% endif %}
+            </td>
+            <td style="color:#6b7280;font-size:13px;">
+                {% if item.latest_time %}
+                    {{ item.latest_time|date:"m-d H:i" }}
+                {% else %}
+                    -
+                {% endif %}
+            </td>
+            <td>
+                <label class="toggle-btn" title="{% if item.db.is_active %}点击停止监控{% else %}点击开启监控{% endif %}">
+                    <input type="checkbox" {% if item.db.is_active %}checked{% endif %}
+                           onchange="toggleActive({{ item.db.id }}, this)">
+                    <span class="slider"></span>
+                </label>
+            </td>
+            <td>
+                <div class="actions">
+                    <a href="{% url 'detail' item.db.id %}" class="btn btn-sm btn-success">监控详情</a>
+                    <a href="{% url 'db_edit' item.db.id %}" class="btn btn-sm btn-warning">编辑</a>
+                    <a href="{% url 'db_delete' item.db.id %}" class="btn btn-sm btn-danger">删除</a>
+                </div>
+            </td>
+        </tr>
+        {% endfor %}
+        </tbody>
+    </table>
+    {% else %}
+    <div class="empty-state">
+        <div class="icon">🗄️</div>
+        <p>暂无数据库配置</p>
+        <a href="{% url 'db_create' %}" class="btn btn-primary" style="margin-top:16px;">立即添加第一个数据库</a>
+    </div>
+    {% endif %}
+</div>
+
+<script>
+function toggleActive(configId, checkbox) {
+    fetch(`/monitor/db/${configId}/toggle/`, {
+        method: 'POST',
+        headers: {'X-CSRFToken': getCookie('csrftoken'), 'Content-Type': 'application/json'},
+    }).then(r => r.json()).then(data => {
+        if (!data.success) {
+            checkbox.checked = !checkbox.checked; // 回滚
+            alert('操作失败，请刷新后重试');
+        }
+    }).catch(() => {
+        checkbox.checked = !checkbox.checked;
+    });
+}
+function getCookie(name) {
+    const v = document.cookie.match('(^|;) ?' + name + '=([^;]*)(;|$)');
+    return v ? v[2] : null;
+}
+</script>
+</body>
+</html>

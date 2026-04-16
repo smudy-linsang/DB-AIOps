@@ -1,0 +1,22 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(uv run:*)",
+      "Bash(where uv:*)",
+      "Bash(python -c \"import subprocess; r=subprocess.run\\(['uv','--version'],capture_output=True,text=True\\); print\\(r.stdout or r.stderr\\)\")",
+      "Bash(powershell.exe -Command \"Get-Command uv -ErrorAction SilentlyContinue | Select-Object -ExpandProperty Source\")",
+      "Bash(powershell.exe -Command '& { $paths = @\\('\\\\''C:/Users/linsa/.local/bin/uv.exe'\\\\'','\\\\''C:/Users/linsa/AppData/Local/uv/bin/uv.exe'\\\\'','\\\\''C:/Users/linsa/AppData/Roaming/uv/bin/uv.exe'\\\\''\\); foreach\\($p in $paths\\){ if\\(Test-Path $p\\){ Write-Host $p; break } } }')",
+      "Bash(powershell.exe -Command \"Get-ChildItem -Path 'C:/Users/linsa' -Recurse -Filter 'uv.exe' -ErrorAction SilentlyContinue | Select-Object -First 3 -ExpandProperty FullName\")",
+      "Bash(powershell.exe -Command \"Get-ChildItem -Path 'C:/' -Recurse -Filter 'uv.exe' -Depth 6 -ErrorAction SilentlyContinue | Select-Object -First 5 -ExpandProperty FullName\")",
+      "Bash(pip show:*)",
+      "Bash(powershell.exe -Command \"python -m pip show claude-agent-sdk 2>&1\")",
+      "Bash(powershell.exe -Command \"pip show claude-agent-sdk 2>&1\")",
+      "Bash(powershell.exe -Command \"python -c 'import claude_agent_sdk; print\\(claude_agent_sdk.__version__\\)' 2>&1\")",
+      "Bash(powershell.exe -Command \"& 'C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe' -c 'import claude_agent_sdk; print\\(claude_agent_sdk.__version__\\)' 2>&1\")",
+      "Bash(powershell.exe -Command \"& 'C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe' 'C:/Users/linsa/claude-memory-compiler/hooks/session-start.py' 2>&1\")",
+      "Bash(powershell.exe -Command 'Get-Command uv -ErrorAction SilentlyContinue; [System.Environment]::GetEnvironmentVariable\\('\\\\''PATH'\\\\'','\\\\''User'\\\\''\\) -split '\\\\'';'\\\\'' | Where-Object { $_ -like '\\\\''*uv*'\\\\'' }')",
+      "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,'✓'\\) for k in d['hooks']]\")",
+      "Bash(python manage.py shell -c \"from monitor.models import DatabaseConfig; [print\\(f'{db.id}: {db.name} \\({db.db_type}\\) {db.host}:{db.port}'\\) for db in DatabaseConfig.objects.all\\(\\)]\")"
+    ]
+  }
+}

@@ -1,0 +1,51 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>确认删除 - DB-AIOps</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
+            min-height: 100vh; display: flex; align-items: center; justify-content: center; padding: 20px;
+        }
+        .card {
+            background: white; border-radius: 12px; max-width: 480px; width: 100%;
+            box-shadow: 0 4px 20px rgba(0,0,0,.2); overflow: hidden;
+        }
+        .card-header { background: #ef4444; color: white; padding: 18px 24px; font-size: 17px; font-weight: 600; }
+        .card-body { padding: 28px 24px; }
+        .warning-icon { font-size: 48px; text-align: center; margin-bottom: 16px; }
+        p { color: #374151; font-size: 15px; line-height: 1.6; }
+        .db-name { font-weight: bold; color: #111827; }
+        .danger-note { color: #b91c1c; font-size: 13px; margin-top: 12px; }
+        .card-footer {
+            border-top: 1px solid #f0f0f0; padding: 18px 24px;
+            display: flex; justify-content: flex-end; gap: 12px;
+        }
+        .btn { padding: 10px 24px; border-radius: 6px; border: none; cursor: pointer; font-size: 14px; text-decoration: none; display: inline-block; }
+        .btn-secondary { background: #f3f4f6; color: #374151; }
+        .btn-danger { background: #ef4444; color: white; }
+        .btn:hover { opacity: .85; }
+    </style>
+</head>
+<body>
+<div class="card">
+    <div class="card-header">确认删除数据库配置</div>
+    <div class="card-body">
+        <div class="warning-icon">⚠️</div>
+        <p>你正在删除数据库配置：<span class="db-name">{{ config.name }}</span></p>
+        <p style="margin-top:8px;">类型：{{ config.get_db_type_display }} &nbsp;|&nbsp; 地址：{{ config.host }}:{{ config.port }}</p>
+        <p class="danger-note">此操作将同时删除该数据库的所有监控日志和告警记录，且不可恢复！</p>
+    </div>
+    <div class="card-footer">
+        <a href="{% url 'db_list' %}" class="btn btn-secondary">取消</a>
+        <form method="post" style="display:inline;">
+            {% csrf_token %}
+            <button type="submit" class="btn btn-danger">确认删除</button>
+        </form>
+    </div>
+</div>
+</body>
+</html>

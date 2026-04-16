@@ -1,0 +1,188 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>{{ config.name }} - 详情监控</title>
+    <script src="https://cdn.jsdelivr.net/npm/echarts@5.4.3/dist/echarts.min.js"></script>
+    <style>
+        /* === 深色主题 CSS === */
+        body { 
+            font-family: "Microsoft YaHei", sans-serif; 
+            background-color: #121212; 
+            color: #e0e0e0; 
+            margin: 0; 
+            padding: 20px; 
+        }
+        .container { max-width: 1200px; margin: 0 auto; }
+        
+        /* 卡片样式 */
+        .dark-card {
+            background: #1e1e1e; 
+            padding: 20px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+            border: 1px solid #333; 
+            margin-bottom: 20px; 
+        }
+        
+        .header { display: flex; justify-content: space-between; align-items: center; }
+        
+        .back-btn { 
+            text-decoration: none; color: #bbb; font-size: 14px; border: 1px solid #444; 
+            padding: 6px 15px; border-radius: 4px; transition: all 0.3s;
+        }
+        .back-btn:hover { background: #333; color: #fff; border-color: #666; }
+        
+        .chart-box { height: 400px; }
+
+        /* 表空间样式 */
+        .section-title {
+            color: #fff; margin: 0 0 20px 0; border-left: 4px solid #1890ff; 
+            padding-left: 10px; font-size: 18px; font-weight: normal;
+        }
+
+        .tbs-grid {
+            display: grid; grid-template-columns: repeat(auto-fill, minmax(350px, 1fr)); gap: 20px;
+        }
+
+        .tbs-item { background: #252525; padding: 15px; border-radius: 6px; border: 1px solid #333; }
+        .tbs-header { display: flex; justify-content: space-between; margin-bottom: 8px; font-weight: 500; }
+        .progress-bg { height: 10px; background: #444; border-radius: 5px; overflow: hidden; }
+        .progress-bar { height: 100%; border-radius: 5px; transition: width 0.6s ease; }
+        .tbs-footer { margin-top: 8px; font-size: 12px; color: #888; display: flex; justify-content: space-between; }
+    </style>
+</head>
+<body>
+    <div class="container">
+        <div class="header dark-card">
+            <div>
+                <h2 style="margin:0; color:#fff; font-weight: normal;">{{ config.name }}</h2>
+                <div style="color:#888; margin-top:8px; font-size:14px;">
+                    <span style="margin-right: 15px;">IP: {{ config.host }}:{{ config.port }}</span>
+                    <span>类型: {{ config.get_db_type_display }}</span>
+                </div>
+            </div>
+            <a href="/" class="back-btn">← 返回大屏</a>
+        </div>
+
+        <div class="dark-card">
+            <h3 class="section-title">活跃连接数趋势</h3>
+            <div class="chart-box" id="connChart"></div>
+        </div>
+        
+        <div class="dark-card" id="tbsTrendCard" style="display:none;">
+            <h3 class="section-title">表空间使用率历史趋势 (%)</h3>
+            <div class="chart-box" id="tbsChart"></div>
+        </div>
+
+        {% if tablespaces %}
+        <div class="dark-card">
+            <h3 class="section-title">当前表空间容量详情</h3>
+            <div class="tbs-grid">
+                {% for tbs in tablespaces %}
+                <div class="tbs-item">
+                    <div class="tbs-header">
+                        <span style="color: #ddd;">{{ tbs.name }}</span>
+                        <span style="color: {% if tbs.used_pct > 90 %}#ff4d4f{% elif tbs.used_pct > 80 %}#faad14{% else %}#52c41a{% endif %};">
+                            {{ tbs.used_pct }}%
+                        </span>
+                    </div>
+                    <div class="progress-bg">
+                        <div class="progress-bar" 
+                             style="width: {{ tbs.used_pct }}%; 
+                                    background: {% if tbs.used_pct > 90 %}#ff4d4f{% elif tbs.used_pct > 80 %}#faad14{% else %}#1890ff{% endif %};">
+                        </div>
+                    </div>
+                    <div class="tbs-footer">
+                        <span>已用: {{ tbs.used_mb }} MB</span>
+                        <span>总量: {{ tbs.total_mb }} MB</span>
+                    </div>
+                </div>
+                {% endfor %}
+            </div>
+        </div>
+        {% endif %}
+
+    </div>
+
+    <script>
+        // 1. 渲染连接数图表 (原有逻辑)
+        var dateList = {{ dates|safe }};
+        var valueList = {{ connections|safe }};
+        
+        var connChart = echarts.init(document.getElementById('connChart'));
+        var connOption = {
+            textStyle: { color: '#eee' },
+            tooltip: { trigger: 'axis', backgroundColor: 'rgba(50,50,50,0.9)', borderColor: '#555', textStyle: { color: '#fff' } },
+            grid: { left: '3%', right: '4%', bottom: '3%', top: '10%', containLabel: true, borderColor: '#333' },
+            xAxis: { type: 'category', boundaryGap: false, data: dateList, axisLine: { lineStyle: { color: '#444' } } },
+            yAxis: { type: 'value', splitLine: { lineStyle: { color: '#333' } } },
+            series: [{
+                name: '连接数', type: 'line', smooth: true, symbol: 'none', 
+                itemStyle: { color: '#3399ff' },
+                areaStyle: { color: new echarts.graphic.LinearGradient(0, 0, 0, 1, [{ offset: 0, color: 'rgba(51, 153, 255, 0.4)' }, { offset: 1, color: 'rgba(51, 153, 255, 0.05)' }]) },
+                data: valueList
+            }]
+        };
+        connChart.setOption(connOption);
+
+        // 2. [新增] 渲染表空间趋势图表
+        var tbsDataMap = {{ tbs_trend_map|safe }};
+        var tbsNames = Object.keys(tbsDataMap);
+        
+        // 如果有数据，则显示卡片并渲染图表
+        if (tbsNames.length > 0) {
+            document.getElementById('tbsTrendCard').style.display = 'block';
+            
+            var tbsChart = echarts.init(document.getElementById('tbsChart'));
+            
+            // 构造 Series 列表
+            var tbsSeries = [];
+            tbsNames.forEach(function(name) {
+                tbsSeries.push({
+                    name: name,
+                    type: 'line',
+                    smooth: true,
+                    symbol: 'none', // 不显示小圆点，保持线条整洁
+                    data: tbsDataMap[name]
+                });
+            });
+
+            var tbsOption = {
+                color: ['#1890ff', '#2fc25b', '#facc14', '#f04864', '#8543e0', '#13c2c2'], // 自定义配色
+                textStyle: { color: '#eee' },
+                tooltip: { trigger: 'axis', backgroundColor: 'rgba(50,50,50,0.9)', borderColor: '#555', textStyle: { color: '#fff' } },
+                legend: { 
+                    data: tbsNames, 
+                    textStyle: { color: '#ccc' },
+                    type: 'scroll', // 如果表空间太多，支持滚动
+                    bottom: 0 
+                },
+                grid: { left: '3%', right: '4%', bottom: '10%', top: '10%', containLabel: true },
+                xAxis: { 
+                    type: 'category', boundaryGap: false, data: dateList,
+                    axisLine: { lineStyle: { color: '#444' } }
+                },
+                yAxis: { 
+                    type: 'value', 
+                    name: '使用率 (%)', 
+                    max: 100, // 也就是100%
+                    splitLine: { lineStyle: { color: '#333' } } 
+                },
+                series: tbsSeries
+            };
+            tbsChart.setOption(tbsOption);
+            
+            // 窗口缩放适配
+            window.addEventListener('resize', function() {
+                connChart.resize();
+                tbsChart.resize();
+            });
+        } else {
+             window.addEventListener('resize', function() {
+                connChart.resize();
+            });
+        }
+    </script>
+</body>
+</html>

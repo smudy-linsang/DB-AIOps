@@ -1,0 +1,20 @@
+# Django Web Framework
+Django>=5.2.0
+
+# 数据库驱动
+pymysql>=1.1.0          # MySQL, Gbase8a, TDSQL
+oracledb>=2.0.0         # Oracle
+psycopg2-binary>=2.9.0  # PostgreSQL
+pyodbc>=5.0.0           # 达梦数据库 (DM8 ODBC Driver)
+
+# 任务调度
+APScheduler>=3.10.0
+
+# 密码加密
+cryptography>=42.0.0
+
+# Redis (预留)
+# redis>=5.0.0
+
+# MongoDB (预留)
+# pymongo>=4.0.0

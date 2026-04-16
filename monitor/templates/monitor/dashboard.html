@@ -1,0 +1,200 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <title>DBM 数据库监控中心</title>
+    <style>
+        /* === 深色主题全局样式 === */
+        body { 
+            font-family: "Segoe UI", "Microsoft YaHei", sans-serif; 
+            background-color: #121212; /* 深邃黑背景 */
+            color: #e0e0e0; 
+            margin: 0; 
+            padding: 20px; 
+        }
+
+        /* 顶部标题栏 */
+        .header { 
+            background: #1e1e1e; 
+            padding: 20px 30px; 
+            border-radius: 8px; 
+            box-shadow: 0 4px 12px rgba(0,0,0,0.5); 
+            margin-bottom: 25px; 
+            border-bottom: 2px solid #333;
+            display: flex;
+            align-items: center;
+        }
+        .header h1 { 
+            margin: 0; 
+            color: #fff; 
+            font-size: 24px; 
+            display: flex;
+            align-items: center;
+        }
+        .header-icon { margin-right: 15px; font-size: 28px; }
+
+        /* 卡片容器 grid布局 */
+        .card-container { 
+            display: grid; 
+            grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); /* 自适应列宽 */
+            gap: 25px; 
+        }
+        
+        /* 单个数据库卡片 */
+        .db-card {
+            background: #1e1e1e;
+            border-radius: 10px;
+            box-shadow: 0 4px 10px rgba(0,0,0,0.3);
+            border: 1px solid #333;
+            transition: all 0.3s ease;
+            cursor: pointer;
+            position: relative;
+            overflow: hidden;
+            text-decoration: none; /* 去掉链接下划线 */
+            display: block; /* 让a标签变成块级元素 */
+            color: inherit;
+        }
+        
+        /* 鼠标悬停特效 */
+        .db-card:hover { 
+            transform: translateY(-5px); 
+            box-shadow: 0 8px 20px rgba(0,0,0,0.6); 
+            border-color: #555;
+            background: #252525;
+        }
+        
+        /* 状态条 (左侧光标) */
+        .status-bar {
+            position: absolute;
+            left: 0;
+            top: 0;
+            bottom: 0;
+            width: 4px;
+        }
+        .bar-up { background-color: #52c41a; box-shadow: 0 0 10px rgba(82, 196, 26, 0.6); }
+        .bar-down { background-color: #f5222d; box-shadow: 0 0 10px rgba(245, 34, 45, 0.6); }
+        .bar-unknown { background-color: #666; }
+
+        /* 卡片头部 */
+        .card-header { 
+            padding: 15px 20px; 
+            border-bottom: 1px solid #333; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center; 
+        }
+        .db-name { 
+            font-weight: bold; 
+            font-size: 18px; 
+            color: #fff; 
+            white-space: nowrap; 
+            overflow: hidden; 
+            text-overflow: ellipsis; 
+            max-width: 180px;
+        }
+        
+        /* 状态徽章 */
+        .status-badge { 
+            padding: 4px 10px; 
+            border-radius: 20px; 
+            color: #fff; 
+            font-size: 12px; 
+            font-weight: bold;
+            letter-spacing: 1px;
+        }
+        .status-up { background-color: rgba(82, 196, 26, 0.2); color: #52c41a; border: 1px solid #52c41a; }
+        .status-down { background-color: rgba(245, 34, 45, 0.2); color: #f5222d; border: 1px solid #f5222d; }
+        .status-unknown { background-color: rgba(255, 255, 255, 0.1); color: #aaa; border: 1px solid #666; }
+        
+        /* 卡片内容区 */
+        .card-body { padding: 20px; font-size: 14px; }
+        
+        .metric-row { 
+            margin-bottom: 12px; 
+            display: flex; 
+            justify-content: space-between; 
+            align-items: center;
+        }
+        .metric-label { color: #888; }
+        .metric-value { font-weight: 500; color: #ddd; font-family: Consolas, monospace;}
+        
+        /* 关键指标高亮 */
+        .highlight-value { color: #40a9ff; font-weight: bold; font-size: 15px; }
+        
+        /* 底部时间戳 */
+        .timestamp { 
+            margin-top: 15px; 
+            font-size: 12px; 
+            color: #555; 
+            text-align: right; 
+            border-top: 1px dashed #333; 
+            padding-top: 10px;
+        }
+    </style> </head>
+<body>
+
+    <div class="header">
+        <span class="header-icon">📟</span>
+        <h1>数据库监控指挥中心</h1>
+    </div>
+
+    <div class="card-container">
+        {% for db in data %}
+        <a href="/monitor/{{ db.id }}/" class="db-card">
+            
+            <div class="status-bar {% if db.status == 'UP' %}bar-up{% elif db.status == 'DOWN' %}bar-down{% else %}bar-unknown{% endif %}"></div>
+
+            <div class="card-header">
+                <span class="db-name" title="{{ db.name }}">{{ db.name }}</span>
+                {% if db.status == 'UP' %}
+                    <span class="status-badge status-up">RUNNING</span>
+                {% elif db.status == 'DOWN' %}
+                    <span class="status-badge status-down">CRITICAL</span>
+                {% else %}
+                    <span class="status-badge status-unknown">UNKNOWN</span>
+                {% endif %}
+            </div>
+            
+            <div class="card-body">
+                <div class="metric-row">
+                    <span class="metric-label">服务地址</span>
+                    <span class="metric-value">{{ db.host }}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">数据库类型</span>
+                    <span class="metric-value">{{ db.type }}</span>
+                </div>
+                
+                {% if db.status == 'UP' %}
+                <div style="height: 1px; background: #333; margin: 10px 0;"></div>
+                
+                <div class="metric-row">
+                    <span class="metric-label">版本</span>
+                    <span class="metric-value" title="{{ db.details.version }}">{{ db.details.version|slice:":15" }}...</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">活跃连接数</span>
+                    <span class="metric-value highlight-value">{{ db.details.active_connections }}</span>
+                </div>
+                <div class="metric-row">
+                    <span class="metric-label">运行时间</span>
+                    <span class="metric-value">{{ db.details.uptime_seconds }} s</span>
+                </div>
+                {% endif %}
+
+                {% if db.details.error %}
+                <div style="color: #ff4d4f; margin-top: 10px; font-size: 12px; background: rgba(255,0,0,0.1); padding: 5px; border-radius: 4px;">
+                    ⚠️ {{ db.details.error }}
+                </div>
+                {% endif %}
+
+                <div class="timestamp">更新: {{ db.check_time }}</div>
+            </div>
+        </a>
+        {% empty %}
+            <p style="color:#666; padding: 20px;">暂无监控配置，请去后台添加。</p>
+        {% endfor %}
+    </div>
+
+</body>
+</html>

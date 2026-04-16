@@ -1,0 +1,96 @@
+# ==========================================
+# DB Monitor - 测试数据库环境
+# MySQL 8.0 + PostgreSQL 15 + Oracle 19c XE
+# ==========================================
+
+version: '3.8'
+
+services:
+
+  # ----------------------------------------
+  # MySQL 8.0
+  # 主机端口: 3306
+  # root 密码: root123
+  # 监控用户: monitor / monitor123
+  # ----------------------------------------
+  mysql:
+    image: mysql:8.0
+    container_name: dbmonitor-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: monitor
+      MYSQL_PASSWORD: monitor123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --slow-query-log=ON
+      --long-query-time=1
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------
+  # PostgreSQL 15
+  # 主机端口: 5432
+  # 用户: postgres / postgres123
+  # ----------------------------------------
+  postgres:
+    image: postgres:15
+    container_name: dbmonitor-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: testdb
+    ports:
+      - "5432:5432"
+    volumes:
+      - pg_data:/var/lib/postgresql/data
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------
+  # Oracle XE 19c (免费版)
+  # 主机端口: 1521
+  # 用户: system / oracle123
+  # Service: XEPDB1
+  # 注意: 首次启动需要等 2-3 分钟初始化
+  # ----------------------------------------
+  oracle:
+    image: gvenzl/oracle-xe:21-full-faststart
+    container_name: dbmonitor-oracle
+    environment:
+      ORACLE_PASSWORD: oracle123
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD", "sqlplus", "-s", "system/oracle123@localhost:1521/XEPDB1", "<<<", "SELECT 1 FROM DUAL;"]
+      interval: 30s
+      timeout: 10s
+      retries: 20
+      start_period: 120s
+
+volumes:
+  mysql_data:
+  pg_data:
+  oracle_data:
+
+networks:
+  dbmonitor-net:
+    driver: bridge

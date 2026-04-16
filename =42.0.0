@@ -1,0 +1,6 @@
+Requirement already satisfied: cryptography in d:\db_monitor\.venv\lib\site-packages (46.0.6)
+Requirement already satisfied: cffi>=2.0.0 in d:\db_monitor\.venv\lib\site-packages (from cryptography) (2.0.0)
+Requirement already satisfied: pycparser in d:\db_monitor\.venv\lib\site-packages (from cffi>=2.0.0->cryptography) (3.0)
+
+[notice] A new release of pip is available: 25.2 -> 26.0.1
+[notice] To update, run: python.exe -m pip install --upgrade pip

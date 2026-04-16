@@ -1,0 +1,53 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(xargs ls *)",
+      "Bash(.venv/Scripts/python.exe manage.py makemigrations monitor)",
+      "Bash(.venv/Scripts/python.exe manage.py migrate)",
+      "Bash(.venv/Scripts/python.exe manage.py check)",
+      "Bash(.venv/Scripts/python.exe -c ' *)",
+      "Bash(.venv/Scripts/python.exe manage.py show_urls)",
+      "Bash(.venv/Scripts/python.exe manage.py check --deploy)",
+      "Bash(.venv/Scripts/pip install *)",
+      "Bash(.venv/Scripts/python.exe manage.py encrypt_passwords)"
+    ]
+  },
+  "hooks": {
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/session-start.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/pre-compact.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/session-end.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

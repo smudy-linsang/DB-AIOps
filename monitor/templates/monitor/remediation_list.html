@@ -1,0 +1,393 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>运维操作审批 - 数据库监控</title>
+    <style>
+        * { margin: 0; padding: 0; box-sizing: border-box; }
+        
+        body {
+            font-family: 'Microsoft YaHei', Arial, sans-serif;
+            background: #f5f7fa;
+            padding: 20px;
+        }
+        
+        .header {
+            background: white;
+            padding: 30px;
+            border-radius: 10px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .header h1 { color: #333; margin-bottom: 10px; }
+        .header p { color: #666; }
+        
+        .section {
+            background: white;
+            border-radius: 10px;
+            padding: 25px;
+            margin-bottom: 20px;
+            box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+        }
+        
+        .section-title {
+            font-size: 20px;
+            color: #333;
+            margin-bottom: 20px;
+            padding-bottom: 15px;
+            border-bottom: 2px solid #e5e7eb;
+        }
+        
+        .ops-table { width: 100%; border-collapse: collapse; }
+        .ops-table th, .ops-table td {
+            padding: 12px;
+            text-align: left;
+            border-bottom: 1px solid #e5e7eb;
+        }
+        .ops-table th { background: #f9fafb; font-weight: 600; color: #374151; }
+        .ops-table tr:hover { background: #f9fafb; }
+        
+        .status-badge {
+            display: inline-block; padding: 4px 12px; border-radius: 12px;
+            font-size: 12px; font-weight: 500;
+        }
+        .status-pending { background: #fef3c7; color: #d97706; }
+        .status-approved { background: #d1fae5; color: #059669; }
+        .status-executing { background: #dbeafe; color: #2563eb; }
+        .status-success { background: #d1fae5; color: #059669; }
+        .status-failed { background: #fee2e2; color: #dc2626; }
+        .status-rejected { background: #f3f4f6; color: #6b7280; }
+        
+        .risk-badge {
+            display: inline-block; padding: 4px 12px; border-radius: 12px;
+            font-size: 12px; font-weight: 500;
+        }
+        .risk-low { background: #d1fae5; color: #059669; }
+        .risk-medium { background: #fef3c7; color: #d97706; }
+        .risk-high { background: #fed7aa; color: #ea580c; }
+        .risk-critical { background: #fee2e2; color: #dc2626; }
+        
+        .btn {
+            padding: 6px 16px; border-radius: 6px; border: none;
+            cursor: pointer; font-size: 14px; transition: all 0.3s; color: white;
+        }
+        .btn-approve { background: #10b981; }
+        .btn-approve:hover { background: #059669; }
+        .btn-execute { background: #2563eb; }
+        .btn-execute:hover { background: #1d4ed8; }
+        .btn-reject { background: #ef4444; }
+        .btn-reject:hover { background: #dc2626; }
+        .btn-view { background: #667eea; }
+        .btn-view:hover { background: #5568d3; }
+        
+        .action-cell { display: flex; gap: 8px; flex-wrap: wrap; }
+        .empty-state { text-align: center; padding: 60px; color: #9ca3af; }
+        
+        /* 弹窗 */
+        .modal {
+            display: none; position: fixed; top: 0; left: 0;
+            width: 100%; height: 100%; background: rgba(0,0,0,0.5); z-index: 1000;
+        }
+        .modal-content {
+            background: white; max-width: 800px; margin: 50px auto;
+            border-radius: 10px; padding: 30px; max-height: calc(100vh - 100px);
+            overflow-y: auto;
+        }
+        .modal-header {
+            display: flex; justify-content: space-between; align-items: center;
+            margin-bottom: 20px; padding-bottom: 15px; border-bottom: 2px solid #e5e7eb;
+        }
+        .modal-header h2 { font-size: 20px; color: #333; }
+        .close-btn { font-size: 28px; cursor: pointer; color: #9ca3af; background: none; border: none; }
+        .close-btn:hover { color: #333; }
+        
+        /* 详情内容样式 */
+        .detail-grid { display: grid; grid-template-columns: 120px 1fr; gap: 12px 16px; }
+        .detail-label { font-weight: 600; color: #6b7280; font-size: 14px; align-self: start; }
+        .detail-value { color: #111; font-size: 14px; }
+        .detail-section { margin-top: 20px; }
+        .detail-section-title { font-size: 16px; font-weight: 600; color: #374151; margin-bottom: 10px; }
+        .sql-preview {
+            background: #1f2937; color: #10b981; padding: 15px; border-radius: 6px;
+            font-family: 'Courier New', monospace; font-size: 13px;
+            max-height: 200px; overflow-y: auto; white-space: pre-wrap; word-break: break-all;
+        }
+        .risk-critical-block {
+            background: #fef2f2; border: 2px solid #fca5a5; border-radius: 8px;
+            padding: 16px; margin-top: 16px;
+        }
+        .risk-critical-block p { color: #991b1b; font-size: 14px; line-height: 1.6; }
+        .execute-result {
+            background: #f0f9ff; border: 1px solid #bae6fd; border-radius: 6px;
+            padding: 12px; margin-top: 12px; font-family: monospace; font-size: 13px;
+            max-height: 200px; overflow-y: auto; white-space: pre-wrap;
+        }
+        .loading { text-align: center; padding: 40px; color: #9ca3af; }
+    </style>
+</head>
+<body>
+    <div class="header">
+        <h1>🔧 运维操作审批中心</h1>
+        <p>审核和管理自动化修复操作 | 所有操作均有审计记录</p>
+    </div>
+    
+    <!-- 待审批 + 已批准待执行 -->
+    <div class="section">
+        <h2 class="section-title">⏳ 待处理操作 ({{ pending_ops.count|add:approved_ops.count }})</h2>
+        
+        {% if pending_ops or approved_ops %}
+        <table class="ops-table">
+            <thead>
+                <tr>
+                    <th>数据库</th>
+                    <th>操作类型</th>
+                    <th>风险等级</th>
+                    <th>创建时间</th>
+                    <th>状态</th>
+                    <th>操作</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for op in pending_ops %}
+                <tr>
+                    <td>{{ op.config.name }}</td>
+                    <td>{{ op.get_action_type_display }}</td>
+                    <td><span class="risk-badge risk-{{ op.risk_level }}">{{ op.get_risk_level_display }}</span></td>
+                    <td>{{ op.create_time|date:"Y-m-d H:i" }}</td>
+                    <td><span class="status-badge status-{{ op.status }}">{{ op.get_status_display }}</span></td>
+                    <td class="action-cell">
+                        <button class="btn btn-view" onclick="viewDetail({{ op.id }})">查看</button>
+                        <button class="btn btn-approve" onclick="approveOp({{ op.id }})">批准</button>
+                        <button class="btn btn-reject" onclick="rejectOp({{ op.id }})">拒绝</button>
+                    </td>
+                </tr>
+                {% endfor %}
+                {% for op in approved_ops %}
+                <tr style="background: #f0fdf4;">
+                    <td>{{ op.config.name }}</td>
+                    <td>{{ op.get_action_type_display }}</td>
+                    <td><span class="risk-badge risk-{{ op.risk_level }}">{{ op.get_risk_level_display }}</span></td>
+                    <td>{{ op.create_time|date:"Y-m-d H:i" }}</td>
+                    <td><span class="status-badge status-{{ op.status }}">{{ op.get_status_display }}</span></td>
+                    <td class="action-cell">
+                        <button class="btn btn-view" onclick="viewDetail({{ op.id }})">查看</button>
+                        <button class="btn btn-execute" onclick="executeOp({{ op.id }})">▶ 执行</button>
+                        <button class="btn btn-reject" onclick="rejectOp({{ op.id }})">拒绝</button>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>暂无待处理的操作</p></div>
+        {% endif %}
+    </div>
+    
+    <!-- 历史操作 -->
+    <div class="section">
+        <h2 class="section-title">📜 历史操作记录</h2>
+        {% if history_ops %}
+        <table class="ops-table">
+            <thead>
+                <tr>
+                    <th>数据库</th>
+                    <th>操作类型</th>
+                    <th>风险等级</th>
+                    <th>执行时间</th>
+                    <th>状态</th>
+                    <th>结果</th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for op in history_ops %}
+                <tr>
+                    <td>{{ op.config.name }}</td>
+                    <td>{{ op.get_action_type_display }}</td>
+                    <td><span class="risk-badge risk-{{ op.risk_level }}">{{ op.get_risk_level_display }}</span></td>
+                    <td>{{ op.execute_time|default:op.approve_time|date:"Y-m-d H:i" }}</td>
+                    <td><span class="status-badge status-{{ op.status }}">{{ op.get_status_display }}</span></td>
+                    <td style="max-width: 300px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap;" title="{{ op.execution_result }}">{{ op.execution_result|truncatechars:60|default:"-" }}</td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+        <div class="empty-state"><p>暂无历史操作记录</p></div>
+        {% endif %}
+    </div>
+    
+    <!-- 详情弹窗 -->
+    <div id="detailModal" class="modal">
+        <div class="modal-content">
+            <div class="modal-header">
+                <h2>📋 操作详情</h2>
+                <button class="close-btn" onclick="closeModal()">&times;</button>
+            </div>
+            <div id="modalBody"><div class="loading">加载中...</div></div>
+        </div>
+    </div>
+    
+    <script>
+        // ---- 通用 ----
+        function getCookie(name) {
+            let cv = null;
+            if (document.cookie) {
+                const cookies = document.cookie.split(';');
+                for (let c of cookies) {
+                    c = c.trim();
+                    if (c.substring(0, name.length + 1) === (name + '=')) {
+                        cv = decodeURIComponent(c.substring(name.length + 1));
+                        break;
+                    }
+                }
+            }
+            return cv;
+        }
+        
+        // ---- 审批 ----
+        function approveOp(auditId) {
+            if (!confirm('⚠️ 确定批准此操作吗？\n批准后将可以执行该 SQL 命令。')) return;
+            fetch(`/monitor/remediation/${auditId}/approve/`, {
+                method: 'POST',
+                headers: {'X-CSRFToken': getCookie('csrftoken')}
+            })
+            .then(r => r.json())
+            .then(d => { alert(d.success ? '✅ 已批准' : '❌ 失败：' + d.message); if (d.success) location.reload(); })
+            .catch(e => alert('❌ 请求失败：' + e));
+        }
+        
+        // ---- 拒绝 ----
+        function rejectOp(auditId) {
+            const reason = prompt('请输入拒绝原因：');
+            if (!reason) return;
+            fetch(`/monitor/remediation/${auditId}/reject/`, {
+                method: 'POST',
+                headers: {'X-CSRFToken': getCookie('csrftoken')},
+                body: new URLSearchParams({'reason': reason})
+            })
+            .then(r => r.json())
+            .then(d => { alert(d.success ? '✅ 已拒绝' : '❌ 失败：' + d.message); if (d.success) location.reload(); })
+            .catch(e => alert('❌ 请求失败：' + e));
+        }
+        
+        // ---- 执行 ----
+        function executeOp(auditId) {
+            if (!confirm('⚠️ 即将执行 SQL 命令！\n此操作不可逆，请再次确认！')) return;
+            if (!confirm('最后确认：确定要执行吗？')) return;
+            
+            fetch(`/monitor/remediation/${auditId}/execute/`, {
+                method: 'POST',
+                headers: {'X-CSRFToken': getCookie('csrftoken')}
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (d.success) {
+                    alert('✅ 执行成功！\n' + (d.message || ''));
+                } else {
+                    alert('❌ 执行失败：' + (d.message || ''));
+                }
+                closeModal();
+                location.reload();
+            })
+            .catch(e => { alert('❌ 请求失败：' + e); location.reload(); });
+        }
+        
+        // ---- 详情弹窗 ----
+        function viewDetail(auditId) {
+            document.getElementById('modalBody').innerHTML = '<div class="loading">加载中...</div>';
+            document.getElementById('detailModal').style.display = 'block';
+            
+            fetch(`/monitor/remediation/${auditId}/detail/`, {
+                headers: {'X-CSRFToken': getCookie('csrftoken')}
+            })
+            .then(r => r.json())
+            .then(d => {
+                if (!d.success) {
+                    document.getElementById('modalBody').innerHTML = '<p>加载失败：' + d.message + '</p>';
+                    return;
+                }
+                const a = d.audit;
+                let html = '<div class="detail-grid">';
+                html += `<div class="detail-label">数据库</div><div class="detail-value"><b>${a.config_name}</b> (${a.db_type})</div>`;
+                html += `<div class="detail-label">操作类型</div><div class="detail-value">${a.action_display}</div>`;
+                html += `<div class="detail-label">风险等级</div><div class="detail-value"><span class="risk-badge risk-${a.risk_level}">${a.risk_display}</span></div>`;
+                html += `<div class="detail-label">状态</div><div class="detail-value"><span class="status-badge status-${a.status}">${a.status_display}</span></div>`;
+                html += `<div class="detail-label">创建时间</div><div class="detail-value">${a.create_time.replace('T', ' ').substring(0, 19)}</div>`;
+                html += `<div class="detail-label">描述</div><div class="detail-value">${a.description || '-'}</div>`;
+                
+                if (a.executor) {
+                    html += `<div class="detail-label">执行人</div><div class="detail-value">${a.executor}</div>`;
+                    html += `<div class="detail-label">执行时间</div><div class="detail-value">${a.execute_time ? a.execute_time.replace('T', ' ').substring(0, 19) : '-'}</div>`;
+                }
+                
+                html += '</div>';
+                
+                // SQL 命令
+                html += '<div class="detail-section">';
+                html += '<div class="detail-section-title">📝 SQL 命令</div>';
+                html += `<div class="sql-preview">${escapeHtml(a.sql_command)}</div>`;
+                html += '</div>';
+                
+                // 回滚命令
+                if (a.rollback_command) {
+                    html += '<div class="detail-section">';
+                    html += '<div class="detail-section-title">↩️ 回滚命令</div>';
+                    html += `<div class="sql-preview" style="color:#f59e0b;">${escapeHtml(a.rollback_command)}</div>`;
+                    html += '</div>';
+                }
+                
+                // 执行结果
+                if (a.execution_result) {
+                    html += '<div class="detail-section">';
+                    html += '<div class="detail-section-title">📤 执行结果</div>';
+                    let resultColor = a.status === 'success' ? '#059669' : '#dc2626';
+                    html += `<div class="execute-result" style="border-color:${resultColor};color:${resultColor};">${escapeHtml(a.execution_result)}</div>`;
+                    html += '</div>';
+                }
+                
+                // 高危警告
+                if (a.risk_level === 'high' || a.risk_level === 'critical') {
+                    html += `<div class="risk-critical-block">
+                        <p><b>⚠️ 高危操作警告</b><br>
+                        此操作风险等级为「${a.risk_display}」，执行前请确保：<br>
+                        1. 已备份相关数据<br>
+                        2. 已在测试环境验证<br>
+                        3. 已通知相关人员</p>
+                    </div>`;
+                }
+                
+                // 操作按钮
+                html += '<div style="margin-top:24px;display:flex;gap:12px;flex-wrap:wrap;">';
+                if (a.status === 'pending') {
+                    html += `<button class="btn btn-approve" onclick="approveOp(${a.id});closeModal();">批准</button>`;
+                    html += `<button class="btn btn-reject" onclick="rejectOp(${a.id});closeModal();">拒绝</button>`;
+                } else if (a.status === 'approved') {
+                    html += `<button class="btn btn-execute" onclick="executeOp(${a.id})">▶ 立即执行</button>`;
+                    html += `<button class="btn btn-reject" onclick="rejectOp(${a.id});closeModal();">拒绝</button>`;
+                }
+                html += `<button class="btn btn-view" onclick="closeModal()">关闭</button>`;
+                html += '</div>';
+                
+                document.getElementById('modalBody').innerHTML = html;
+            })
+            .catch(e => { document.getElementById('modalBody').innerHTML = '<p>加载失败：' + e + '</p>'; });
+        }
+        
+        function closeModal() {
+            document.getElementById('detailModal').style.display = 'none';
+        }
+        
+        function escapeHtml(text) {
+            const div = document.createElement('div');
+            div.textContent = text;
+            return div.innerHTML;
+        }
+        
+        window.onclick = function(event) {
+            if (event.target === document.getElementById('detailModal')) closeModal();
+        };
+    </script>
+</body>
+</html>
