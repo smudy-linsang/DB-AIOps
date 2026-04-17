@@ -25,7 +25,7 @@ SECRET_KEY = os.environ.get(
 )
 
 # 生产环境必须关闭 DEBUG
-DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
+DEBUG = True  # 开发环境强制开启
 
 # 允许的主机（生产环境必须配置）
 ALLOWED_HOSTS = [
@@ -43,7 +43,7 @@ CSRF_TRUSTED_ORIGINS = [
 
 # 安全中间件配置（生产环境）
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False  # 开发环境关闭
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
@@ -170,6 +170,12 @@ USE_TZ = True
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
 STATIC_URL = 'static/'
+
+# 静态文件收集目录
+STATIC_ROOT = BASE_DIR / 'staticfiles'
+
+# 额外静态文件目录
+STATICFILES_DIRS = []
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
