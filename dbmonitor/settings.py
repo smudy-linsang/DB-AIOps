@@ -11,24 +11,44 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 """
 
 from pathlib import Path
+import os
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+# ============================================================================
+# 安全配置（生产环境通过环境变量注入）
+# ============================================================================
+SECRET_KEY = os.environ.get(
+    'DJANGO_SECRET_KEY',
+    'django-insecure-change-me-in-production'
+)
 
-# Quick-start development settings - unsuitable for production
-# See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
+# 生产环境必须关闭 DEBUG
+DEBUG = os.environ.get('DJANGO_DEBUG', 'False').lower() in ('true', '1', 'yes')
 
-# SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-v(j06=*3x3&c6c6w$+0fi8fo-jpnas#ko6+@gi&b(v_a=kw4xu'
+# 允许的主机（生产环境必须配置）
+ALLOWED_HOSTS = [
+    h.strip()
+    for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+    if h.strip()
+]
 
-# SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = True
+# CSRF 信任来源
+CSRF_TRUSTED_ORIGINS = [
+    o.strip()
+    for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000').split(',')
+    if o.strip()
+]
 
-ALLOWED_HOSTS = ['127.0.0.1', 'localhost']
-
-# Django 4+ CSRF 需要明确信任的来源列表（本地开发）
-CSRF_TRUSTED_ORIGINS = ['http://127.0.0.1:8000', 'http://localhost:8000']
+# 安全中间件配置（生产环境）
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+    SECURE_HSTS_SECONDS = 31536000
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
 
 
 # Application definition
@@ -73,13 +93,44 @@ TEMPLATES = [
 WSGI_APPLICATION = 'dbmonitor.wsgi.application'
 
 
-# Database
-# https://docs.djangoproject.com/en/5.2/ref/settings/#databases
+# ============================================================================
+# 数据库配置（支持 PostgreSQL / SQLite）
+# ============================================================================
+USE_POSTGRESQL = os.environ.get('USE_POSTGRESQL', 'False').lower() in ('true', '1', 'yes')
 
-DATABASES = {
+if USE_POSTGRESQL:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.postgresql',
+            'NAME': os.environ.get('POSTGRES_DB', 'db_monitor'),
+            'USER': os.environ.get('POSTGRES_USER', 'db_monitor'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+            'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+            'CONN_MAX_AGE': 60,
+            'OPTIONS': {
+                'connect_timeout': 10,
+            },
+        }
+    }
+else:
+    DATABASES = {
+        'default': {
+            'ENGINE': 'django.db.backends.sqlite3',
+            'NAME': BASE_DIR / 'db.sqlite3',
+        }
+    }
+
+# ============================================================================
+# 缓存配置（使用 Redis，支持基线缓存）
+# ============================================================================
+REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+
+CACHES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+        'LOCATION': REDIS_URL,
+        'TIMEOUT': 300,
     }
 }
 
@@ -172,6 +223,8 @@ DINGTALK_SECRET = ''
 # 采集调度参数（v0.1.0 新增）
 # ==========================================
 # 单个数据库采集超时（秒），超过后记录 DOWN，不阻塞其他库
-COLLECT_TIMEOUT_SEC = 15
+COLLECT_TIMEOUT_SEC = int(os.environ.get('COLLECT_TIMEOUT_SEC', 15))
 # 并发采集线程数（建议不超过数据库实例数）
-COLLECT_WORKERS = 20
+COLLECT_WORKERS = int(os.environ.get('COLLECT_WORKERS', 20))
+# 采集间隔（秒）
+COLLECT_INTERVAL_SEC = int(os.environ.get('COLLECT_INTERVAL_SEC', 60))
