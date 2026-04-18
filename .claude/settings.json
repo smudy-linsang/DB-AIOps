@@ -9,7 +9,21 @@
       "Bash(.venv/Scripts/python.exe manage.py show_urls)",
       "Bash(.venv/Scripts/python.exe manage.py check --deploy)",
       "Bash(.venv/Scripts/pip install *)",
-      "Bash(.venv/Scripts/python.exe manage.py encrypt_passwords)"
+      "Bash(.venv/Scripts/python.exe manage.py encrypt_passwords)",
+      "Bash(python3 -c ' *)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/views.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/views_enhanced.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/models.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/management/commands/start_monitor.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/intelligent_baseline_engine.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/baseline_engine.py)",
+      "Bash(python -m py_compile /c/DB_Monitor/monitor/rca_engine.py)",
+      "Bash(python3 -m py_compile monitor/management/commands/start_monitor.py)",
+      "Bash(git add *)",
+      "Bash(git commit -m ' *)",
+      "Bash(git push *)",
+      "WebSearch",
+      "WebFetch(domain:docs.litellm.ai)"
     ]
   },
   "hooks": {

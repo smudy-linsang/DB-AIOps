@@ -1,4 +1,4 @@
-﻿import os
+import os
 code = '# -*- coding: utf-8 -*-\n' + '''
 import json
 import statistics

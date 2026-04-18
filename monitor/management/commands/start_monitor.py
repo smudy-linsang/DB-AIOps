@@ -1,30 +1,29 @@
-from django.core.management.base import BaseCommand
-from django.core.mail import send_mail
-from django.conf import settings
-from monitor.models import DatabaseConfig, MonitorLog
-from django.db import connection
+from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
+import datetime
+import json
+
 from apscheduler.schedulers.blocking import BlockingScheduler
-from monitor.baseline_engine import BaselineEngine
-from monitor.intelligent_baseline_engine import IntelligentBaselineEngine
-from monitor.alert_manager import AlertManager
-import pymysql
+from django.conf import settings
+from django.core.management.base import BaseCommand
+from django.db import connection
 import oracledb
 import psycopg2
+import pymysql
 import pyodbc
-import json
-import datetime
-import time
-import logging
-from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 
-# 单次采集任务超时（秒）：超过此时间的采集视为失败，记DOWN，不阻塞其他COLLECT_TIMEOUT_SEC = getattr(settings, 'COLLECT_TIMEOUT_SEC', 15)
-# 并发采集线程COLLECT_WORKERS = getattr(settings, 'COLLECT_WORKERS', 20)
+from monitor.alert_manager import AlertManager
+from monitor.baseline_engine import BaselineEngine
+from monitor.models import DatabaseConfig, MonitorLog
 
-# ==========================================
-# [配置区] 阈值设# ==========================================
-TBS_THRESHOLD = 90       # 表空间使用率告警阈(%)
-LOCK_TIME_THRESHOLD = 10 # 锁等待告警阈(
-CONN_THRESHOLD_PCT = 80  # 连接数使用率告警阈(%)
+# 单次采集任务超时（秒）：超过此时间的采集视为失败，记 DOWN，不阻塞其他任务。
+COLLECT_TIMEOUT_SEC = getattr(settings, "COLLECT_TIMEOUT_SEC", 15)
+# 并发采集线程数。
+COLLECT_WORKERS = getattr(settings, "COLLECT_WORKERS", 20)
+
+# 阈值配置。
+TBS_THRESHOLD = 90
+LOCK_TIME_THRESHOLD = 10
+CONN_THRESHOLD_PCT = 80
 
 # ==========================================
 # 通用监控数据采集器基# ==========================================
@@ -227,7 +226,8 @@ class MySQLChecker(BaseDBChecker):
             questions = int(cursor.fetchone()['Value'])
             qps = round(questions / uptime, 2) if uptime > 0 else 0
             
-            # 5. 慢查询统            cursor.execute("SHOW GLOBAL STATUS LIKE 'Slow_queries'")
+            # 5. 慢查询统计
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Slow_queries'")
             slow_queries = int(cursor.fetchone()['Value'])
             
             cursor.execute("SHOW VARIABLES LIKE 'long_query_time'")

@@ -1,4 +1,4 @@
-﻿import re
+import re
 
 with open(r'D:\DB_Monitor\monitor\views_enhanced.py', 'r', encoding='utf-8') as f:
     content = f.read()

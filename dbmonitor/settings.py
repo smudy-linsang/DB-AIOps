@@ -25,7 +25,7 @@ SECRET_KEY = os.environ.get(
 )
 
 # 生产环境必须关闭 DEBUG
-DEBUG = True  # 开发环境强制开启
+DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
 # 允许的主机（生产环境必须配置）
 ALLOWED_HOSTS = [
@@ -189,34 +189,38 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # SMTP服务器地址 (例如: smtp.qq.com, smtp.163.com, smtp.office365.com)
-EMAIL_HOST = 'smtp.qq.com' 
+EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.qq.com')
 
 # SMTP端口 (通常是 465 或 587，如果是 25 请把下面两个 False 改一下)
-EMAIL_PORT = 465 
+EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '465'))
 
 # 发件人邮箱账号
-EMAIL_HOST_USER = 'smudy@qq.com' 
+EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 
 # 邮箱密码 (注意：如果是QQ/网易，这里填的是"授权码"，不是登录密码！如果是公司邮箱则是密码)
-EMAIL_HOST_PASSWORD = 'qkygyyjtofaubhbj' 
+EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # 是否使用 SSL 安全连接 (465端口通常选True)
-EMAIL_USE_SSL = True
-EMAIL_USE_TLS = False
+EMAIL_USE_SSL = os.environ.get('EMAIL_USE_SSL', 'True').lower() in ('true', '1', 'yes')
+EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() in ('true', '1', 'yes')
 
 # 默认发件人 (格式: "显示名字 <邮箱地址>")
-DEFAULT_FROM_EMAIL = f"DB监控系统 <{EMAIL_HOST_USER}>"
+DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f"DB监控系统 <{EMAIL_HOST_USER}>")
 
 # 接收告警的邮箱列表 (可以是同一个邮箱)
-ADMIN_EMAILS = ['smudy@qq.com']
+ADMIN_EMAILS = [
+    x.strip()
+    for x in os.environ.get('ADMIN_EMAILS', EMAIL_HOST_USER).split(',')
+    if x.strip()
+]
 
 # ==========================================
 # 钉钉机器人告警配置（v0.1.0 新增）
 # ==========================================
 # 钉钉自定义机器人 Webhook URL（留空则禁用钉钉通知）
-DINGTALK_WEBHOOK = ''
+DINGTALK_WEBHOOK = os.environ.get('DINGTALK_WEBHOOK', '')
 # 钉钉加签密钥（在机器人配置页面开启"加签"后填入，不填则不签名）
-DINGTALK_SECRET = ''
+DINGTALK_SECRET = os.environ.get('DINGTALK_SECRET', '')
 
 # ==========================================
 # 密码加密密钥（v0.1.0 新增）
