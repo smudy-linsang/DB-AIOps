@@ -17,22 +17,29 @@ import os
 BASE_DIR = Path(__file__).resolve().parent.parent
 
 # ============================================================================
-# 安全配置（生产环境通过环境变量注入）
+# 环境分层配置（新增）
+# ============================================================================
+# 环境选项: dev / test / prod
+ENVIRONMENT = os.environ.get('DJANGO_ENV', 'dev')
+
+# ============================================================================
+# 安全配置
 # ============================================================================
 SECRET_KEY = os.environ.get(
     'DJANGO_SECRET_KEY',
     'django-insecure-change-me-in-production'
 )
 
-# 生产环境必须关闭 DEBUG
-DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
+# DEBUG 模式控制
+if ENVIRONMENT == 'prod':
+    DEBUG = False
+elif ENVIRONMENT == 'test':
+    DEBUG = False
+else:
+    DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
-# 允许的主机（生产环境必须配置）
-ALLOWED_HOSTS = [
-    h.strip()
-    for h in os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
-    if h.strip()
-]
+# 允许的主机
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
 
 # CSRF 信任来源
 CSRF_TRUSTED_ORIGINS = [
@@ -41,20 +48,45 @@ CSRF_TRUSTED_ORIGINS = [
     if o.strip()
 ]
 
-# 安全中间件配置（生产环境）
+# 安全中间件配置
 if not DEBUG:
-    SECURE_SSL_REDIRECT = False  # 开发环境关闭
+    SECURE_SSL_REDIRECT = (ENVIRONMENT == 'prod')
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True
+else:
+    SECURE_SSL_REDIRECT = False
+    SESSION_COOKIE_SECURE = False
+    CSRF_COOKIE_SECURE = False
+    SECURE_HSTS_SECONDS = 0
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = False
+    SECURE_HSTS_PRELOAD = False
+
+# Admin IP 白名单（新增）
+ADMIN_IP_WHITELIST = [
+    ip.strip()
+    for ip in os.environ.get('ADMIN_IP_WHITELIST', '').split(',')
+    if ip.strip()
+]
+# 如果配置了白名单，则启用 IP 检查
+ADMIN_IP_WHITELIST_ENABLED = bool(ADMIN_IP_WHITELIST)
+
+# 密码加密密钥（新增）
+DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
+if not DB_MONITOR_SECRET_KEY:
+    if ENVIRONMENT == 'prod':
+        raise ValueError("生产环境必须配置 DB_MONITOR_SECRET_KEY 环境变量")
+    else:
+        # 开发环境使用默认密钥（仅用于开发）
+        DB_MONITOR_SECRET_KEY = 'dev-only-secret-key-not-for-production'
 
 
 # Application definition
 
 INSTALLED_APPS = [
-    'monitor', # <--- 这是我们需要新增的一行
+    'monitor',
     'django.contrib.admin',
     'django.contrib.auth',
     'django.contrib.contenttypes',
@@ -94,7 +126,7 @@ WSGI_APPLICATION = 'dbmonitor.wsgi.application'
 
 
 # ============================================================================
-# 数据库配置（支持 PostgreSQL / SQLite）
+# 数据库配置
 # ============================================================================
 USE_POSTGRESQL = os.environ.get('USE_POSTGRESQL', 'False').lower() in ('true', '1', 'yes')
 
@@ -107,9 +139,10 @@ if USE_POSTGRESQL:
             'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
             'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
             'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-            'CONN_MAX_AGE': 60,
+            'CONN_MAX_AGE': 600,  # 持久连接 10 分钟
             'OPTIONS': {
                 'connect_timeout': 10,
+                'application_name': 'db_monitor',
             },
         }
     }
@@ -121,8 +154,12 @@ else:
         }
     }
 
+# TimescaleDB 配置（预留）
+TIMESCALEDB_ENABLED = os.environ.get('TIMESCALEDB_ENABLED', 'False').lower() in ('true', '1', 'yes')
+
+
 # ============================================================================
-# 缓存配置（生产可启用 Redis；开发默认 LocMem，避免未装 redis 包时无法启动）
+# 缓存配置
 # ============================================================================
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
 USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'False').lower() in ('true', '1', 'yes')
@@ -142,6 +179,20 @@ else:
             'LOCATION': 'dbmonitor-local',
         }
     }
+
+
+# ============================================================================
+# Celery 配置（预留）
+# ============================================================================
+USE_CELERY = os.environ.get('USE_CELERY', 'False').lower() in ('true', '1', 'yes')
+
+if USE_CELERY:
+    CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL', 'redis://localhost:6379/1')
+    CELERY_RESULT_BACKEND = os.environ.get('CELERY_RESULT_BACKEND', 'redis://localhost:6379/2')
+    CELERY_ACCEPT_CONTENT = ['json']
+    CELERY_TASK_SERIALIZER = 'json'
+    CELERY_RESULT_SERIALIZER = 'json'
+    CELERY_TIMEZONE = 'Asia/Shanghai'
 
 
 # Password validation
@@ -194,19 +245,18 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # ==========================================
 # 邮件发送配置
 # ==========================================
-# 邮件后端 (默认不用动)
 EMAIL_BACKEND = 'django.core.mail.backends.smtp.EmailBackend'
 
 # SMTP服务器地址 (例如: smtp.qq.com, smtp.163.com, smtp.office365.com)
 EMAIL_HOST = os.environ.get('EMAIL_HOST', 'smtp.qq.com')
 
-# SMTP端口 (通常是 465 或 587，如果是 25 请把下面两个 False 改一下)
+# SMTP端口 (通常是 465 或 587)
 EMAIL_PORT = int(os.environ.get('EMAIL_PORT', '465'))
 
 # 发件人邮箱账号
 EMAIL_HOST_USER = os.environ.get('EMAIL_HOST_USER', '')
 
-# 邮箱密码 (注意：如果是QQ/网易，这里填的是"授权码"，不是登录密码！如果是公司邮箱则是密码)
+# 邮箱密码 (注意：如果是QQ/网易，这里填的是"授权码"，不是登录密码)
 EMAIL_HOST_PASSWORD = os.environ.get('EMAIL_HOST_PASSWORD', '')
 
 # 是否使用 SSL 安全连接 (465端口通常选True)
@@ -216,7 +266,7 @@ EMAIL_USE_TLS = os.environ.get('EMAIL_USE_TLS', 'False').lower() in ('true', '1'
 # 默认发件人 (格式: "显示名字 <邮箱地址>")
 DEFAULT_FROM_EMAIL = os.environ.get('DEFAULT_FROM_EMAIL', f"DB监控系统 <{EMAIL_HOST_USER}>")
 
-# 接收告警的邮箱列表 (可以是同一个邮箱)
+# 接收告警的邮箱列表
 ADMIN_EMAILS = [
     x.strip()
     for x in os.environ.get('ADMIN_EMAILS', EMAIL_HOST_USER).split(',')
@@ -224,25 +274,44 @@ ADMIN_EMAILS = [
 ]
 
 # ==========================================
-# 钉钉机器人告警配置（v0.1.0 新增）
+# 钉钉机器人告警配置
 # ==========================================
-# 钉钉自定义机器人 Webhook URL（留空则禁用钉钉通知）
 DINGTALK_WEBHOOK = os.environ.get('DINGTALK_WEBHOOK', '')
-# 钉钉加签密钥（在机器人配置页面开启"加签"后填入，不填则不签名）
 DINGTALK_SECRET = os.environ.get('DINGTALK_SECRET', '')
 
 # ==========================================
-# 密码加密密钥（v0.1.0 新增）
+# 企业微信机器人告警配置（新增）
 # ==========================================
-# 用于 AES-256-GCM 加密数据库连接密码；优先读环境变量 DB_MONITOR_SECRET_KEY
+WECOM_WEBHOOK = os.environ.get('WECOM_WEBHOOK', '')
+WECOM_AGENT_ID = os.environ.get('WECOM_AGENT_ID', '')
+
+# ==========================================
+# 密码加密密钥
+# ==========================================
+# 用于 AES-256-GCM 加密数据库连接密码
 DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
 
 # ==========================================
-# 采集调度参数（v0.1.0 新增）
+# 采集调度参数
 # ==========================================
-# 单个数据库采集超时（秒），超过后记录 DOWN，不阻塞其他库
+# 单个数据库采集超时（秒）
 COLLECT_TIMEOUT_SEC = int(os.environ.get('COLLECT_TIMEOUT_SEC', 15))
-# 并发采集线程数（建议不超过数据库实例数）
+# 并发采集线程数
 COLLECT_WORKERS = int(os.environ.get('COLLECT_WORKERS', 20))
 # 采集间隔（秒）
 COLLECT_INTERVAL_SEC = int(os.environ.get('COLLECT_INTERVAL_SEC', 60))
+
+# ==========================================
+# Phase 2 智能引擎开关
+# ==========================================
+ENABLE_PHASE2_ENGINES = os.environ.get('ENABLE_PHASE2_ENGINES', 'True').lower() in ('true', '1', 'yes')
+# 容量预测检查间隔（小时）
+CAPACITY_CHECK_INTERVAL_HOURS = int(os.environ.get('CAPACITY_CHECK_INTERVAL_HOURS', 24))
+# 健康评分检查间隔（小时）
+HEALTH_CHECK_INTERVAL_HOURS = int(os.environ.get('HEALTH_CHECK_INTERVAL_HOURS', 1))
+
+# ==========================================
+# API 配置
+# ==========================================
+API_RATE_LIMIT = int(os.environ.get('API_RATE_LIMIT', 100))  # 每分钟请求数限制
+API_TOKEN_EXPIRY_HOURS = int(os.environ.get('API_TOKEN_EXPIRY_HOURS', 24))  # Token 过期时间

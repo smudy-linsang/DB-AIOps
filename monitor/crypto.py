@@ -81,3 +81,151 @@ def decrypt_password(stored: str) -> str:
 def is_encrypted(value: str) -> bool:
     """判断一个存储值是否已经加密"""
     return bool(value and value.startswith(_ENC_PREFIX))
+
+
+# ============================================================================
+# 密码轮换管理器（新增）
+# ============================================================================
+
+class PasswordRotationManager:
+    """
+    密码轮换管理器
+    
+    支持功能：
+    - 检查密码是否需要轮换
+    - 执行密码轮换
+    - 记录密码轮换历史
+    """
+    
+    def __init__(self, max_age_days: int = 90):
+        """
+        初始化密码轮换管理器
+        
+        Args:
+            max_age_days: 密码最大使用天数，默认 90 天
+        """
+        self.max_age_days = max_age_days
+    
+    def should_rotate(self, config_id: int) -> bool:
+        """
+        检查指定数据库配置的密码是否需要轮换
+        
+        Args:
+            config_id: 数据库配置 ID
+            
+        Returns:
+            True 如果需要轮换，否则 False
+        """
+        from monitor.models import DatabaseConfig
+        from django.utils import timezone
+        from datetime import timedelta
+        
+        try:
+            config = DatabaseConfig.objects.get(id=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return False
+        
+        # 如果密码是明文（旧的），需要加密
+        if not is_encrypted(config.password):
+            return True
+        
+        # 检查密码最后更新时间（如果有该字段）
+        if hasattr(config, 'password_updated_at') and config.password_updated_at:
+            days_since_update = (timezone.now() - config.password_updated_at).days
+            return days_since_update >= self.max_age_days
+        
+        # 如果没有更新时间字段，假设需要定期轮换
+        # 这里可以添加基于创建时间的检查
+        return True
+    
+    def rotate_password(self, config_id: int, new_password: str) -> dict:
+        """
+        执行密码轮换
+        
+        Args:
+            config_id: 数据库配置 ID
+            new_password: 新密码（明文）
+            
+        Returns:
+            dict: 包含操作结果的字典
+        """
+        from monitor.models import DatabaseConfig, AuditLog
+        from django.utils import timezone
+        from datetime import timedelta
+        import json
+        
+        result = {
+            'success': False,
+            'message': '',
+            'config_id': config_id
+        }
+        
+        try:
+            config = DatabaseConfig.objects.get(id=config_id)
+        except DatabaseConfig.DoesNotExist:
+            result['message'] = f"数据库配置 ID {config_id} 不存在"
+            return result
+        
+        # 验证新密码不为空
+        if not new_password or new_password.strip() == '':
+            result['message'] = "新密码不能为空"
+            return result
+        
+        # 保存旧密码用于回滚
+        old_password = config.password
+        old_password_encrypted = is_encrypted(old_password)
+        
+        # 加密并保存新密码
+        try:
+            encrypted_password = encrypt_password(new_password)
+            config.password = encrypted_password
+            config.save(update_fields=['password', 'updated_at'])
+        except Exception as e:
+            result['message'] = f"密码加密或保存失败: {e}"
+            return result
+        
+        # 记录轮换日志
+        try:
+            AuditLog.objects.create(
+                config=config,
+                action_type='ROTATE_PASSWORD',
+                description=f"数据库 {config.name} 密码轮换",
+                sql_command=f"-- 密码已轮换，新密码加密后存储",
+                risk_level='medium',
+                rollback_command=f"-- 回滚：将密码恢复为旧值\nUPDATE monitor_databaseconfig SET password='{old_password}' WHERE id={config_id}",
+                status='success',
+                execution_result=json.dumps({
+                    'old_password_encrypted': old_password_encrypted,
+                    'new_password_encrypted': is_encrypted(encrypted_password),
+                    'rotated_at': str(timezone.now())
+                })
+            )
+        except Exception as e:
+            # 审计日志记录失败不影响主流程
+            pass
+        
+        result['success'] = True
+        result['message'] = f"数据库 {config.name} 密码轮换成功"
+        return result
+    
+    def batch_rotate_check(self) -> list:
+        """
+        批量检查哪些数据库配置需要密码轮换
+        
+        Returns:
+            list: 需要轮换的数据库配置 ID 列表
+        """
+        from monitor.models import DatabaseConfig
+        
+        configs = DatabaseConfig.objects.filter(is_active=True)
+        needs_rotation = []
+        
+        for config in configs:
+            if self.should_rotate(config.id):
+                needs_rotation.append({
+                    'id': config.id,
+                    'name': config.name,
+                    'db_type': config.db_type
+                })
+        
+        return needs_rotation

@@ -1,6 +1,6 @@
 # ==========================================
-# DB Monitor - 测试数据库环境
-# MySQL 8.0 + PostgreSQL 15 + Oracle 19c XE
+# DB Monitor - Full Stack Environment
+# MySQL 8.0 + PostgreSQL 15 + Redis + Django App
 # ==========================================
 
 version: '3.8'
@@ -8,10 +8,29 @@ version: '3.8'
 services:
 
   # ----------------------------------------
+  # Redis Cache
+  # Host port: 6379
+  # ----------------------------------------
+  redis:
+    image: redis:7-alpine
+    container_name: dbmonitor-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ----------------------------------------
   # MySQL 8.0
-  # 主机端口: 3306
-  # root 密码: root123
-  # 监控用户: monitor / monitor123
+  # Host port: 3306
+  # root password: root123
+  # monitor user: monitor / monitor123
   # ----------------------------------------
   mysql:
     image: mysql:8.0
@@ -39,8 +58,8 @@ services:
 
   # ----------------------------------------
   # PostgreSQL 15
-  # 主机端口: 5432
-  # 用户: postgres / postgres123
+  # Host port: 5432
+  # User: postgres / postgres123
   # ----------------------------------------
   postgres:
     image: postgres:15
@@ -62,34 +81,68 @@ services:
       retries: 10
 
   # ----------------------------------------
-  # Oracle XE 19c (免费版)
-  # 主机端口: 1521
-  # 用户: system / oracle123
-  # Service: XEPDB1
-  # 注意: 首次启动需要等 2-3 分钟初始化
+  # Django Application
+  # Host port: 8000
   # ----------------------------------------
-  oracle:
-    image: gvenzl/oracle-xe:21-full-faststart
-    container_name: dbmonitor-oracle
+  web:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dbmonitor-web
     environment:
-      ORACLE_PASSWORD: oracle123
+      - DJANGO_ENV=production
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+      - DB_HOST=mysql
+      - DB_PORT=3306
+      - DB_NAME=testdb
+      - DB_USER=monitor
+      - DB_PASSWORD=monitor123
     ports:
-      - "1521:1521"
+      - "8000:8000"
     volumes:
-      - oracle_data:/opt/oracle/oradata
+      - .:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
     networks:
       - dbmonitor-net
-    healthcheck:
-      test: ["CMD", "sqlplus", "-s", "system/oracle123@localhost:1521/XEPDB1", "<<<", "SELECT 1 FROM DUAL;"]
-      interval: 30s
-      timeout: 10s
-      retries: 20
-      start_period: 120s
+    command: >
+      sh -c "python manage.py migrate &&
+             python manage.py runserver 0.0.0.0:8000"
+
+  # ----------------------------------------
+  # APScheduler / Celery Worker (Optional)
+  # ----------------------------------------
+  # celery-worker:
+  #   build:
+  #     context: .
+  #     dockerfile: Dockerfile
+  #   container_name: dbmonitor-celery
+  #   environment:
+  #     - DJANGO_ENV=production
+  #     - REDIS_HOST=redis
+  #     - REDIS_PORT=6379
+  #     - DB_HOST=mysql
+  #     - DB_PORT=3306
+  #     - DB_NAME=testdb
+  #     - DB_USER=monitor
+  #     - DB_PASSWORD=monitor123
+  #   volumes:
+  #     - .:/app
+  #   depends_on:
+  #     - redis
+  #     - mysql
+  #   networks:
+  #     - dbmonitor-net
+  #   command: celery -A dbmonitor worker -l info
 
 volumes:
   mysql_data:
   pg_data:
-  oracle_data:
+  redis_data:
 
 networks:
   dbmonitor-net:

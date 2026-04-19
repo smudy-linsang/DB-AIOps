@@ -119,6 +119,15 @@ class AuditLog(models.Model):
     config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, verbose_name="数据库")
     related_log = models.ForeignKey(MonitorLog, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="关联监控日志")
     
+    # 新增: 触发告警（用于告警与工单关联）
+    triggered_by_alert = models.ForeignKey('AlertLog', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="触发告警")
+    
+    # 新增: 执行上下文
+    execution_context = models.JSONField(null=True, blank=True, verbose_name="执行上下文")
+    
+    # 新增: 执行证据
+    execution_evidence = models.JSONField(null=True, blank=True, verbose_name="执行证据")
+    
     # 操作信息
     action_type = models.CharField(max_length=50, choices=ACTION_CHOICES, verbose_name="操作类型")
     description = models.TextField(verbose_name="操作描述")
@@ -174,6 +183,8 @@ class AlertLog(models.Model):
 
     config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, verbose_name="数据库")
     alert_type = models.CharField(max_length=50, choices=ALERT_TYPE_CHOICES, verbose_name="告警类型")
+    # 新增: 关联工单（用于告警与工单关联）
+    related_ticket = models.ForeignKey('AuditLog', on_delete=models.SET_NULL, null=True, blank=True, verbose_name="关联工单")
     # 对于基线告警，存储指标名（如 active_connections）；其他告警类型可留空
     metric_key = models.CharField(max_length=100, blank=True, default='', verbose_name="指标键")
     severity = models.CharField(max_length=20, default='warning', verbose_name="严重程度")
