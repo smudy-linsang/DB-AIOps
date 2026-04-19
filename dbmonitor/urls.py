@@ -21,6 +21,20 @@ from monitor.views_enhanced import (
     db_delete,
     db_toggle_active,
 )
+from monitor.api_views import (
+    HealthCheckView,
+    DatabaseListView,
+    DatabaseStatusView,
+    DatabaseMetricsView,
+    DatabaseBaselineView,
+    DatabasePredictionView,
+    DatabaseHealthView,
+    AlertListView,
+    AlertAcknowledgeView,
+    AuditLogListView,
+    AuditLogApproveView,
+    AuditLogRejectView,
+)
 
 urlpatterns = [
     path('admin/', admin.site.urls),
@@ -28,7 +42,29 @@ urlpatterns = [
     path('dashboard/', dashboard, name='dashboard'),
     path('monitor/<int:config_id>/', detail, name='detail'),
 
-    # API 接口
+    # ========== REST API v1 (Phase 3.6) ==========
+    # 平台健康检查
+    path('api/v1/health/', HealthCheckView.as_view(), name='api_v1_health'),
+    
+    # 数据库配置
+    path('api/v1/databases/', DatabaseListView.as_view(), name='api_v1_database_list'),
+    path('api/v1/databases/<int:config_id>/status/', DatabaseStatusView.as_view(), name='api_v1_database_status'),
+    path('api/v1/databases/<int:config_id>/metrics/', DatabaseMetricsView.as_view(), name='api_v1_database_metrics'),
+    path('api/v1/databases/<int:config_id>/baseline/', DatabaseBaselineView.as_view(), name='api_v1_database_baseline'),
+    path('api/v1/databases/<int:config_id>/prediction/', DatabasePredictionView.as_view(), name='api_v1_database_prediction'),
+    path('api/v1/databases/<int:config_id>/health/', DatabaseHealthView.as_view(), name='api_v1_database_health'),
+    
+    # 告警管理
+    path('api/v1/alerts/', AlertListView.as_view(), name='api_v1_alert_list'),
+    path('api/v1/alerts/<int:alert_id>/acknowledge/', AlertAcknowledgeView.as_view(), name='api_v1_alert_acknowledge'),
+    
+    # 运维工单
+    path('api/v1/auditlogs/', AuditLogListView.as_view(), name='api_v1_auditlog_list'),
+    path('api/v1/auditlogs/<int:audit_id>/approve/', AuditLogApproveView.as_view(), name='api_v1_auditlog_approve'),
+    path('api/v1/auditlogs/<int:audit_id>/reject/', AuditLogRejectView.as_view(), name='api_v1_auditlog_reject'),
+    # ========== END REST API v1 ==========
+
+    # API 接口（旧版，兼容）
     path('api/metrics/<int:config_id>/', api_latest_metrics, name='api_metrics'),
     path('api/baseline/<int:config_id>/', api_baseline, name='api_baseline'),
     path('api/intelligent-baseline/<int:config_id>/', api_intelligent_baseline, name='api_intelligent_baseline'),

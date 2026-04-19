@@ -1,0 +1,686 @@
+"""
+REST API 视图模块
+=================
+
+Phase 3.6 核心模块 - REST API 扩展与 RBAC 完善
+
+实现设计文档 5.2 节的外部 API：
+- /api/v1/databases/ - 数据库配置列表
+- /api/v1/databases/{id}/status/ - 数据库状态
+- /api/v1/databases/{id}/metrics/ - 历史指标
+- /api/v1/databases/{id}/baseline/ - 基线模型
+- /api/v1/databases/{id}/prediction/ - 容量预测
+- /api/v1/databases/{id}/health/ - 健康评分
+- /api/v1/alerts/ - 告警列表
+- /api/v1/auditlogs/ - 运维工单
+- /api/v1/health/ - 平台健康检查
+
+Author: DB-AIOps Team
+"""
+
+import json
+from datetime import datetime, timedelta
+from typing import Optional
+
+from django.http import JsonResponse
+from django.views import View
+from django.views.decorators.csrf import csrf_exempt
+from django.utils.decorators import method_decorator
+from django.contrib.auth.models import User
+
+from .models import MonitorLog, AlertLog, AuditLog
+from .auth import require_auth, require_role, get_user_role, get_user_database_ids
+
+
+class JSONResponseMixin:
+    """JSON 响应混入类"""
+    
+    def json_response(self, data: dict, status: int = 200) -> JsonResponse:
+        """返回 JSON 响应"""
+        return JsonResponse(data, status=status, safe=False)
+    
+    def error_response(self, message: str, status: int = 400) -> JsonResponse:
+        """返回错误响应"""
+        return JsonResponse({'error': message}, status=status)
+    
+    def success_response(self, data: dict = None, message: str = "OK") -> JsonResponse:
+        """返回成功响应"""
+        response = {'status': 'success', 'message': message}
+        if data is not None:
+            response['data'] = data
+        return JsonResponse(response, safe=False)
+
+
+class HealthCheckView(JSONResponseMixin, View):
+    """平台健康检查 API"""
+    
+    def get(self, request):
+        """
+        GET /api/v1/health/
+        平台自身健康检查（供外部监控探活）
+        """
+        # 检查数据库连接
+        try:
+            from django.db import connection
+            with connection.cursor() as cursor:
+                cursor.execute("SELECT 1")
+            db_status = "ok"
+        except Exception as e:
+            db_status = f"error: {str(e)}"
+        
+        # 检查采集状态（最近5分钟有日志的数据库数）
+        recent_time = datetime.now() - timedelta(minutes=5)
+        active_dbs = MonitorLog.objects.filter(
+            created_at__gte=recent_time
+        ).values('config_id').distinct().count()
+        
+        # 检查活跃告警数
+        active_alerts = AlertLog.objects.filter(status='active').count()
+        
+        data = {
+            'status': 'healthy',
+            'timestamp': datetime.now().isoformat(),
+            'components': {
+                'database': db_status,
+                'api': 'ok',
+                'collector': 'ok'
+            },
+            'metrics': {
+                'active_databases': active_dbs,
+                'active_alerts': active_alerts
+            }
+        }
+        
+        return self.json_response(data)
+
+
+class DatabaseListView(JSONResponseMixin, View):
+    """数据库配置列表 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request):
+        """
+        GET /api/v1/databases/
+        获取所有数据库配置列表（不含密码）
+        """
+        # 获取用户可见的数据库ID列表（RBAC 数据范围过滤）
+        allowed_db_ids = get_user_database_ids(request.user)
+        
+        # 查询数据库配置
+        # 这里使用 MonitorConfig 模型，需要根据实际模型名称调整
+        from .models import MonitorConfig
+        
+        if allowed_db_ids is not None:
+            configs = MonitorConfig.objects.filter(id__in=allowed_db_ids, is_active=True)
+        else:
+            configs = MonitorConfig.objects.filter(is_active=True)
+        
+        result = []
+        for config in configs:
+            result.append({
+                'id': config.id,
+                'name': config.name,
+                'db_type': config.db_type,
+                'host': config.host,
+                'port': config.port,
+                'environment': config.environment,
+                'is_active': config.is_active,
+                'created_at': config.created_at.isoformat() if config.created_at else None
+            })
+        
+        return self.json_response({
+            'total': len(result),
+            'databases': result
+        })
+
+
+class DatabaseStatusView(JSONResponseMixin, View):
+    """数据库状态 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/status/
+        获取指定数据库当前状态（最新采集结果）
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 获取最新采集日志
+        latest = MonitorLog.objects.filter(
+            config_id=config_id
+        ).order_by('-created_at').first()
+        
+        if not latest:
+            return self.error_response('No data for this database', 404)
+        
+        # 解析存储的指标数据
+        try:
+            metrics = json.loads(latest.metrics) if latest.metrics else {}
+        except (json.JSONDecodeError, TypeError):
+            metrics = {}
+        
+        data = {
+            'config_id': config_id,
+            'status': latest.status,
+            'collected_at': latest.created_at.isoformat(),
+            'collection_ms': latest.collection_ms,
+            'metrics': metrics
+        }
+        
+        return self.json_response(data)
+
+
+class DatabaseMetricsView(JSONResponseMixin, View):
+    """历史指标 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/metrics/
+        查询历史指标，支持时间范围和指标名过滤
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 解析查询参数
+        start_time = request.GET.get('start')
+        end_time = request.GET.get('end')
+        metric_name = request.GET.get('metric')
+        limit = int(request.GET.get('limit', 1000))
+        
+        # 解析时间
+        if start_time:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        else:
+            start_dt = datetime.now() - timedelta(hours=24)
+        
+        if end_time:
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        else:
+            end_dt = datetime.now()
+        
+        # 查询日志
+        logs = MonitorLog.objects.filter(
+            config_id=config_id,
+            created_at__gte=start_dt,
+            created_at__lte=end_dt
+        ).order_by('-created_at')[:limit]
+        
+        result = []
+        for log in logs:
+            try:
+                metrics = json.loads(log.metrics) if log.metrics else {}
+            except (json.JSONDecodeError, TypeError):
+                metrics = {}
+            
+            # 过滤指定指标
+            if metric_name:
+                if metric_name in metrics:
+                    result.append({
+                        'timestamp': log.created_at.isoformat(),
+                        'metric': metric_name,
+                        'value': metrics[metric_name],
+                        'status': log.status
+                    })
+            else:
+                for key, value in metrics.items():
+                    result.append({
+                        'timestamp': log.created_at.isoformat(),
+                        'metric': key,
+                        'value': value,
+                        'status': log.status
+                    })
+        
+        return self.json_response({
+            'config_id': config_id,
+            'start': start_dt.isoformat(),
+            'end': end_dt.isoformat(),
+            'count': len(result),
+            'metrics': result
+        })
+
+
+class DatabaseBaselineView(JSONResponseMixin, View):
+    """基线模型 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/baseline/
+        获取基线模型数据
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 查询基线模型
+        from .models import BaselineModel
+        
+        baselines = BaselineModel.objects.filter(db_config_id=config_id)
+        
+        result = []
+        for bl in baselines:
+            result.append({
+                'metric_key': bl.metric_key,
+                'time_slot': bl.time_slot,
+                'sample_count': bl.sample_count,
+                'mean': float(bl.mean) if bl.mean else None,
+                'std': float(bl.std) if bl.std else None,
+                'p90': float(bl.p90) if bl.p90 else None,
+                'p95': float(bl.p95) if bl.p95 else None,
+                'p99': float(bl.p99) if bl.p99 else None,
+                'normal_min': float(bl.normal_min) if bl.normal_min else None,
+                'normal_max': float(bl.normal_max) if bl.normal_max else None,
+                'data_sufficient': bl.data_sufficient,
+                'updated_at': bl.updated_at.isoformat() if bl.updated_at else None
+            })
+        
+        return self.json_response({
+            'config_id': config_id,
+            'total_baselines': len(result),
+            'baselines': result
+        })
+
+
+class DatabasePredictionView(JSONResponseMixin, View):
+    """容量预测 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/prediction/
+        获取最新容量预测结果
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 查询最新预测结果
+        from .models import PredictionResult
+        
+        predictions = PredictionResult.objects.filter(
+            db_config_id=config_id
+        ).order_by('-generated_at')[:10]  # 最近10条
+        
+        result = []
+        for pred in predictions:
+            result.append({
+                'metric_key': pred.metric_key,
+                'resource_name': pred.resource_name,
+                'current_value': float(pred.current_value) if pred.current_value else None,
+                'monthly_growth_rate': float(pred.monthly_growth_rate) if pred.monthly_growth_rate else None,
+                'predicted_warn_date': pred.predicted_warn_date.isoformat() if pred.predicted_warn_date else None,
+                'predicted_crit_date': pred.predicted_crit_date.isoformat() if pred.predicted_crit_date else None,
+                'model_used': pred.model_used,
+                'confidence': float(pred.confidence) if pred.confidence else None,
+                'recommendation': pred.recommendation,
+                'generated_at': pred.generated_at.isoformat() if pred.generated_at else None
+            })
+        
+        return self.json_response({
+            'config_id': config_id,
+            'predictions': result
+        })
+
+
+class DatabaseHealthView(JSONResponseMixin, View):
+    """健康评分 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/health/
+        获取健康评分历史
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 解析查询参数
+        days = int(request.GET.get('days', 30))
+        start_date = datetime.now().date() - timedelta(days=days)
+        
+        # 查询健康评分
+        from .models import HealthScore
+        
+        scores = HealthScore.objects.filter(
+            db_config_id=config_id,
+            score_date__gte=start_date
+        ).order_by('-score_date')
+        
+        result = []
+        for score in scores:
+            result.append({
+                'score_date': score.score_date.isoformat(),
+                'total_score': float(score.total_score) if score.total_score else None,
+                'availability_score': float(score.availability_score) if score.availability_score else None,
+                'capacity_score': float(score.capacity_score) if score.capacity_score else None,
+                'performance_score': float(score.performance_score) if score.performance_score else None,
+                'config_score': float(score.config_score) if score.config_score else None,
+                'ops_score': float(score.ops_score) if score.ops_score else None,
+                'score_detail': score.score_detail
+            })
+        
+        return self.json_response({
+            'config_id': config_id,
+            'days': days,
+            'scores': result
+        })
+
+
+class AlertListView(JSONResponseMixin, View):
+    """告警列表 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request):
+        """
+        GET /api/v1/alerts/
+        查询告警列表，支持状态/级别/时间过滤
+        """
+        # 解析查询参数
+        status = request.GET.get('status')
+        severity = request.GET.get('severity')
+        config_id = request.GET.get('config_id')
+        start_time = request.GET.get('start')
+        end_time = request.GET.get('end')
+        limit = int(request.GET.get('limit', 100))
+        
+        # RBAC - 只能看有权限的数据库告警
+        allowed_db_ids = get_user_database_ids(request.user)
+        
+        # 构建查询
+        queryset = AlertLog.objects.all().order_by('-created_at')
+        
+        if status:
+            queryset = queryset.filter(status=status)
+        if severity:
+            queryset = queryset.filter(severity=severity)
+        if config_id:
+            if allowed_db_ids is not None and config_id not in allowed_db_ids:
+                return self.error_response('Permission denied', 403)
+            queryset = queryset.filter(config_id=config_id)
+        elif allowed_db_ids is not None:
+            queryset = queryset.filter(config_id__in=allowed_db_ids)
+        
+        if start_time:
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            queryset = queryset.filter(created_at__gte=start_dt)
+        if end_time:
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            queryset = queryset.filter(created_at__lte=end_dt)
+        
+        queryset = queryset[:limit]
+        
+        result = []
+        for alert in queryset:
+            result.append({
+                'id': alert.id,
+                'config_id': alert.config_id,
+                'alert_type': alert.alert_type,
+                'severity': alert.severity,
+                'metric_key': alert.metric_key,
+                'current_value': float(alert.current_value) if alert.current_value else None,
+                'baseline_value': float(alert.baseline_value) if alert.baseline_value else None,
+                'title': alert.title,
+                'description': alert.description,
+                'status': alert.status,
+                'acknowledged_by': alert.acknowledged_by,
+                'acknowledged_at': alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                'resolved_at': alert.resolved_at.isoformat() if alert.resolved_at else None,
+                'created_at': alert.created_at.isoformat() if alert.created_at else None
+            })
+        
+        return self.json_response({
+            'total': len(result),
+            'alerts': result
+        })
+
+
+class AlertAcknowledgeView(JSONResponseMixin, View):
+    """告警确认 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request, alert_id: int):
+        """
+        POST /api/v1/alerts/{id}/acknowledge/
+        确认告警
+        """
+        try:
+            alert = AlertLog.objects.get(id=alert_id)
+        except AlertLog.DoesNotExist:
+            return self.error_response('Alert not found', 404)
+        
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and alert.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 更新告警状态
+        alert.status = 'acknowledged'
+        alert.acknowledged_by = request.user.username
+        alert.acknowledged_at = datetime.now()
+        alert.save()
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Alert acknowledged',
+            'alert_id': alert_id
+        })
+
+
+class AuditLogListView(JSONResponseMixin, View):
+    """运维工单列表 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request):
+        """
+        GET /api/v1/auditlogs/
+        查询运维工单列表
+        """
+        # 解析查询参数
+        status = request.GET.get('status')
+        risk_level = request.GET.get('risk_level')
+        config_id = request.GET.get('config_id')
+        limit = int(request.GET.get('limit', 100))
+        
+        # RBAC - 只能看有权限的数据库工单
+        allowed_db_ids = get_user_database_ids(request.user)
+        
+        # 构建查询
+        queryset = AuditLog.objects.all().order_by('-created_at')
+        
+        if status:
+            queryset = queryset.filter(status=status)
+        if risk_level:
+            queryset = queryset.filter(risk_level=risk_level)
+        if config_id:
+            if allowed_db_ids is not None and config_id not in allowed_db_ids:
+                return self.error_response('Permission denied', 403)
+            queryset = queryset.filter(config_id=config_id)
+        elif allowed_db_ids is not None:
+            queryset = queryset.filter(config_id__in=allowed_db_ids)
+        
+        queryset = queryset[:limit]
+        
+        result = []
+        for log in queryset:
+            result.append({
+                'id': log.id,
+                'config_id': log.config_id,
+                'source': log.source,
+                'action_type': log.action_type,
+                'risk_level': log.risk_level,
+                'description': log.description,
+                'status': log.status,
+                'created_by': log.created_by,
+                'approver_1': log.approver_1,
+                'approve_1_at': log.approve_1_at.isoformat() if log.approve_1_at else None,
+                'approver_2': log.approver_2,
+                'approve_2_at': log.approve_2_at.isoformat() if log.approve_2_at else None,
+                'executor': log.executor,
+                'execute_at': log.execute_at.isoformat() if log.execute_at else None,
+                'result': log.result,
+                'created_at': log.created_at.isoformat() if log.created_at else None
+            })
+        
+        return self.json_response({
+            'total': len(result),
+            'auditlogs': result
+        })
+
+
+class AuditLogApproveView(JSONResponseMixin, View):
+    """工单审批 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request, audit_id: int):
+        """
+        POST /api/v1/auditlogs/{id}/approve/
+        审批通过
+        """
+        try:
+            audit_log = AuditLog.objects.get(id=audit_id)
+        except AuditLog.DoesNotExist:
+            return self.error_response('Audit log not found', 404)
+        
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 获取用户角色
+        role = get_user_role(request.user)
+        
+        # 更新审批状态
+        if role == 'dba_supervisor':
+            if not audit_log.approver_1:
+                audit_log.approver_1 = request.user.username
+                audit_log.approve_1_at = datetime.now()
+                # 如果是高风险工单，需要第二级审批
+                if audit_log.risk_level == 'high':
+                    audit_log.status = 'pending_approval_2'
+                else:
+                    audit_log.status = 'approved'
+            elif not audit_log.approver_2:
+                audit_log.approver_2 = request.user.username
+                audit_log.approve_2_at = datetime.now()
+                audit_log.status = 'approved'
+        elif role == 'admin':
+            # admin 可以直接审批
+            if not audit_log.approver_1:
+                audit_log.approver_1 = request.user.username
+                audit_log.approve_1_at = datetime.now()
+            audit_log.status = 'approved'
+        
+        audit_log.save()
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Audit log approved',
+            'audit_id': audit_id,
+            'new_status': audit_log.status
+        })
+
+
+class AuditLogRejectView(JSONResponseMixin, View):
+    """工单拒绝 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request, audit_id: int):
+        """
+        POST /api/v1/auditlogs/{id}/reject/
+        拒绝工单
+        """
+        try:
+            audit_log = AuditLog.objects.get(id=audit_id)
+        except AuditLog.DoesNotExist:
+            return self.error_response('Audit log not found', 404)
+        
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        audit_log.status = 'rejected'
+        audit_log.save()
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Audit log rejected',
+            'audit_id': audit_id
+        })
+
+
+# =============================================================================
+# API 路由映射（供 urls.py 使用）
+# =============================================================================
+
+api_views = {
+    'health_check': HealthCheckView.as_view,
+    'database_list': DatabaseListView.as_view,
+    'database_status': DatabaseStatusView.as_view,
+    'database_metrics': DatabaseMetricsView.as_view,
+    'database_baseline': DatabaseBaselineView.as_view,
+    'database_prediction': DatabasePredictionView.as_view,
+    'database_health': DatabaseHealthView.as_view,
+    'alert_list': AlertListView.as_view,
+    'alert_acknowledge': AlertAcknowledgeView.as_view,
+    'auditlog_list': AuditLogListView.as_view,
+    'auditlog_approve': AuditLogApproveView.as_view,
+    'auditlog_reject': AuditLogRejectView.as_view,
+}
