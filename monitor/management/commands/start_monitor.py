@@ -12,8 +12,13 @@ import pymysql
 import pyodbc
 
 from monitor.alert_manager import AlertManager
+from monitor.alert_engine import AlertEngine  # Phase 3 智能告警引擎
 from monitor.baseline_engine import BaselineEngine
+from monitor.rca_engine import RCAEngine
+from monitor.capacity_engine import CapacityEngine
+from monitor.health_engine import HealthEngine
 from monitor.models import DatabaseConfig, MonitorLog
+from monitor.pg_capacity import postgresql_db_used_pct
 
 # 单次采集任务超时（秒）：超过此时间的采集视为失败，记 DOWN，不阻塞其他任务。
 COLLECT_TIMEOUT_SEC = getattr(settings, "COLLECT_TIMEOUT_SEC", 15)
@@ -24,6 +29,11 @@ COLLECT_WORKERS = getattr(settings, "COLLECT_WORKERS", 20)
 TBS_THRESHOLD = 90
 LOCK_TIME_THRESHOLD = 10
 CONN_THRESHOLD_PCT = 80
+
+# Phase 2 智能引擎开关
+ENABLE_PHASE2_ENGINES = getattr(settings, "ENABLE_PHASE2_ENGINES", True)
+CAPACITY_CHECK_INTERVAL_HOURS = getattr(settings, "CAPACITY_CHECK_INTERVAL_HOURS", 24)  # 容量预测检查间隔
+HEALTH_CHECK_INTERVAL_HOURS = getattr(settings, "HEALTH_CHECK_INTERVAL_HOURS", 1)  # 健康评分检查间隔
 
 # ==========================================
 # 通用监控数据采集器基# ==========================================
@@ -339,29 +349,33 @@ class PostgreSQLChecker(BaseDBChecker):
         uptime = int(cur.fetchone()[0])
         
         # 4. 数据库大小
+        # 实例已分配表空间总字节（作为分母，避免「库大小 / max(库大小)」的错误自比）
+        cur.execute("SELECT COALESCE(SUM(pg_tablespace_size(oid)), 0) FROM pg_tablespace")
+        total_tablespace_bytes = int(cur.fetchone()[0])
+        total_tablespace_mb = (
+            round(total_tablespace_bytes / 1024.0 / 1024.0, 2) if total_tablespace_bytes > 0 else None
+        )
+
         cur.execute("""
-            SELECT datname, pg_database_size(datname) / 1024 / 1024 as size_mb
+            SELECT datname, pg_database_size(datname) AS size_bytes
             FROM pg_database
             WHERE datistemplate = false
-            ORDER BY size_mb DESC
+            ORDER BY size_bytes DESC
             LIMIT 10
         """)
         db_sizes = []
-        for row in cur.fetchall():
-            db_sizes.append({
-                "name": row[0],
-                "size_mb": float(row[1])
-            })
-        
-        # 5. 数据库大小作为容量指标（PostgreSQL 表空间无独立配额限制        #    used_pct 无法SQL 层获取磁盘容量计算，此处只报告绝对大小，
-        #    used_pct 设为 None，避免前版本自比较算法导致的误报警）
         tbs_list = []
-        for row in db_sizes:
+        for row in cur.fetchall():
+            name = row[0]
+            size_bytes = int(row[1])
+            size_mb = round(size_bytes / 1024.0 / 1024.0, 2)
+            db_sizes.append({"name": name, "size_mb": float(size_mb)})
+            used_pct = postgresql_db_used_pct(size_bytes, total_tablespace_bytes)
             tbs_list.append({
-                "name": row["name"],
-                "total_mb": None,
-                "used_mb": row["size_mb"],
-                "used_pct": None
+                "name": name,
+                "total_mb": total_tablespace_mb,
+                "used_mb": size_mb,
+                "used_pct": used_pct,
             })
         
         # 6. 锁等待
@@ -698,7 +712,7 @@ class RedisChecker(BaseDBChecker):
 # 主命令类
 # ==========================================
 class Command(BaseCommand):
-    help = '全能数据库监控守护进(v0.1.0 - 并发隔离 + 告警去重 + 密码加密)'
+    help = '全能数据库监控守护进(v0.2.0 - Phase 2 智能增强版)'
 
     # 数据库类-> 检查器映射
     CHECKER_MAP = {
@@ -713,10 +727,14 @@ class Command(BaseCommand):
     }
 
     def handle(self, *args, **options):
-        print(f"[{datetime.datetime.now()}] 全栈监控守护进程 v0.1.0 已启..")
+        print(f"[{datetime.datetime.now()}] 全栈监控守护进程 v0.2.0 (Phase 2 智能增强版) 已启动")
         print(f">> 支持的数据库：Oracle, MySQL, PostgreSQL, 达梦，Gbase8a, TDSQL")
-        print(f">> 架构模式：插件化检查器 + 基线异常检测")
-        print(f">> 告警策略：基线偏离告警 + 锁等待 + 容量监控")
+        print(f">> Phase 2 智能特性：168时间槽基线 | RCA根因分析 | 容量预测 | 健康评分")
+        
+        if ENABLE_PHASE2_ENGINES:
+            print(f">> Phase 2 引擎: 已启用")
+        else:
+            print(f">> Phase 2 引擎: 已禁用 (设置 ENABLE_PHASE2_ENGINES=True 启用)")
 
         scheduler = BlockingScheduler()
         scheduler.add_job(self.monitor_job, 'interval', seconds=60)
@@ -764,7 +782,7 @@ class Command(BaseCommand):
                     self.process_result(cfg, 'DOWN', {'error': f'采集线程异常：{str(e)}'})
 
     def process_result(self, config, current_status, data):
-        """统一结果处理和告警逻辑（v0.1.0：基AlertLog 去重"""
+        """统一结果处理和告警逻辑（v0.2.0：Phase 2 智能引擎集成）"""
 
         def notify(title, body):
             self.send_alert(config, title, body)
@@ -824,48 +842,11 @@ class Command(BaseCommand):
             if current_locks:
                 print(f"  🛑 [锁等待] {len(current_locks)} 个阻塞会话")
 
-            # D. 基线异常检测
-            try:
-                baseline_engine = BaselineEngine(config)
-                anomalies = baseline_engine.check_current_against_baseline(data)
-
-                # 当前异常的指标集合，用于后续解除已恢复指标的告警
-                anomaly_keys = set()
-                for metric_name, current_val, baseline, anomaly_type, sev in anomalies:
-                    anomaly_keys.add(metric_name)
-                    direction = '暴涨' if anomaly_type == 'high' else '骤降'
-                    emoji = '🔴' if sev == 'critical' else '🟡'
-                    body = (
-                        f"指标：{metric_name}\n"
-                        f"当前值：{current_val}\n"
-                        f"基线均值：{baseline['mean']} ± {baseline['std']}\n"
-                        f"正常范围：{baseline['normal_range'][0]} ~ {baseline['normal_range'][1]}\n"
-                        f"P99：{baseline['p99']}\n"
-                        f"偏离类型：{direction}\n"
-                        f"建议：检查是否有异常业务行为或潜在故障"
-                    )
-                    am.fire(
-                        alert_type='baseline', metric_key=metric_name,
-                        title=f'{emoji} 基线异常：{metric_name}', description=body,
-                        severity=sev,
-                    )
-                    print(f"  📊 [基线] {metric_name}={current_val} 偏离（{direction}）")
-
-                # 对本轮已恢复的基线异常发送恢复通知
-                from monitor.models import AlertLog
-                active_baseline = AlertLog.objects.filter(
-                    config=config, alert_type='baseline', status='active'
-                )
-                for al in active_baseline:
-                    if al.metric_key not in anomaly_keys:
-                        am.resolve(
-                            alert_type='baseline', metric_key=al.metric_key,
-                            recovery_title=f'🟢 基线恢复：{al.metric_key}',
-                            recovery_body=f'指标 {al.metric_key} 已恢复至正常范围',
-                        )
-
-            except Exception as e:
-                print(f"  ⚠️ 基线检测异常：{e}")
+            # ======================================
+            # D. Phase 2: 智能引擎分析
+            # ======================================
+            if ENABLE_PHASE2_ENGINES:
+                self._run_phase2_analysis(config, data, am)
 
         # --- 3. 记录监控日志 ---
         MonitorLog.objects.create(
@@ -873,6 +854,186 @@ class Command(BaseCommand):
             status=current_status,
             message=json.dumps(data, ensure_ascii=False, default=str)
         )
+
+    def _run_phase2_analysis(self, config, data, am):
+        """
+        Phase 2 智能引擎分析
+        
+        包含:
+        - 168时间槽动态基线异常检测
+        - RCA根因分析
+        - 容量预测 (定期)
+        - 健康评分 (定期)
+        """
+        
+        # --- D1. 基线异常检测 (168时间槽 + 三重条件 + Phase 3智能告警收敛) ---
+        try:
+            # Phase 3: 初始化智能告警引擎
+            alert_engine = AlertEngine(config)
+            
+            baseline_engine = BaselineEngine(config)
+            anomalies = baseline_engine.check_current_against_baseline(data)
+
+            anomaly_keys = set()
+            for metric_name, current_val, baseline, anomaly_type, sev in anomalies:
+                anomaly_keys.add(metric_name)
+                
+                # Phase 3: 使用 AlertEngine.should_alert() 进行收敛判断
+                # 只在满足三重条件(幅度+方向+持续性)且通过收敛窗口时发送告警
+                direction_str = 'up' if anomaly_type == 'high' else 'down'
+                alert_result = alert_engine.should_alert(metric_name, current_val, direction_str)
+                
+                if alert_result['should_fire']:
+                    # 计算正常范围
+                    normal_range = f"{baseline.normal_min:.2f} ~ {baseline.normal_max:.2f}"
+                    direction_label = '暴涨' if anomaly_type == 'high' else '骤降'
+                    emoji = '🔴' if alert_result['severity'] == 'critical' else '🟡'
+                    body = (
+                        f"指标：{metric_name}\n"
+                        f"当前值：{current_val}\n"
+                        f"基线均值：{baseline.mean:.2f} ± {baseline.std:.2f}\n"
+                        f"正常范围：{normal_range}\n"
+                        f"P99：{baseline.p99:.2f}\n"
+                        f"偏离类型：{direction_label}\n"
+                        f"告警等级：{alert_result['severity']} (连续{alert_result['consecutive_count']}次)\n"
+                        f"建议：检查是否有异常业务行为或潜在故障"
+                    )
+                    am.fire(
+                        alert_type='baseline', metric_key=metric_name,
+                        title=f'{emoji} 基线异常：{metric_name}', description=body,
+                        severity=alert_result['severity'],
+                    )
+                    print(f"  📊 [基线] {metric_name}={current_val} 偏离（{direction_label}） [{alert_result['severity']}]")
+                else:
+                    print(f"  📊 [基线-收敛] {metric_name}={current_val} 检测到异常但处于收敛窗口内")
+
+            # 对本轮已恢复的基线异常发送恢复通知
+            from monitor.models import AlertLog
+            active_baseline = AlertLog.objects.filter(
+                config=config, alert_type='baseline', status='active'
+            )
+            for al in active_baseline:
+                if al.metric_key not in anomaly_keys:
+                    am.resolve(
+                        alert_type='baseline', metric_key=al.metric_key,
+                        recovery_title=f'🟢 基线恢复：{al.metric_key}',
+                        recovery_body=f'指标 {al.metric_key} 已恢复至正常范围',
+                    )
+
+        except Exception as e:
+            print(f"  ⚠️ 基线检测异常：{e}")
+
+        # --- D2. RCA 根因分析 ---
+        try:
+            rca_engine = RCAEngine(config)
+            rca_report = rca_engine.analyze(data)
+
+            if rca_report.get('diagnoses'):
+                for diag in rca_report['diagnoses']:
+                    if diag['severity'] == 'critical':
+                        body = (
+                            f"规则ID：{diag['rule_id']}\n"
+                            f"问题描述：{diag['description']}\n\n"
+                            f"建议措施：\n" + "\n".join(f"• {s}" for s in diag['suggestions'])
+                        )
+                        am.fire(
+                            alert_type='rca', metric_key=diag['rule_id'],
+                            title=f"🔴 RCA根因：{diag['name']}",
+                            description=body,
+                            severity='critical',
+                        )
+                        print(f"  🔍 [RCA] {diag['rule_id']} - {diag['name']}")
+
+            # 复合故障告警
+            if rca_report.get('compound_diagnoses'):
+                for compound in rca_report['compound_diagnoses']:
+                    body = (
+                        f"复合故障：{compound['name']}\n"
+                        f"关联规则：{', '.join(compound['requires'])}\n\n"
+                        f"建议措施：\n" + "\n".join(f"• {s}" for s in compound['suggestions'])
+                    )
+                    am.fire(
+                        alert_type='rca_compound', metric_key=compound['id'],
+                        title=f"🚨 复合故障：{compound['name']}",
+                        description=body,
+                        severity='critical',
+                    )
+                    print(f"  🚨 [RCA复合] {compound['id']} - {compound['name']}")
+
+        except Exception as e:
+            print(f"  ⚠️ RCA分析异常：{e}")
+
+        # --- D3. 健康评分 (每小时一次) ---
+        try:
+            from django.core.cache import cache
+            health_cache_key = f"health_score_{config.id}"
+            last_health_check = cache.get(health_cache_key)
+
+            if last_health_check is None:  # 首次检查或缓存过期
+                health_engine = HealthEngine(config)
+                health_report = health_engine.calculate(data)
+
+                # 缓存1小时
+                cache.set(health_cache_key, health_report, 3600)
+
+                # 评分低于C级发送告警
+                if health_report['grade'] in ('D', 'F'):
+                    emoji = '🔴' if health_report['grade'] == 'F' else '🟠'
+                    body = (
+                        f"健康评分：{health_report['overall_score']} 分\n"
+                        f"等级：{health_report['grade']} ({health_report['grade_description']})\n\n"
+                        f"各维度得分：\n" + "\n".join(
+                            f"• {dim}: {d['score']}" 
+                            for dim, d in health_report['dimensions'].items()
+                        ) + "\n\n"
+                        f"改进建议：\n" + "\n".join(f"• {r}" for r in health_report['recommendations'])
+                    )
+                    am.fire(
+                        alert_type='health', metric_key='health_score',
+                        title=f"{emoji} 数据库健康评分 {health_report['grade']}级",
+                        description=body,
+                        severity='critical' if health_report['grade'] == 'F' else 'warning',
+                    )
+                    print(f"  💚 [健康] 评分={health_report['overall_score']} {health_report['grade']}级")
+                else:
+                    print(f"  💚 [健康] 评分={health_report['overall_score']} {health_report['grade']}级 (正常)")
+
+        except Exception as e:
+            print(f"  ⚠️ 健康评分异常：{e}")
+
+        # --- D4. 容量预测 (每天一次) ---
+        try:
+            from django.core.cache import cache
+            capacity_cache_key = f"capacity_forecast_{config.id}"
+            last_capacity_check = cache.get(capacity_cache_key)
+
+            if last_capacity_check is None:  # 首次检查或缓存过期
+                capacity_engine = CapacityEngine(config)
+                capacity_report = capacity_engine.analyze_all_metrics()
+
+                # 缓存24小时
+                cache.set(capacity_cache_key, capacity_report, 86400)
+
+                if capacity_report.get('alerts'):
+                    for alert in capacity_report['alerts']:
+                        emoji = '🚨' if alert['severity'] == 'emergency' else \
+                                '🔴' if alert['severity'] == 'critical' else '🟠'
+                        body = (
+                            f"类型：{alert['type']}\n"
+                            f"当前值：{alert['current']}%\n"
+                            f"预测值：{alert['predicted']}%\n"
+                            f"消息：{alert['message']}"
+                        )
+                        am.fire(
+                            alert_type='capacity', metric_key=alert['type'],
+                            title=f"{emoji} 容量预测告警",
+                            description=body,
+                            severity=alert['severity'],
+                        )
+                        print(f"  📈 [容量] {alert['type']} - {alert['message']}")
+
+        except Exception as e:
+            print(f"  ⚠️ 容量预测异常：{e}")
 
     def _build_lock_msg(self, locks):
         """构建锁等待告警消"""

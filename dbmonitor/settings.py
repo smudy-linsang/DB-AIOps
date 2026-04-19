@@ -122,17 +122,26 @@ else:
     }
 
 # ============================================================================
-# 缓存配置（使用 Redis，支持基线缓存）
+# 缓存配置（生产可启用 Redis；开发默认 LocMem，避免未装 redis 包时无法启动）
 # ============================================================================
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'False').lower() in ('true', '1', 'yes')
 
-CACHES = {
-    'default': {
-        'BACKEND': 'django.core.cache.backends.redis.RedisCache',
-        'LOCATION': REDIS_URL,
-        'TIMEOUT': 300,
+if USE_REDIS_CACHE:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.redis.RedisCache',
+            'LOCATION': REDIS_URL,
+            'TIMEOUT': 300,
+        }
     }
-}
+else:
+    CACHES = {
+        'default': {
+            'BACKEND': 'django.core.cache.backends.locmem.LocMemCache',
+            'LOCATION': 'dbmonitor-local',
+        }
+    }
 
 
 # Password validation
@@ -225,9 +234,8 @@ DINGTALK_SECRET = os.environ.get('DINGTALK_SECRET', '')
 # ==========================================
 # 密码加密密钥（v0.1.0 新增）
 # ==========================================
-# 用于 AES-256-GCM 加密数据库连接密码
-# 生产环境请通过环境变量 DB_MONITOR_SECRET_KEY 注入，不要写在此文件中
-# DB_MONITOR_SECRET_KEY = 'your-32-char-secret-key'
+# 用于 AES-256-GCM 加密数据库连接密码；优先读环境变量 DB_MONITOR_SECRET_KEY
+DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
 
 # ==========================================
 # 采集调度参数（v0.1.0 新增）

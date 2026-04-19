@@ -1,7 +1,10 @@
 from django.contrib import admin
+
+from monitor.crypto import is_encrypted
+
 from .models import DatabaseConfig
 
-# 自定义后台显示样式
+
 class DatabaseConfigAdmin(admin.ModelAdmin):
     # 列表页显示的字段
     # 把 service_name 加进去
@@ -12,5 +15,12 @@ class DatabaseConfigAdmin(admin.ModelAdmin):
     # 允许筛选的字段
     list_filter = ('db_type', 'is_active')
 
-# 注册到后台
+    def save_model(self, request, obj, form, change):
+        if 'password' in form.changed_data:
+            raw = form.cleaned_data.get('password') or ''
+            if raw and not is_encrypted(raw):
+                obj.set_password(raw)
+        super().save_model(request, obj, form, change)
+
+
 admin.site.register(DatabaseConfig, DatabaseConfigAdmin)

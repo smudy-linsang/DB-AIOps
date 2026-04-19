@@ -7,6 +7,7 @@ from monitor.alert_manager import AlertManager
 from monitor.crypto import decrypt_password, encrypt_password, is_encrypted
 from monitor.management.commands.start_monitor import Command
 from monitor.models import AlertLog, DatabaseConfig, MonitorLog
+from monitor.pg_capacity import postgresql_db_used_pct
 
 
 class CryptoTests(TestCase):
@@ -25,6 +26,14 @@ class CryptoTests(TestCase):
 
     def test_decrypt_plaintext_keeps_backward_compatibility(self):
         self.assertEqual(decrypt_password("plain_old_value"), "plain_old_value")
+
+
+class PgCapacityTests(TestCase):
+    def test_used_pct_proxy(self):
+        self.assertEqual(postgresql_db_used_pct(300, 1000), 30.0)
+        self.assertEqual(postgresql_db_used_pct(1000, 1000), 100.0)
+        self.assertIsNone(postgresql_db_used_pct(0, 0))
+        self.assertIsNone(postgresql_db_used_pct(100, 0))
 
 
 class AlertManagerTests(TestCase):

@@ -13,8 +13,8 @@ APScheduler>=3.10.0
 # 密码加密
 cryptography>=42.0.0
 
-# Redis (预留)
-# redis>=5.0.0
+# Redis（可选：生产环境设置 USE_REDIS_CACHE=True 时需要）
+redis>=5.0.0
 
 # MongoDB (预留)
 # pymongo>=4.0.0
