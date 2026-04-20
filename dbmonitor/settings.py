@@ -157,6 +157,17 @@ else:
 # TimescaleDB 配置（预留）
 TIMESCALEDB_ENABLED = os.environ.get('TIMESCALEDB_ENABLED', 'False').lower() in ('true', '1', 'yes')
 
+# TimescaleDB 连接配置
+TIMESCALEDB_HOST = os.environ.get('TIMESCALEDB_HOST', 'localhost')
+TIMESCALEDB_PORT = os.environ.get('TIMESCALEDB_PORT', '5432')
+TIMESCALEDB_NAME = os.environ.get('TIMESCALEDB_NAME', 'timeseriesdb')
+TIMESCALEDB_USER = os.environ.get('TIMESCALEDB_USER', 'postgres')
+TIMESCALEDB_PASSWORD = os.environ.get('TIMESCALEDB_PASSWORD', 'postgres123')
+
+# TimescaleDB 时序数据保留策略
+TIMESCALEDB_RETENTION_DAYS = int(os.environ.get('TIMESCALEDB_RETENTION_DAYS', '90'))
+TIMESCALEDB_COMPRESSION_INTERVAL = os.environ.get('TIMESCALEDB_COMPRESSION_INTERVAL', '7 days')
+
 
 # ============================================================================
 # 缓存配置

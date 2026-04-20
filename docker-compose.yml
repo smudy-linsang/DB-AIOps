@@ -1,6 +1,6 @@
 # ==========================================
 # DB Monitor - Full Stack Environment
-# MySQL 8.0 + PostgreSQL 15 + Redis + Django App
+# MySQL 8.0 + TimescaleDB (PostgreSQL) + Redis + Django App
 # ==========================================
 
 version: '3.8'
@@ -57,21 +57,22 @@ services:
       retries: 10
 
   # ----------------------------------------
-  # PostgreSQL 15
+  # TimescaleDB (PostgreSQL with time-series extensions)
   # Host port: 5432
   # User: postgres / postgres123
+  # Database: timeseriesdb
   # ----------------------------------------
-  postgres:
-    image: postgres:15
-    container_name: dbmonitor-postgres
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: dbmonitor-timescaledb
     environment:
       POSTGRES_USER: postgres
       POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: testdb
+      POSTGRES_DB: timeseriesdb
     ports:
       - "5432:5432"
     volumes:
-      - pg_data:/var/lib/postgresql/data
+      - timeseries_data:/var/lib/postgresql/data
     networks:
       - dbmonitor-net
     healthcheck:
@@ -98,12 +99,19 @@ services:
       - DB_NAME=testdb
       - DB_USER=monitor
       - DB_PASSWORD=monitor123
+      - TIMESERIES_DB_HOST=timescaledb
+      - TIMESERIES_DB_PORT=5432
+      - TIMESERIES_DB_NAME=timeseriesdb
+      - TIMESERIES_DB_USER=postgres
+      - TIMESERIES_DB_PASSWORD=postgres123
     ports:
       - "8000:8000"
     volumes:
       - .:/app
     depends_on:
       mysql:
+        condition: service_healthy
+      timescaledb:
         condition: service_healthy
       redis:
         condition: service_healthy
@@ -141,7 +149,7 @@ services:
 
 volumes:
   mysql_data:
-  pg_data:
+  timeseries_data:
   redis_data:
 
 networks:
