@@ -79,7 +79,7 @@ ROLE_PERMISSIONS = {
         Permission.VIEW_BASELINE,
         Permission.VIEW_PREDICTION,
         Permission.VIEW_HEALTH,
-        Permission.VIEW_ALERJS,
+        Permission.VIEW_ALERTS,
         Permission.VIEW_AUDITLOGS,
         Permission.ACKNOWLEDGE_ALERTS,
     ],
@@ -463,7 +463,3 @@ class APIKeyAuth:
         """
         cache_key = f"api_key_{api_key}"
         return cache.delete(cache_key) > 0
-
-
-# 修复：导入 settings
-from django.conf import settings

@@ -28,8 +28,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.contrib.auth.models import User
 
-from .models import MonitorLog, AlertLog, AuditLog
-from .auth import require_auth, require_role, get_user_role, get_user_database_ids
+from .models import MonitorLog, AlertLog, AuditLog, UserProfile
+from .auth import require_auth, require_role, get_user_role, get_user_database_ids, get_user_permissions, is_admin
 
 
 class JSONResponseMixin:
@@ -92,6 +92,70 @@ class HealthCheckView(JSONResponseMixin, View):
         }
         
         return self.json_response(data)
+
+
+class LoginView(JSONResponseMixin, View):
+    """用户登录 API"""
+    
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request):
+        """
+        POST /api/v1/auth/login/
+        用户登录，获取Token
+        """
+        import json
+        
+        try:
+            data = json.loads(request.body)
+        except:
+            return self.error_response('Invalid JSON body', 400)
+        
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        
+        if not username or not password:
+            return self.error_response('Username and password are required', 400)
+        
+        from .auth import login_user
+        result = login_user(username, password)
+        
+        if not result:
+            return self.error_response('Invalid username or password', 401)
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Login successful',
+            'token': result['token'],
+            'user': result['user']
+        })
+
+
+class LogoutView(JSONResponseMixin, View):
+    """用户登出 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request):
+        """
+        POST /api/v1/auth/logout/
+        用户登出，撤销Token
+        """
+        from .auth import logout_user
+        
+        token = getattr(request, 'auth_token', None)
+        if token:
+            logout_user(token)
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Logout successful'
+        })
 
 
 class DatabaseListView(JSONResponseMixin, View):
@@ -862,11 +926,266 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
 
 
 # =============================================================================
+# 用户管理 API (Phase 3.6 扩展)
+# =============================================================================
+
+class UserListView(JSONResponseMixin, View):
+    """用户列表 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request):
+        """
+        GET /api/v1/users/
+        获取用户列表
+        """
+        users = User.objects.all().order_by('-date_joined')
+        
+        result = []
+        for user in users:
+            try:
+                profile = user.userprofile
+                role = profile.role
+                allowed_dbs = profile.allowed_databases
+            except:
+                role = 'read_only_observer'
+                allowed_dbs = []
+            
+            result.append({
+                'id': user.id,
+                'username': user.username,
+                'email': user.email,
+                'is_active': user.is_active,
+                'is_staff': user.is_staff,
+                'role': role,
+                'allowed_databases': allowed_dbs,
+                'date_joined': user.date_joined.isoformat() if user.date_joined else None,
+                'last_login': user.last_login.isoformat() if user.last_login else None
+            })
+        
+        return self.json_response({
+            'total': len(result),
+            'users': result
+        })
+    
+    def post(self, request):
+        """
+        POST /api/v1/users/
+        创建用户
+        """
+        import json
+        
+        try:
+            data = json.loads(request.body)
+        except:
+            return self.error_response('Invalid JSON body', 400)
+        
+        username = data.get('username', '').strip()
+        password = data.get('password', '')
+        email = data.get('email', '').strip()
+        role = data.get('role', 'read_only_observer')
+        allowed_databases = data.get('allowed_databases', [])
+        
+        # 验证
+        if not username:
+            return self.error_response('Username is required', 400)
+        if not password:
+            return self.error_response('Password is required', 400)
+        if User.objects.filter(username=username).exists():
+            return self.error_response('Username already exists', 400)
+        
+        # 创建用户
+        user = User.objects.create_user(
+            username=username,
+            password=password,
+            email=email
+        )
+        
+        # 创建用户配置
+        UserProfile.objects.create(
+            user=user,
+            role=role,
+            allowed_databases=allowed_databases
+        )
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'User created',
+            'user_id': user.id
+        }, status=201)
+
+
+class UserDetailView(JSONResponseMixin, View):
+    """用户详情 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, user_id: int):
+        """
+        GET /api/v1/users/{id}/
+        获取用户详情
+        """
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return self.error_response('User not found', 404)
+        
+        try:
+            profile = user.userprofile
+            role = profile.role
+            allowed_dbs = profile.allowed_databases
+        except:
+            role = 'read_only_observer'
+            allowed_dbs = []
+        
+        return self.json_response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_active': user.is_active,
+            'is_staff': user.is_staff,
+            'role': role,
+            'allowed_databases': allowed_dbs,
+            'date_joined': user.date_joined.isoformat() if user.date_joined else None,
+            'last_login': user.last_login.isoformat() if user.last_login else None
+        })
+    
+    def put(self, request, user_id: int):
+        """
+        PUT /api/v1/users/{id}/
+        更新用户信息
+        """
+        import json
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return self.error_response('User not found', 404)
+        
+        try:
+            data = json.loads(request.body)
+        except:
+            return self.error_response('Invalid JSON body', 400)
+        
+        # 更新字段
+        if 'email' in data:
+            user.email = data['email'].strip()
+        if 'is_active' in data:
+            user.is_active = data['is_active']
+        
+        user.save()
+        
+        # 更新用户配置
+        profile, _ = UserProfile.objects.get_or_create(user=user)
+        if 'role' in data:
+            profile.role = data['role']
+        if 'allowed_databases' in data:
+            profile.allowed_databases = data['allowed_databases']
+        profile.save()
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'User updated'
+        })
+
+
+class UserPasswordView(JSONResponseMixin, View):
+    """用户密码修改 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def put(self, request, user_id: int):
+        """
+        PUT /api/v1/users/{id}/password/
+        修改用户密码
+        """
+        import json
+        
+        # 只有管理员或本人可以修改密码
+        if request.user.id != user_id and not is_admin(request.user):
+            return self.error_response('Permission denied', 403)
+        
+        try:
+            user = User.objects.get(id=user_id)
+        except User.DoesNotExist:
+            return self.error_response('User not found', 404)
+        
+        try:
+            data = json.loads(request.body)
+        except:
+            return self.error_response('Invalid JSON body', 400)
+        
+        password = data.get('password', '')
+        if not password:
+            return self.error_response('Password is required', 400)
+        
+        if len(password) < 8:
+            return self.error_response('Password must be at least 8 characters', 400)
+        
+        user.set_password(password)
+        user.save()
+        
+        return self.json_response({
+            'status': 'success',
+            'message': 'Password updated'
+        })
+
+
+class CurrentUserView(JSONResponseMixin, View):
+    """当前用户 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request):
+        """
+        GET /api/v1/users/me/
+        获取当前用户信息
+        """
+        user = request.user
+        
+        try:
+            profile = user.userprofile
+            role = profile.role
+            allowed_dbs = profile.allowed_databases
+        except:
+            role = 'read_only_observer'
+            allowed_dbs = []
+        
+        return self.json_response({
+            'id': user.id,
+            'username': user.username,
+            'email': user.email,
+            'is_active': user.is_active,
+            'role': role,
+            'permissions': get_user_permissions(user),
+            'allowed_databases': allowed_dbs,
+            'date_joined': user.date_joined.isoformat() if user.date_joined else None,
+            'last_login': user.last_login.isoformat() if user.last_login else None
+        })
+
+
+# =============================================================================
 # API 路由映射（供 urls.py 使用）
 # =============================================================================
 
 api_views = {
     'health_check': HealthCheckView.as_view,
+    'login': LoginView.as_view,
+    'logout': LogoutView.as_view,
     'database_list': DatabaseListView.as_view,
     'database_status': DatabaseStatusView.as_view,
     'database_metrics': DatabaseMetricsView.as_view,
@@ -880,4 +1199,8 @@ api_views = {
     'auditlog_reject': AuditLogRejectView.as_view,
     'auditlog_execute': AuditLogExecuteView.as_view,
     'auditlog_dry_run': AuditLogExecuteDryRunView.as_view,
+    'user_list': UserListView.as_view,
+    'user_detail': UserDetailView.as_view,
+    'user_password': UserPasswordView.as_view,
+    'current_user': CurrentUserView.as_view,
 }

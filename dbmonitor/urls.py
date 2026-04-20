@@ -23,6 +23,8 @@ from monitor.views_enhanced import (
 )
 from monitor.api_views import (
     HealthCheckView,
+    LoginView,
+    LogoutView,
     DatabaseListView,
     DatabaseStatusView,
     DatabaseMetricsView,
@@ -36,6 +38,10 @@ from monitor.api_views import (
     AuditLogRejectView,
     AuditLogExecuteView,
     AuditLogExecuteDryRunView,
+    UserListView,
+    UserDetailView,
+    UserPasswordView,
+    CurrentUserView,
 )
 
 urlpatterns = [
@@ -47,6 +53,10 @@ urlpatterns = [
     # ========== REST API v1 (Phase 3.6) ==========
     # 平台健康检查
     path('api/v1/health/', HealthCheckView.as_view(), name='api_v1_health'),
+    
+    # 认证
+    path('api/v1/auth/login/', LoginView.as_view(), name='api_v1_login'),
+    path('api/v1/auth/logout/', LogoutView.as_view(), name='api_v1_logout'),
     
     # 数据库配置
     path('api/v1/databases/', DatabaseListView.as_view(), name='api_v1_database_list'),
@@ -66,6 +76,12 @@ urlpatterns = [
     path('api/v1/auditlogs/<int:audit_id>/reject/', AuditLogRejectView.as_view(), name='api_v1_auditlog_reject'),
     path('api/v1/auditlogs/<int:audit_id>/execute/', AuditLogExecuteView.as_view(), name='api_v1_auditlog_execute'),
     path('api/v1/auditlogs/<int:audit_id>/dry-run/', AuditLogExecuteDryRunView.as_view(), name='api_v1_auditlog_dry_run'),
+    
+    # 用户管理
+    path('api/v1/users/', UserListView.as_view(), name='api_v1_user_list'),
+    path('api/v1/users/me/', CurrentUserView.as_view(), name='api_v1_current_user'),
+    path('api/v1/users/<int:user_id>/', UserDetailView.as_view(), name='api_v1_user_detail'),
+    path('api/v1/users/<int:user_id>/password/', UserPasswordView.as_view(), name='api_v1_user_password'),
     # ========== END REST API v1 ==========
 
     # API 接口（旧版，兼容）
