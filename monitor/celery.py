@@ -55,6 +55,32 @@ app.conf.beat_schedule = {
         'task': 'monitor.tasks.check_alerts',
         'schedule': 60.0,  # 1 分钟
     },
+    # 日报生成：每天凌晨 4 点执行
+    'generate-daily-report': {
+        'task': 'monitor.tasks.generate_daily_report',
+        'schedule': 86400.0,
+        'options': {
+            'run_at': '04:00'
+        }
+    },
+    # 月报生成：每月 1 号凌晨 5 点执行
+    'generate-monthly-report': {
+        'task': 'monitor.tasks.generate_monthly_report',
+        'schedule': 86400.0 * 28,  # 约每月执行
+    },
+    # 日志清理：每天凌晨 6 点执行
+    'cleanup-old-logs': {
+        'task': 'monitor.tasks.cleanup_old_logs',
+        'schedule': 86400.0,
+        'options': {
+            'run_at': '06:00'
+        }
+    },
+    # 基线同步到TimescaleDB：每小时执行
+    'sync-baseline-timeseries': {
+        'task': 'monitor.tasks.sync_baseline_to_timeseries',
+        'schedule': 3600.0,  # 1 小时
+    },
 }
 
 # 任务序列化方式

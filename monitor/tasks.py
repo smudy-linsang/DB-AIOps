@@ -253,3 +253,191 @@ def cleanup_old_logs():
     except Exception as e:
         logger.error(f"清理日志任务异常: {e}")
         raise
+
+
+@shared_task(bind=True)
+def run_slow_query_analysis(self, config_id: int, days: int = 7):
+    """
+    执行慢查询分析任务
+    
+    Args:
+        config_id: 数据库配置 ID
+        days: 分析最近几天的数据
+    """
+    from monitor.models import DatabaseConfig
+    from monitor.slow_query_engine import SlowQueryEngine
+    
+    try:
+        config = DatabaseConfig.objects.get(id=config_id)
+        engine = SlowQueryEngine(config)
+        
+        # 采集慢查询
+        queries = engine.collect_slow_queries(days=days)
+        
+        # 分析慢查询
+        analysis = engine.analyze_queries(queries)
+        
+        logger.info(f"慢查询分析完成: {config.name}, 采集 {len(queries)} 条")
+        
+        return {
+            'status': 'completed',
+            'config_id': config_id,
+            'queries_collected': len(queries),
+            'analysis': analysis
+        }
+    except DatabaseConfig.DoesNotExist:
+        return {'status': 'error', 'message': 'Config not found'}
+    except Exception as e:
+        logger.error(f"慢查询分析失败 {config_id}: {e}")
+        raise
+
+
+@shared_task(bind=True)
+def run_config_advisor_check(self, config_id: int, db_type: str = None):
+    """
+    执行配置检查任务
+    
+    Args:
+        config_id: 数据库配置 ID
+        db_type: 数据库类型 (mysql/postgresql/oracle)
+    """
+    from monitor.models import DatabaseConfig
+    from monitor.config_advisor import ConfigAdvisor
+    
+    try:
+        config = DatabaseConfig.objects.get(id=config_id)
+        advisor = ConfigAdvisor()
+        
+        # 如果未指定类型，从配置获取
+        if db_type is None:
+            db_type = config.db_type
+        
+        # 执行检查
+        results = advisor.check_by_db_type(db_type)
+        
+        logger.info(f"配置检查完成: {config.name}, 检查 {len(results)} 条规则")
+        
+        failed_rules = [r for r in results if not r.get('passed', True)]
+        
+        return {
+            'status': 'completed',
+            'config_id': config_id,
+            'total_rules': len(results),
+            'passed_rules': len(results) - len(failed_rules),
+            'failed_rules': len(failed_rules)
+        }
+    except DatabaseConfig.DoesNotExist:
+        return {'status': 'error', 'message': 'Config not found'}
+    except Exception as e:
+        logger.error(f"配置检查失败 {config_id}: {e}")
+        raise
+
+
+@shared_task
+def generate_daily_report():
+    """
+    生成日报任务
+    
+    每天凌晨 4 点执行，为所有活跃数据库生成监控日报。
+    """
+    from monitor.models import DatabaseConfig
+    from monitor.report_engine import ReportService
+    
+    try:
+        configs = DatabaseConfig.objects.filter(is_active=True)
+        service = ReportService()
+        
+        # 生成所有数据库的日报
+        results = service.generate_daily_report(config_ids=[c.id for c in configs])
+        
+        logger.info(f"日报生成完成: 处理 {len(configs)} 个数据库")
+        
+        return {
+            'status': 'completed',
+            'configs_processed': len(configs),
+            'reports': results
+        }
+    except Exception as e:
+        logger.error(f"日报生成任务异常: {e}")
+        raise
+
+
+@shared_task
+def generate_monthly_report(month: str = None):
+    """
+    生成月报任务
+    
+    Args:
+        month: 月份，格式 YYYY-MM，默认为上个月
+    """
+    from monitor.models import DatabaseConfig
+    from monitor.report_engine import ReportService
+    from dateutil.relativedelta import relativedelta
+    
+    try:
+        if month is None:
+            # 上个月
+            today = datetime.now()
+            last_month = today - relativedelta(months=1)
+            month = last_month.strftime('%Y-%m')
+        
+        configs = DatabaseConfig.objects.filter(is_active=True)
+        service = ReportService()
+        
+        # 生成月报
+        results = service.generate_monthly_report(month=month)
+        
+        logger.info(f"月报生成完成: {month}, 处理 {len(configs)} 个数据库")
+        
+        return {
+            'status': 'completed',
+            'month': month,
+            'configs_processed': len(configs),
+            'reports': results
+        }
+    except ImportError:
+        return {'status': 'error', 'message': 'python-dateutil not installed'}
+    except Exception as e:
+        logger.error(f"月报生成任务异常: {e}")
+        raise
+
+
+@shared_task
+def sync_baseline_to_timeseries(config_id: int = None):
+    """
+    同步基线数据到 TimescaleDB
+    
+    Args:
+        config_id: 数据库配置 ID，None 表示同步所有
+    """
+    from monitor.models import DatabaseConfig
+    from monitor.timeseries import TimeSeriesWriter
+    
+    try:
+        writer = TimeSeriesWriter()
+        
+        if config_id is None:
+            # 同步所有
+            configs = DatabaseConfig.objects.filter(is_active=True)
+            for config in configs:
+                _sync_single_baseline(writer, config)
+        else:
+            config = DatabaseConfig.objects.get(id=config_id)
+            _sync_single_baseline(writer, config)
+        
+        return {'status': 'completed'}
+    except Exception as e:
+        logger.error(f"基线同步任务异常: {e}")
+        raise
+
+
+def _sync_single_baseline(writer, config):
+    """同步单个数据库的基线数据"""
+    from monitor.baseline_engine import BaselineEngine
+    
+    try:
+        engine = BaselineEngine(config)
+        engine.sync_to_timeseries(writer)
+        logger.info(f"基线同步完成: {config.name}")
+    except Exception as e:
+        logger.error(f"基线同步失败 {config.name}: {e}")
