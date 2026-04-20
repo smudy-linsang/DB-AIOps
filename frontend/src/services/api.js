@@ -1,7 +1,8 @@
 import axios from 'axios'
 
-const API_BASE = '/api'
+const API_BASE = '/api/v1'
 
+// 创建 axios 实例
 const api = axios.create({
   baseURL: API_BASE,
   timeout: 30000,
@@ -10,68 +11,197 @@ const api = axios.create({
   },
 })
 
-// Database Config API
-export const getDatabaseList = () => api.get('/configs/')
-export const getDatabaseDetail = (id) => api.get(`/configs/${id}/`)
-export const createDatabase = (data) => api.post('/configs/', data)
-export const updateDatabase = (id, data) => api.put(`/configs/${id}/`, data)
-export const deleteDatabase = (id) => api.delete(`/configs/${id}/`)
+// 请求拦截器 - 添加 Token
+api.interceptors.request.use(
+  (config) => {
+    const token = localStorage.getItem('auth_token')
+    if (token) {
+      config.headers.Authorization = `Bearer ${token}`
+    }
+    return config
+  },
+  (error) => {
+    return Promise.reject(error)
+  }
+)
 
-// Monitor Logs API
-export const getMonitorLogs = (configId, params) => 
-  api.get(`/logs/${configId}/`, { params })
-export const getLatestMetrics = (configId) => 
-  api.get(`/metrics/${configId}/latest/`)
+// 响应拦截器 - 处理错误
+api.interceptors.response.use(
+  (response) => {
+    return response.data
+  },
+  (error) => {
+    if (error.response?.status === 401) {
+      // Token 过期或无效
+      localStorage.removeItem('auth_token')
+      localStorage.removeItem('user')
+      window.location.href = '/login'
+    }
+    return Promise.reject(error)
+  }
+)
 
-// Intelligent Baseline API
-export const getIntelligentBaseline = (configId) => 
-  api.get(`/baseline/${configId}/intelligent/`)
-export const getBaselineTrend = (configId) => 
-  api.get(`/baseline/${configId}/trend/`)
+// ==========================================
+// 认证 API
+// ==========================================
 
-// Anomaly Detection API
-export const getAnomalyDetection = (configId) => 
-  api.get(`/anomaly/${configId}/`)
+export const authAPI = {
+  login: (username, password) => 
+    api.post('/auth/login/', { username, password }),
+  logout: () => 
+    api.post('/auth/logout/'),
+  getCurrentUser: () => 
+    api.get('/users/me/'),
+}
 
-// RCA API
-export const getRCAnalysis = (configId) => 
-  api.get(`/rca/${configId}/`)
+// ==========================================
+// 健康检查 API
+// ==========================================
 
-// Capacity Prediction API
-export const getCapacityPrediction = (configId, metric, days) => 
-  api.get(`/capacity/${configId}/predict/`, { 
-    params: { metric, days } 
-  })
+export const healthAPI = {
+  check: () => api.get('/health/'),
+}
 
-// Alert API
-export const getActiveAlerts = () => api.get('/alerts/active/')
-export const getAlertHistory = (params) => api.get('/alerts/history/', { params })
-export const getAlerts = (filters) => api.get('/alerts/', { params: filters })
-export const getAlertStatistics = () => api.get('/alerts/statistics/')
-export const acknowledgeAlert = (alertId) => api.post(`/alerts/${alertId}/acknowledge/`)
+// ==========================================
+// 数据库配置 API
+// ==========================================
 
-// Dashboard API
-export const getDashboardStats = () => api.get('/dashboard/stats/')
-export const getDashboardCharts = () => api.get('/dashboard/charts/')
+export const databaseAPI = {
+  // 获取数据库列表
+  list: () => api.get('/databases/'),
+  
+  // 获取数据库详情
+  getDetail: (id) => api.get(`/databases/${id}/`),
+  
+  // 获取数据库状态
+  getStatus: (id) => api.get(`/databases/${id}/status/`),
+  
+  // 获取数据库指标
+  getMetrics: (id, params = {}) => 
+    api.get(`/databases/${id}/metrics/`, { params }),
+  
+  // 获取基线
+  getBaseline: (id) => api.get(`/databases/${id}/baseline/`),
+  
+  // 获取预测
+  getPrediction: (id) => api.get(`/databases/${id}/prediction/`),
+  
+  // 获取健康评分
+  getHealth: (id) => api.get(`/databases/${id}/health/`),
+  
+  // 获取统计信息
+  getStats: () => api.get('/databases/stats/'),
+}
 
-// Database List API
-export const getDatabases = () => api.get('/databases/')
-export const getDatabaseStats = () => api.get('/databases/stats/')
+// ==========================================
+// 告警 API
+// ==========================================
 
-// Database Metrics API
-export const getDatabaseMetrics = (id, timeRange) => api.get(`/databases/${id}/metrics/`, { 
-  params: { time_range: timeRange } 
-})
-export const getDatabaseAlerts = (id) => api.get(`/databases/${id}/alerts/`)
+export const alertAPI = {
+  // 获取告警列表
+  list: (params = {}) => api.get('/alerts/', { params }),
+  
+  // 获取告警统计
+  getStatistics: () => api.get('/alerts/statistics/'),
+  
+  // 确认告警
+  acknowledge: (id) => api.post(`/alerts/${id}/acknowledge/`),
+  
+  // 获取数据库关联告警
+  getByDatabase: (dbId) => api.get(`/databases/${dbId}/alerts/`),
+}
 
-// Remediation API
-export const getPendingOperations = () => api.get('/remediation/pending/')
-export const approveOperation = (auditId, approver) => 
-  api.post(`/remediation/${auditId}/approve/`, { approver })
-export const rejectOperation = (auditId, reason) => 
-  api.post(`/remediation/${auditId}/reject/`, { reason })
+// ==========================================
+// 运维工单 API
+// ==========================================
 
-// Health Check API
-export const healthCheck = () => api.get('/health/')
+export const auditLogAPI = {
+  // 获取工单列表
+  list: (params = {}) => api.get('/auditlogs/', { params }),
+  
+  // 审批工单
+  approve: (id) => api.post(`/auditlogs/${id}/approve/`),
+  
+  // 拒绝工单
+  reject: (id, reason) => api.post(`/auditlogs/${id}/reject/`, { reason }),
+  
+  // 执行工单
+  execute: (id) => api.post(`/auditlogs/${id}/execute/`),
+  
+  // 预执行（验证SQL语法）
+  dryRun: (id) => api.post(`/auditlogs/${id}/dry-run/`),
+}
+
+// ==========================================
+// 用户管理 API
+// ==========================================
+
+export const userAPI = {
+  // 获取用户列表
+  list: () => api.get('/users/'),
+  
+  // 获取用户详情
+  getDetail: (id) => api.get(`/users/${id}/`),
+  
+  // 更新用户
+  update: (id, data) => api.put(`/users/${id}/`, data),
+  
+  // 修改密码
+  changePassword: (id, password) => 
+    api.put(`/users/${id}/password/`, { password }),
+  
+  // 获取当前用户
+  getCurrentUser: () => api.get('/users/me/'),
+}
+
+// ==========================================
+// 仪表盘 API
+// ==========================================
+
+export const dashboardAPI = {
+  // 获取仪表盘统计
+  getStats: () => api.get('/dashboard/stats/'),
+  
+  // 获取仪表盘图表数据
+  getCharts: () => api.get('/dashboard/charts/'),
+  
+  // 获取健康评分趋势
+  getHealthTrend: (days = 7) => 
+    api.get('/dashboard/health-trend/', { params: { days } }),
+  
+  // 获取告警趋势
+  getAlertTrend: (days = 7) => 
+    api.get('/dashboard/alert-trend/', { params: { days } }),
+}
+
+// ==========================================
+// 便捷函数
+// ==========================================
+
+export const setAuthToken = (token) => {
+  localStorage.setItem('auth_token', token)
+}
+
+export const clearAuthToken = () => {
+  localStorage.removeItem('auth_token')
+  localStorage.removeItem('user')
+}
+
+export const getAuthToken = () => {
+  return localStorage.getItem('auth_token')
+}
+
+export const setUser = (user) => {
+  localStorage.setItem('user', JSON.stringify(user))
+}
+
+export const getUser = () => {
+  const userStr = localStorage.getItem('user')
+  return userStr ? JSON.parse(userStr) : null
+}
+
+export const isAuthenticated = () => {
+  return !!localStorage.getItem('auth_token')
+}
 
 export default api

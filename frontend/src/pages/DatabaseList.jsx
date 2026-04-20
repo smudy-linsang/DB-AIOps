@@ -1,69 +1,56 @@
-import { useState, useEffect } from 'react';
-import { Link } from 'react-router-dom';
+import { useState, useEffect } from 'react'
+import { Link } from 'react-router-dom'
 import { 
   Table, Tag, Space, Button, Input, Select, Card, 
-  Typography, Tooltip, Badge, Statistic, Row, Col 
-} from 'antd';
+  Typography, Tooltip, Statistic, Row, Col, message
+} from 'antd'
 import { 
   SearchOutlined, ReloadOutlined, PlusOutlined,
   DatabaseOutlined, CheckCircleOutlined, CloseCircleOutlined,
   ClockCircleOutlined, WarningOutlined
-} from '@ant-design/icons';
-import { getDatabases, getDatabaseStats } from '../services/api';
-import dayjs from 'dayjs';
+} from '@ant-design/icons'
+import { databaseAPI } from '../services/api'
+import dayjs from 'dayjs'
 
-const { Title, Text } = Typography;
-const { Option } = Select;
+const { Title, Text } = Typography
+const { Option } = Select
 
 const DatabaseList = () => {
-  const [databases, setDatabases] = useState([]);
-  const [loading, setLoading] = useState(false);
-  const [stats, setStats] = useState({
-    total: 0,
-    active: 0,
-    error: 0,
-    warning: 0
-  });
+  const [databases, setDatabases] = useState([])
+  const [loading, setLoading] = useState(false)
   const [filters, setFilters] = useState({
     search: '',
     dbType: 'all',
     status: 'all'
-  });
+  })
 
-  const fetchData = async () => {
-    setLoading(true);
+  const fetchDatabases = async () => {
+    setLoading(true)
     try {
-      const [dbData, statsData] = await Promise.all([
-        getDatabases(),
-        getDatabaseStats()
-      ]);
-      setDatabases(dbData);
-      setStats(statsData);
+      const response = await databaseAPI.list()
+      setDatabases(response.data?.databases || [])
+      message.success('数据加载成功')
     } catch (error) {
-      console.error('获取数据失败:', error);
+      console.error('获取数据失败:', error)
+      message.error('获取数据失败')
     } finally {
-      setLoading(false);
+      setLoading(false)
     }
-  };
+  }
 
   useEffect(() => {
-    fetchData();
-  }, []);
+    fetchDatabases()
+  }, [])
 
-  const getStatusTag = (status) => {
-    const statusMap = {
-      active: { color: 'green', text: '正常', icon: <CheckCircleOutlined /> },
-      error: { color: 'red', text: '异常', icon: <CloseCircleOutlined /> },
-      warning: { color: 'orange', text: '警告', icon: <WarningOutlined /> },
-      inactive: { color: 'default', text: '离线', icon: <ClockCircleOutlined /> }
-    };
-    const config = statusMap[status] || statusMap.inactive;
-    return (
-      <Tag color={config.color} icon={config.icon}>
-        {config.text}
-      </Tag>
-    );
-  };
+  const getStatusTag = (db) => {
+    // 基于 is_active 和其他指标判断状态
+    const isActive = db.is_active !== false
+    if (!isActive) {
+      return <Tag color="default" icon={<ClockCircleOutlined />}>离线</Tag>
+    }
+    // 可以基于最新指标判断
+    return <Tag color="green" icon={<CheckCircleOutlined />}>正常</Tag>
+  }
 
   const getDbTypeTag = (type) => {
     const typeMap = {
@@ -73,23 +60,20 @@ const DatabaseList = () => {
       dm: { color: 'purple', text: 'DM达梦' },
       gbase: { color: 'cyan', text: 'GBase' },
       tdsql: { color: 'orange', text: 'TDSQL' }
-    };
-    const config = typeMap[type] || { color: 'default', text: type };
-    return <Tag color={config.color}>{config.text}</Tag>;
-  };
+    }
+    const config = typeMap[type?.toLowerCase()] || { color: 'default', text: type }
+    return <Tag color={config.color}>{config.text}</Tag>
+  }
 
   const filteredDatabases = databases.filter(db => {
-    if (filters.search && !db.name.toLowerCase().includes(filters.search.toLowerCase())) {
-      return false;
+    if (filters.search && !db.name?.toLowerCase().includes(filters.search.toLowerCase())) {
+      return false
     }
     if (filters.dbType !== 'all' && db.db_type !== filters.dbType) {
-      return false;
+      return false
     }
-    if (filters.status !== 'all' && db.status !== filters.status) {
-      return false;
-    }
-    return true;
-  });
+    return true
+  })
 
   const columns = [
     {
@@ -98,10 +82,12 @@ const DatabaseList = () => {
       key: 'name',
       render: (text, record) => (
         <Space direction="vertical" size="small">
-          <Link to={`/database/${record.id}`}>
+          <Link to={`/databases/${record.id}`}>
             <Text strong style={{ fontSize: 14 }}>{text}</Text>
           </Link>
-          <Text type="secondary" style={{ fontSize: 12 }}>{record.host}:{record.port}</Text>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            {record.host}:{record.port}
+          </Text>
         </Space>
       )
     },
@@ -114,60 +100,23 @@ const DatabaseList = () => {
     },
     {
       title: '状态',
-      dataIndex: 'status',
       key: 'status',
       width: 100,
-      render: (status) => getStatusTag(status)
+      render: (_, record) => getStatusTag(record)
     },
     {
-      title: 'CPU使用率',
-      dataIndex: 'cpu_usage',
-      key: 'cpu_usage',
-      width: 120,
-      render: (value) => {
-        let color = 'green';
-        if (value > 80) color = 'red';
-        else if (value > 60) color = 'orange';
-        return <ProgressBar value={value} color={color} />;
-      }
-    },
-    {
-      title: '内存使用率',
-      dataIndex: 'memory_usage',
-      key: 'memory_usage',
-      width: 120,
-      render: (value) => {
-        let color = 'green';
-        if (value > 85) color = 'red';
-        else if (value > 70) color = 'orange';
-        return <ProgressBar value={value} color={color} />;
-      }
-    },
-    {
-      title: '磁盘使用率',
-      dataIndex: 'disk_usage',
-      key: 'disk_usage',
-      width: 120,
-      render: (value) => {
-        let color = 'green';
-        if (value > 90) color = 'red';
-        else if (value > 75) color = 'orange';
-        return <ProgressBar value={value} color={color} />;
-      }
-    },
-    {
-      title: '活跃会话',
-      dataIndex: 'active_sessions',
-      key: 'active_sessions',
+      title: '环境',
+      dataIndex: 'environment',
+      key: 'environment',
       width: 100,
-      render: (value) => <Text>{value || 0}</Text>
+      render: (env) => env ? <Tag>{env}</Tag> : '-'
     },
     {
-      title: '最后检查',
-      dataIndex: 'last_check',
-      key: 'last_check',
+      title: '最后更新',
+      dataIndex: 'updated_at',
+      key: 'updated_at',
       width: 150,
-      render: (time) => time ? dayjs(time).format('MM-DD HH:mm:ss') : '-'
+      render: (time) => time ? dayjs(time).format('MM-DD HH:mm') : '-'
     },
     {
       title: '操作',
@@ -175,23 +124,16 @@ const DatabaseList = () => {
       width: 150,
       render: (_, record) => (
         <Space size="small">
-          <Tooltip title="查看详情">
-            <Link to={`/database/${record.id}`}>
-              <Button type="link" size="small">详情</Button>
-            </Link>
-          </Tooltip>
-          <Tooltip title="实时监控">
-            <Link to={`/database/${record.id}/monitor`}>
-              <Button type="link" size="small">监控</Button>
-            </Link>
-          </Tooltip>
+          <Link to={`/databases/${record.id}`}>
+            <Button type="link" size="small">详情</Button>
+          </Link>
         </Space>
       )
     }
-  ];
+  ]
 
   return (
-    <div className="database-list" style={{ padding: 24 }}>
+    <div className="database-list" style={{ padding: 0 }}>
       <div style={{ marginBottom: 24 }}>
         <Title level={4} style={{ marginBottom: 16 }}>
           <DatabaseOutlined /> 数据库列表
@@ -202,7 +144,7 @@ const DatabaseList = () => {
             <Card size="small">
               <Statistic 
                 title="总数据库数" 
-                value={stats.total}
+                value={databases.length}
                 prefix={<DatabaseOutlined />}
               />
             </Card>
@@ -211,7 +153,7 @@ const DatabaseList = () => {
             <Card size="small">
               <Statistic 
                 title="正常运行" 
-                value={stats.active}
+                value={databases.filter(d => d.is_active !== false).length}
                 valueStyle={{ color: '#52c41a' }}
                 prefix={<CheckCircleOutlined />}
               />
@@ -220,20 +162,18 @@ const DatabaseList = () => {
           <Col span={6}>
             <Card size="small">
               <Statistic 
-                title="异常" 
-                value={stats.error}
-                valueStyle={{ color: '#ff4d4f' }}
-                prefix={<CloseCircleOutlined />}
+                title="离线" 
+                value={databases.filter(d => d.is_active === false).length}
+                valueStyle={{ color: '#999' }}
+                prefix={<ClockCircleOutlined />}
               />
             </Card>
           </Col>
           <Col span={6}>
             <Card size="small">
               <Statistic 
-                title="警告" 
-                value={stats.warning}
-                valueStyle={{ color: '#faad14' }}
-                prefix={<WarningOutlined />}
+                title="总数据库类型" 
+                value={new Set(databases.map(d => d.db_type)).size}
               />
             </Card>
           </Col>
@@ -260,20 +200,9 @@ const DatabaseList = () => {
             <Option value="gbase">GBase</Option>
             <Option value="tdsql">TDSQL</Option>
           </Select>
-          <Select
-            value={filters.status}
-            onChange={(value) => setFilters({...filters, status: value})}
-            style={{ width: 100 }}
-          >
-            <Option value="all">全部状态</Option>
-            <Option value="active">正常</Option>
-            <Option value="warning">警告</Option>
-            <Option value="error">异常</Option>
-            <Option value="inactive">离线</Option>
-          </Select>
           <Button 
             icon={<ReloadOutlined />} 
-            onClick={fetchData}
+            onClick={fetchDatabases}
             loading={loading}
           >
             刷新
@@ -297,29 +226,7 @@ const DatabaseList = () => {
         }}
       />
     </div>
-  );
-};
+  )
+}
 
-// 简单的进度条组件
-const ProgressBar = ({ value, color }) => {
-  const style = {
-    width: '100%',
-    height: 8,
-    backgroundColor: '#f0f0f0',
-    borderRadius: 4,
-    overflow: 'hidden'
-  };
-  const fillStyle = {
-    width: `${value || 0}%`,
-    height: '100%',
-    backgroundColor: color === 'red' ? '#ff4d4f' : color === 'orange' ? '#faad14' : '#52c41a',
-    transition: 'width 0.3s'
-  };
-  return (
-    <div style={style}>
-      <div style={fillStyle} />
-    </div>
-  );
-};
-
-export default DatabaseList;
+export default DatabaseList

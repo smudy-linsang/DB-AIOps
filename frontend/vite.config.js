@@ -6,7 +6,17 @@ export default defineConfig({
   server: {
     port: 3000,
     proxy: {
+      // API 请求代理到 Django 后端
       '/api': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      // 静态文件和媒体文件
+      '/static': {
+        target: 'http://localhost:8000',
+        changeOrigin: true,
+      },
+      '/media': {
         target: 'http://localhost:8000',
         changeOrigin: true,
       }
@@ -15,5 +25,15 @@ export default defineConfig({
   build: {
     outDir: 'dist',
     sourcemap: false,
+    // 构建优化
+    rollupOptions: {
+      output: {
+        manualChunks: {
+          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
+          'vendor-antd': ['antd'],
+          'vendor-charts': ['recharts']
+        }
+      }
+    }
   }
 })

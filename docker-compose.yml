@@ -133,12 +133,15 @@ services:
       - ./frontend:/app
     ports:
       - "3000:3000"
+    environment:
+      - VITE_API_BASE_URL=http://localhost:8000
     networks:
       - dbmonitor-net
     depends_on:
-      - web
+      web:
+        condition: service_started
     command: >
-      sh -c "npm install &&
+      sh -c "cd /app && npm install &&
              npm run dev -- --host 0.0.0.0 --port 3000"
 
   # ----------------------------------------

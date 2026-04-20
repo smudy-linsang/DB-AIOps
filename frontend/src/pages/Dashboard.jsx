@@ -1,213 +1,278 @@
-import React, { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { 
-  Database, 
-  AlertTriangle, 
-  CheckCircle, 
-  TrendingUp,
-  Activity
-} from 'lucide-react'
-import { 
-  LineChart, 
-  Line, 
-  XAxis, 
-  YAxis, 
-  CartesianGrid, 
-  Tooltip, 
-  ResponsiveContainer 
+import { useState, useEffect } from 'react'
+import { Card, Row, Col, Statistic, Typography, Space, Spin, Alert } from 'antd'
+import {
+  DatabaseOutlined,
+  CheckCircleOutlined,
+  WarningOutlined,
+  CloseCircleOutlined,
+  RiseOutlined,
+  FallOutlined,
+  ReloadOutlined,
+  Button
+} from '@ant-design/icons'
+import {
+  LineChart, Line, AreaChart, Area, XAxis, YAxis,
+  CartesianGrid, Tooltip, ResponsiveContainer, Legend
 } from 'recharts'
-import { getDatabaseList, getActiveAlerts, getMonitorLogs } from '../services/api'
+import { healthAPI, databaseAPI, alertAPI } from '../services/api'
+import dayjs from 'dayjs'
 
-function Dashboard() {
-  const [databases, setDatabases] = useState([])
-  const [alerts, setAlerts] = useState([])
+const { Title, Text } = Typography
+
+const Dashboard = () => {
   const [loading, setLoading] = useState(true)
-  const [error, setError] = useState(null)
+  const [healthData, setHealthData] = useState(null)
+  const [dbStats, setDbStats] = useState({
+    total: 0,
+    active: 0,
+    warning: 0,
+    error: 0
+  })
+  const [alertStats, setAlertStats] = useState({
+    critical: 0,
+    warning: 0,
+    total: 0
+  })
+  const [trendData, setTrendData] = useState([])
 
-  useEffect(() => {
-    loadDashboardData()
-  }, [])
-
-  const loadDashboardData = async () => {
+  const fetchDashboardData = async () => {
+    setLoading(true)
     try {
-      setLoading(true)
-      const [dbRes, alertRes] = await Promise.all([
-        getDatabaseList(),
-        getActiveAlerts()
+      // 并行获取数据
+      const [health, dbList, alerts] = await Promise.all([
+        healthAPI.check().catch(() => null),
+        databaseAPI.list().catch(() => ({ data: [] })),
+        alertAPI.list({ limit: 100 }).catch(() => ({ data: [] }))
       ])
-      setDatabases(dbRes.data)
-      setAlerts(alertRes.data)
-      setError(null)
-    } catch (err) {
-      setError('Failed to load dashboard data')
-      console.error(err)
+
+      // 处理健康检查数据
+      if (health) {
+        setHealthData(health)
+      }
+
+      // 处理数据库统计
+      const databases = dbList.data?.databases || []
+      setDbStats({
+        total: databases.length,
+        active: databases.filter(db => db.is_active).length,
+        warning: 0, // 需要基于实际状态计算
+        error: 0
+      })
+
+      // 处理告警统计
+      const alertList = alerts.data?.alerts || []
+      setAlertStats({
+        critical: alertList.filter(a => a.severity === 'critical').length,
+        warning: alertList.filter(a => a.severity === 'warning').length,
+        total: alertList.length
+      })
+
+      // 生成趋势数据（模拟）
+      const now = dayjs()
+      const mockTrend = Array.from({ length: 24 }, (_, i) => ({
+        time: now.subtract(23 - i, 'hour').format('HH:mm'),
+        cpu: 30 + Math.random() * 40,
+        memory: 40 + Math.random() * 30,
+        alerts: Math.floor(Math.random() * 5)
+      }))
+      setTrendData(mockTrend)
+
+    } catch (error) {
+      console.error('获取仪表盘数据失败:', error)
     } finally {
       setLoading(false)
     }
   }
 
-  const getStatusStats = () => {
-    const healthy = databases.filter(db => db.status === 'healthy').length
-    const warning = databases.filter(db => db.status === 'warning').length
-    const error = databases.filter(db => db.status === 'error').length
-    return { healthy, warning, error }
-  }
+  useEffect(() => {
+    fetchDashboardData()
+    // 定时刷新
+    const interval = setInterval(fetchDashboardData, 60000)
+    return () => clearInterval(interval)
+  }, [])
 
-  const stats = getStatusStats()
-
-  if (loading) {
-    return <div className="loading">Loading dashboard...</div>
-  }
-
-  if (error) {
-    return <div className="error-message">{error}</div>
+  if (loading && !healthData) {
+    return (
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: 400 }}>
+        <Spin size="large" tip="加载仪表盘数据..." />
+      </div>
+    )
   }
 
   return (
     <div className="dashboard">
-      <h1 className="page-title">Dashboard</h1>
-      
-      <div className="stats-grid">
-        <div className="stat-card">
-          <div className="stat-card-title">
-            <Database size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-            Total Databases
-          </div>
-          <div className="stat-card-value">{databases.length}</div>
-          <div className="stat-card-subtitle">Monitored instances</div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-card-title">
-            <CheckCircle size={16} style={{ marginRight: 8, verticalAlign: 'middle', color: '#52c41a' }} />
-            Healthy
-          </div>
-          <div className="stat-card-value" style={{ color: '#52c41a' }}>{stats.healthy}</div>
-          <div className="stat-card-subtitle">Operating normally</div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-card-title">
-            <AlertTriangle size={16} style={{ marginRight: 8, verticalAlign: 'middle', color: '#faad14' }} />
-            Warnings
-          </div>
-          <div className="stat-card-value" style={{ color: '#faad14' }}>{stats.warning}</div>
-          <div className="stat-card-subtitle">Need attention</div>
-        </div>
-        
-        <div className="stat-card">
-          <div className="stat-card-title">
-            <Activity size={16} style={{ marginRight: 8, verticalAlign: 'middle', color: '#ff4d4f' }} />
-            Active Alerts
-          </div>
-          <div className="stat-card-value" style={{ color: '#ff4d4f' }}>{alerts.length}</div>
-          <div className="stat-card-subtitle">Require action</div>
-        </div>
+      <div style={{ marginBottom: 24, display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+        <Title level={4} style={{ margin: 0 }}>数据库监控仪表盘</Title>
+        <Button icon={<ReloadOutlined />} onClick={fetchDashboardData} loading={loading}>
+          刷新
+        </Button>
       </div>
 
-      <div className="charts-grid">
-        <div className="chart-card">
-          <h3 className="chart-card-title">
-            <TrendingUp size={16} style={{ marginRight: 8, verticalAlign: 'middle' }} />
-            System Overview
-          </h3>
-          <div className="metric-chart">
-            <ResponsiveContainer width="100%" height={250}>
-              <LineChart data={[
-                { time: '00:00', cpu: 45, memory: 62 },
-                { time: '04:00', cpu: 38, memory: 58 },
-                { time: '08:00', cpu: 65, memory: 72 },
-                { time: '12:00', cpu: 78, memory: 85 },
-                { time: '16:00', cpu: 72, memory: 80 },
-                { time: '20:00', cpu: 55, memory: 68 },
-              ]}>
+      {/* 健康状态提示 */}
+      {healthData && (
+        <Alert
+          message={`系统状态: ${healthData.status === 'healthy' ? '正常' : '异常'}`}
+          description={`活跃数据库: ${healthData.metrics?.active_databases || 0}, 活跃告警: ${healthData.metrics?.active_alerts || 0}`}
+          type={healthData.status === 'healthy' ? 'success' : 'error'}
+          showIcon
+          style={{ marginBottom: 16 }}
+        />
+      )}
+
+      {/* 统计卡片 */}
+      <Row gutter={16} style={{ marginBottom: 24 }}>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="数据库总数"
+              value={dbStats.total}
+              prefix={<DatabaseOutlined />}
+              valueStyle={{ color: '#1890ff' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="正常运行"
+              value={dbStats.active}
+              prefix={<CheckCircleOutlined />}
+              valueStyle={{ color: '#52c41a' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="严重告警"
+              value={alertStats.critical}
+              prefix={<CloseCircleOutlined />}
+              valueStyle={{ color: '#ff4d4f' }}
+            />
+          </Card>
+        </Col>
+        <Col span={6}>
+          <Card size="small">
+            <Statistic
+              title="警告"
+              value={alertStats.warning}
+              prefix={<WarningOutlined />}
+              valueStyle={{ color: '#faad14' }}
+            />
+          </Card>
+        </Col>
+      </Row>
+
+      {/* 趋势图表 */}
+      <Row gutter={16}>
+        <Col span={12}>
+          <Card title="CPU/内存使用率趋势" size="small">
+            <ResponsiveContainer width="100%" height={300}>
+              <AreaChart data={trendData}>
+                <CartesianGrid strokeDasharray="3 3" />
+                <XAxis dataKey="time" />
+                <YAxis domain={[0, 100]} />
+                <Tooltip />
+                <Legend />
+                <Area
+                  type="monotone"
+                  dataKey="cpu"
+                  name="CPU %"
+                  stroke="#1890ff"
+                  fill="#1890ff"
+                  fillOpacity={0.3}
+                />
+                <Area
+                  type="monotone"
+                  dataKey="memory"
+                  name="内存 %"
+                  stroke="#722ed1"
+                  fill="#722ed1"
+                  fillOpacity={0.3}
+                />
+              </AreaChart>
+            </ResponsiveContainer>
+          </Card>
+        </Col>
+        <Col span={12}>
+          <Card title="告警趋势" size="small">
+            <ResponsiveContainer width="100%" height={300}>
+              <LineChart data={trendData}>
                 <CartesianGrid strokeDasharray="3 3" />
                 <XAxis dataKey="time" />
                 <YAxis />
                 <Tooltip />
-                <Line type="monotone" dataKey="cpu" stroke="#1890ff" strokeWidth={2} name="CPU %" />
-                <Line type="monotone" dataKey="memory" stroke="#52c41a" strokeWidth={2} name="Memory %" />
+                <Legend />
+                <Line
+                  type="monotone"
+                  dataKey="alerts"
+                  name="告警数"
+                  stroke="#ff4d4f"
+                  strokeWidth={2}
+                  dot={false}
+                />
               </LineChart>
             </ResponsiveContainer>
-          </div>
-        </div>
+          </Card>
+        </Col>
+      </Row>
 
-        <div className="chart-card">
-          <h3 className="chart-card-title">Database Status</h3>
-          <div style={{ display: 'flex', gap: 24, justifyContent: 'center', padding: '40px 0' }}>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                width: 100, 
-                height: 100, 
-                borderRadius: '50%', 
-                background: `conic-gradient(#52c41a ${stats.healthy/databases.length*360}deg, #e8e8e8 0deg)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px'
-              }}>
-                <span style={{ fontSize: 24, fontWeight: 600 }}>{stats.healthy}</span>
-              </div>
-              <span style={{ color: '#52c41a', fontWeight: 500 }}>Healthy</span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                width: 100, 
-                height: 100, 
-                borderRadius: '50%', 
-                background: `conic-gradient(#faad14 ${stats.warning/databases.length*360}deg, #e8e8e8 0deg)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px'
-              }}>
-                <span style={{ fontSize: 24, fontWeight: 600 }}>{stats.warning}</span>
-              </div>
-              <span style={{ color: '#faad14', fontWeight: 500 }}>Warning</span>
-            </div>
-            <div style={{ textAlign: 'center' }}>
-              <div style={{ 
-                width: 100, 
-                height: 100, 
-                borderRadius: '50%', 
-                background: `conic-gradient(#ff4d4f ${stats.error/databases.length*360}deg, #e8e8e8 0deg)`,
-                display: 'flex',
-                alignItems: 'center',
-                justifyContent: 'center',
-                margin: '0 auto 16px'
-              }}>
-                <span style={{ fontSize: 24, fontWeight: 600 }}>{stats.error}</span>
-              </div>
-              <span style={{ color: '#ff4d4f', fontWeight: 500 }}>Error</span>
-            </div>
-          </div>
-        </div>
-      </div>
-
-      {alerts.length > 0 && (
-        <div className="chart-card" style={{ marginTop: 24 }}>
-          <h3 className="chart-card-title">
-            <AlertTriangle size={16} style={{ marginRight: 8, verticalAlign: 'middle', color: '#ff4d4f' }} />
-            Recent Alerts
-          </h3>
-          <div className="alert-list">
-            {alerts.slice(0, 5).map((alert, idx) => (
-              <div key={idx} className="alert-item">
-                <div className={`alert-icon ${alert.severity}`}>
-                  <AlertTriangle size={20} />
-                </div>
-                <div className="alert-content">
-                  <div className="alert-title">{alert.title}</div>
-                  <div className="alert-time">{alert.created_at}</div>
-                </div>
-                <span className={`status-badge ${alert.severity}`}>
-                  {alert.severity}
-                </span>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
+      {/* 性能指标 */}
+      <Row gutter={16} style={{ marginTop: 16 }}>
+        <Col span={24}>
+          <Card title="实时性能指标" size="small">
+            <Row gutter={16}>
+              <Col span={4}>
+                <Statistic
+                  title="平均CPU"
+                  value={trendData.length > 0 ? (trendData.reduce((a, b) => a + b.cpu, 0) / trendData.length).toFixed(1) : 0}
+                  suffix="%"
+                  precision={1}
+                  valueStyle={{ color: '#1890ff' }}
+                  prefix={<DatabaseOutlined />}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="平均内存"
+                  value={trendData.length > 0 ? (trendData.reduce((a, b) => a + b.memory, 0) / trendData.length).toFixed(1) : 0}
+                  suffix="%"
+                  precision={1}
+                  valueStyle={{ color: '#722ed1' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="总数据库"
+                  value={dbStats.total}
+                  valueStyle={{ color: '#1890ff' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="活跃告警"
+                  value={alertStats.total}
+                  valueStyle={{ color: alertStats.critical > 0 ? '#ff4d4f' : '#52c41a' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="系统状态"
+                  value={healthData?.status === 'healthy' ? '正常' : '异常'}
+                  valueStyle={{ color: healthData?.status === 'healthy' ? '#52c41a' : '#ff4d4f' }}
+                />
+              </Col>
+              <Col span={4}>
+                <Statistic
+                  title="最后更新"
+                  value={dayjs().format('HH:mm:ss')}
+                  valueStyle={{ fontSize: 16 }}
+                />
+              </Col>
+            </Row>
+          </Card>
+        </Col>
+      </Row>
     </div>
   )
 }
