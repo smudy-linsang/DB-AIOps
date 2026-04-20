@@ -54,8 +54,8 @@ class CycleDetector:
         if len(positive_freqs_idx) == 0:
             return {'has_weekly': False, 'has_monthly': False, 'dominant_period': None, 'all_periods': []}
 
-        # Calculate periods
-        periods = n / freqs[positive_freqs_idx]
+        # Calculate periods (period = 1/frequency, where frequency = k/n)
+        periods = 1.0 / freqs[positive_freqs_idx]
         period_amplitudes = amplitudes[positive_freqs_idx]
 
         # Filter to valid period range
