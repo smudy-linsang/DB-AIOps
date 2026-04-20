@@ -202,6 +202,7 @@ def get_audit_detail(request, audit_id):
 def execute_operation(request, audit_id):
     """执行操作"""
     from monitor.auto_remediation_engine import AutoRemediationEngine
+    from monitor.db_connector import get_db_connection, close_db_connection
     
     if request.method != 'POST':
         return JsonResponse({'success': False, 'message': '仅支持 POST 请求'}, status=405)
@@ -211,18 +212,48 @@ def execute_operation(request, audit_id):
     except AuditLog.DoesNotExist:
         return JsonResponse({'success': False, 'message': '审计记录不存在'}, status=404)
     
+    # 检查状态
+    if audit.status != 'approved':
+        return JsonResponse({
+            'success': False, 
+            'message': f"操作状态为 '{audit.status}'，只能执行已批准的工单"
+        }, status=400)
+    
     # 获取执行人
     executor = request.user.username if request.user.is_authenticated else 'system'
     
-    # 获取数据库连接
+    # 获取数据库连接并执行
+    conn = None
     try:
+        conn = get_db_connection(audit.config)
         engine = AutoRemediationEngine(audit.config)
-        # 注意：实际执行需要数据库连接，这里简化处理
-        # 完整实现需要建立数据库连接并调用 engine.execute_operation
-        success, message = True, "执行功能已就绪，请确保操作已批准"
-        return JsonResponse({'success': success, 'message': message})
+        success, message = engine.execute_operation(
+            audit_id=audit_id,
+            executor=executor,
+            db_connection=conn
+        )
+        
+        # 刷新审计记录获取最新状态
+        audit.refresh_from_db()
+        
+        return JsonResponse({
+            'success': success,
+            'message': message,
+            'execution_result': audit.execution_result or message,
+            'status': audit.status
+        })
     except Exception as e:
+        # 执行失败
+        try:
+            audit.status = 'failed'
+            audit.execution_result = f"执行异常: {str(e)}"
+            audit.save()
+        except:
+            pass
         return JsonResponse({'success': False, 'message': f'执行异常: {e}'})
+    finally:
+        if conn:
+            close_db_connection(conn)
 DB_TYPE_CHOICES = [('oracle', 'Oracle'), ('mysql', 'MySQL'), ('pgsql', 'PostgreSQL'), ('dm', 'DM8'), ('gbase', 'Gbase 8a'), ('tdsql', 'TDSQL')]
 DEFAULT_PORTS = {'oracle': 1521, 'mysql': 3306, 'pgsql': 5432, 'dm': 5236, 'gbase': 5050, 'tdsql': 3306}
 def db_list(request):

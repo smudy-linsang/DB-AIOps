@@ -666,6 +666,201 @@ class AuditLogRejectView(JSONResponseMixin, View):
         })
 
 
+class AuditLogExecuteView(JSONResponseMixin, View):
+    """工单执行 API - 实际执行已批准的SQL操作"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request, audit_id: int):
+        """
+        POST /api/v1/auditlogs/{id}/execute/
+        执行已批准的工单
+        
+        返回:
+            {
+                'status': 'success' | 'failed',
+                'message': str,
+                'execution_result': str,
+                'affected_rows': int
+            }
+        """
+        from monitor.db_connector import get_db_connection, close_db_connection
+        from monitor.auto_remediation_engine import AutoRemediationEngine
+        
+        try:
+            # 1. 获取审计记录
+            audit_log = AuditLog.objects.get(id=audit_id)
+        except AuditLog.DoesNotExist:
+            return self.error_response('Audit log not found', 404)
+        
+        # 2. RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 3. 检查状态
+        if audit_log.status != 'approved':
+            return self.error_response(
+                f"操作状态为 '{audit_log.status}'，只能执行已批准的工单",
+                400
+            )
+        
+        # 4. 获取数据库配置
+        config = audit_log.config
+        
+        # 5. 获取数据库连接
+        conn = None
+        try:
+            conn = get_db_connection(config)
+        except Exception as e:
+            audit_log.status = 'failed'
+            audit_log.execution_result = f"数据库连接失败: {str(e)}"
+            audit_log.save()
+            return self.json_response({
+                'status': 'failed',
+                'message': '数据库连接失败',
+                'execution_result': str(e)
+            }, status=500)
+        
+        # 6. 执行操作
+        try:
+            # 使用 AutoRemediationEngine 执行
+            engine = AutoRemediationEngine(config)
+            success, message = engine.execute_operation(
+                audit_id=audit_id,
+                executor=request.user.username,
+                db_connection=conn
+            )
+            
+            # 7. 更新审计记录
+            audit_log.refresh_from_db()  # 刷新获取最新状态
+            
+            return self.json_response({
+                'status': 'success' if success else 'failed',
+                'message': message,
+                'execution_result': audit_log.execution_result or message,
+                'audit_id': audit_id,
+                'new_status': audit_log.status
+            })
+            
+        except Exception as e:
+            # 执行失败
+            audit_log.status = 'failed'
+            audit_log.execution_result = f"执行异常: {str(e)}"
+            audit_log.save()
+            
+            return self.json_response({
+                'status': 'failed',
+                'message': '执行异常',
+                'execution_result': str(e),
+                'audit_id': audit_id
+            }, status=500)
+            
+        finally:
+            # 8. 关闭连接
+            close_db_connection(conn)
+
+
+class AuditLogExecuteDryRunView(JSONResponseMixin, View):
+    """工单预执行API - 仅验证SQL语法不实际执行"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def post(self, request, audit_id: int):
+        """
+        POST /api/v1/auditlogs/{id}/dry-run/
+        预执行工单（仅验证SQL语法）
+        
+        返回:
+            {
+                'status': 'valid' | 'invalid',
+                'message': str,
+                'sql_preview': str
+            }
+        """
+        from monitor.db_connector import get_db_connection, close_db_connection
+        
+        try:
+            audit_log = AuditLog.objects.get(id=audit_id)
+        except AuditLog.DoesNotExist:
+            return self.error_response('Audit log not found', 404)
+        
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 获取数据库连接
+        config = audit_log.config
+        conn = None
+        try:
+            conn = get_db_connection(config)
+        except Exception as e:
+            return self.json_response({
+                'status': 'invalid',
+                'message': f"数据库连接失败: {str(e)}",
+                'sql_preview': audit_log.sql_command
+            })
+        
+        try:
+            cursor = conn.cursor()
+            
+            # 解析SQL命令
+            sql_commands = []
+            for line in audit_log.sql_command.split(';'):
+                line = line.strip()
+                if line and not line.startswith('--'):
+                    sql_commands.append(line)
+            
+            # 尝试解析每条SQL（不执行）
+            parsed = []
+            for sql in sql_commands:
+                try:
+                    # 使用 EXPLAIN 或 DESCRIBE 验证语法
+                    db_type = config.db_type.lower()
+                    if db_type == 'oracle':
+                        test_sql = f"EXPLAIN PLAN FOR {sql}"
+                    elif db_type in ['mysql', 'gbase', 'tdsql']:
+                        test_sql = f"EXPLAIN {sql}"
+                    elif db_type in ['pgsql', 'postgresql']:
+                        test_sql = f"EXPLAIN {sql}"
+                    else:
+                        test_sql = sql
+                    
+                    cursor.execute(test_sql)
+                    parsed.append({'sql': sql, 'status': 'valid'})
+                except Exception as e:
+                    parsed.append({'sql': sql, 'status': 'invalid', 'error': str(e)})
+            
+            cursor.close()
+            
+            all_valid = all(p['status'] == 'valid' for p in parsed)
+            
+            return self.json_response({
+                'status': 'valid' if all_valid else 'invalid',
+                'message': '所有SQL语法验证通过' if all_valid else '部分SQL语法验证失败',
+                'sql_preview': audit_log.sql_command,
+                'parsed_commands': parsed
+            })
+            
+        except Exception as e:
+            return self.json_response({
+                'status': 'invalid',
+                'message': f"预执行失败: {str(e)}",
+                'sql_preview': audit_log.sql_command
+            })
+        finally:
+            close_db_connection(conn)
+
+
 # =============================================================================
 # API 路由映射（供 urls.py 使用）
 # =============================================================================
@@ -683,4 +878,6 @@ api_views = {
     'auditlog_list': AuditLogListView.as_view,
     'auditlog_approve': AuditLogApproveView.as_view,
     'auditlog_reject': AuditLogRejectView.as_view,
+    'auditlog_execute': AuditLogExecuteView.as_view,
+    'auditlog_dry_run': AuditLogExecuteDryRunView.as_view,
 }

@@ -34,6 +34,8 @@ from monitor.api_views import (
     AuditLogListView,
     AuditLogApproveView,
     AuditLogRejectView,
+    AuditLogExecuteView,
+    AuditLogExecuteDryRunView,
 )
 
 urlpatterns = [
@@ -62,6 +64,8 @@ urlpatterns = [
     path('api/v1/auditlogs/', AuditLogListView.as_view(), name='api_v1_auditlog_list'),
     path('api/v1/auditlogs/<int:audit_id>/approve/', AuditLogApproveView.as_view(), name='api_v1_auditlog_approve'),
     path('api/v1/auditlogs/<int:audit_id>/reject/', AuditLogRejectView.as_view(), name='api_v1_auditlog_reject'),
+    path('api/v1/auditlogs/<int:audit_id>/execute/', AuditLogExecuteView.as_view(), name='api_v1_auditlog_execute'),
+    path('api/v1/auditlogs/<int:audit_id>/dry-run/', AuditLogExecuteDryRunView.as_view(), name='api_v1_auditlog_dry_run'),
     # ========== END REST API v1 ==========
 
     # API 接口（旧版，兼容）
