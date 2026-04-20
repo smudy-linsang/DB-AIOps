@@ -122,6 +122,26 @@ services:
              python manage.py runserver 0.0.0.0:8000"
 
   # ----------------------------------------
+  # React Frontend (Vite dev server)
+  # Host port: 3000
+  # ----------------------------------------
+  frontend:
+    image: node:18-alpine
+    container_name: dbmonitor-frontend
+    working_dir: /app
+    volumes:
+      - ./frontend:/app
+    ports:
+      - "3000:3000"
+    networks:
+      - dbmonitor-net
+    depends_on:
+      - web
+    command: >
+      sh -c "npm install &&
+             npm run dev -- --host 0.0.0.0 --port 3000"
+
+  # ----------------------------------------
   # APScheduler / Celery Worker (Optional)
   # ----------------------------------------
   # celery-worker:
