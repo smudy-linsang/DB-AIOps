@@ -478,6 +478,38 @@ class OracleChecker(BaseDBChecker):
             pga_used_mb = float(cursor.fetchone()[0])
         except:
             pga_used_mb = 0
+        
+        # 命中率统计
+        try:
+            cursor.execute("""
+                SELECT 
+                    ROUND((1 - physical_reads / (session_logical_reads + 1)) * 100, 2) as buffer_hit_ratio
+                FROM v$sysstat WHERE name = 'session logical reads'
+            """)
+            buffer_hit_ratio = float(cursor.fetchone()[0])
+        except:
+            buffer_hit_ratio = 0
+        
+        try:
+            cursor.execute("""
+                SELECT ROUND(SUM(pins) / DECODE(SUM(pins) + SUM(reloads), 0, 1, SUM(pins) + SUM(reloads)) * 100, 2)
+                FROM v$librarycache
+            """)
+            library_cache_hit_ratio = float(cursor.fetchone()[0])
+        except:
+            library_cache_hit_ratio = 0
+        
+        # CPU和DB Time
+        try:
+            cursor.execute("SELECT value FROM v$sys_time_model WHERE stat_name = 'DB CPU'")
+            cpu_used_seconds = int(cursor.fetchone()[0]) / 1000000
+        except:
+            cpu_used_seconds = 0
+        try:
+            cursor.execute("SELECT value FROM v$sys_time_model WHERE stat_name = 'DB time'")
+            db_time_seconds = int(cursor.fetchone()[0]) / 1000000
+        except:
+            db_time_seconds = 0
 
         # =============================================
         # 9. 事务统计 (transaction) - P1
@@ -487,6 +519,93 @@ class OracleChecker(BaseDBChecker):
         
         cursor.execute("SELECT COUNT(DISTINCT s.sid) FROM gv$session s WHERE s.row_wait_obj# != -1")
         row_lock_contention = int(cursor.fetchone()[0])
+        
+        cursor.execute("SELECT value FROM v$sysstat WHERE name = 'user commits'")
+        try:
+            committed_transactions = int(cursor.fetchone()[0])
+        except:
+            committed_transactions = 0
+        cursor.execute("SELECT value FROM v$sysstat WHERE name = 'user rollbacks'")
+        try:
+            rolled_back_transactions = int(cursor.fetchone()[0])
+        except:
+            rolled_back_transactions = 0
+
+        # =============================================
+        # 9.5 对象统计 (object) - P2补全
+        # =============================================
+        # 表数量
+        cursor.execute("SELECT COUNT(*) FROM dba_tables WHERE owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')")
+        try:
+            table_count = int(cursor.fetchone()[0])
+        except:
+            table_count = 0
+        
+        # 索引数量
+        cursor.execute("SELECT COUNT(*) FROM dba_indexes WHERE owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')")
+        try:
+            index_count = int(cursor.fetchone()[0])
+        except:
+            index_count = 0
+        
+        # Top 20 表大小
+        cursor.execute("""
+            SELECT owner, segment_name, ROUND(SUM(bytes)/1024/1024, 2) as size_mb
+            FROM dba_segments
+            WHERE segment_type = 'TABLE'
+              AND owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')
+            GROUP BY owner, segment_name
+            ORDER BY size_mb DESC
+            FETCH FIRST 20 ROWS ONLY
+        """)
+        table_size_top20 = []
+        for row in cursor.fetchall():
+            table_size_top20.append({
+                "owner": row[0],
+                "table_name": row[1],
+                "size_mb": float(row[2])
+            })
+        
+        # Top 20 索引大小
+        cursor.execute("""
+            SELECT owner, index_name, ROUND(SUM(bytes)/1024/1024, 2) as size_mb
+            FROM dba_segments
+            WHERE segment_type = 'INDEX'
+              AND owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')
+            GROUP BY owner, index_name
+            ORDER BY size_mb DESC
+            FETCH FIRST 20 ROWS ONLY
+        """)
+        index_size_top20 = []
+        for row in cursor.fetchall():
+            index_size_top20.append({
+                "owner": row[0],
+                "index_name": row[1],
+                "size_mb": float(row[2])
+            })
+        
+        # 统计信息过期对象
+        cursor.execute("""
+            SELECT owner, table_name, stale_stats
+            FROM dba_tab_statistics
+            WHERE stale_stats = 'YES'
+              AND owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')
+            FETCH FIRST 20 ROWS ONLY
+        """)
+        stale_statistics = []
+        for row in cursor.fetchall():
+            stale_statistics.append({
+                "owner": row[0],
+                "table_name": row[1],
+                "stale_stats": row[2]
+            })
+        
+        # 分区数量
+        cursor.execute("SELECT COUNT(*) FROM dba_part_tables WHERE owner NOT IN ('SYS', 'SYSTEM')")
+        try:
+            partition_count = int(cursor.fetchone()[0])
+        except:
+            partition_count = 0
 
         # =============================================
         # 10. 复制与集群 (replication) - P1
@@ -626,10 +745,24 @@ class OracleChecker(BaseDBChecker):
             "java_pool_mb": java_pool_mb,
             "large_pool_mb": large_pool_mb,
             "pga_used_mb": pga_used_mb,
+            "buffer_hit_ratio": buffer_hit_ratio,
+            "library_cache_hit_ratio": library_cache_hit_ratio,
+            "cpu_used_seconds": cpu_used_seconds,
+            "db_time_seconds": db_time_seconds,
             
             # 事务
             "active_transactions": active_transactions,
             "row_lock_contention": row_lock_contention,
+            "committed_transactions": committed_transactions,
+            "rolled_back_transactions": rolled_back_transactions,
+            
+            # 对象统计
+            "table_count": table_count,
+            "index_count": index_count,
+            "table_size_top20": table_size_top20,
+            "index_size_top20": index_size_top20,
+            "stale_statistics": stale_statistics,
+            "partition_count": partition_count,
             
             # 复制集群
             "rac_instance_count": rac_instance_count,
@@ -1023,12 +1156,17 @@ class MySQLChecker(BaseDBChecker):
                 seconds_behind_master = int(slave_status['Seconds_Behind_Master']) if slave_status and slave_status['Seconds_Behind_Master'] is not None else -1
                 relay_log_space = int(slave_status['Relay_Log_Space']) if slave_status else 0
                 slave_last_error = slave_status['Last_Error'] if slave_status else 'N/A'
+                # 主从复制位置信息
+                master_log_file = slave_status['Master_Log_File'] if slave_status else 'N/A'
+                read_master_log_pos = slave_status['Read_Master_Log_Pos'] if slave_status else 0
             except:
                 slave_io_running = 'NO'
                 slave_sql_running = 'NO'
                 seconds_behind_master = -1
                 relay_log_space = 0
                 slave_last_error = 'N/A'
+                master_log_file = 'N/A'
+                read_master_log_pos = 0
             
             cursor.execute("SHOW VARIABLES LIKE 'gtid_mode'")
             try:
@@ -1111,6 +1249,84 @@ class MySQLChecker(BaseDBChecker):
             except:
                 have_ssl = 'DISABLED'
 
+            # =============================================
+            # 14. 对象统计 (object) - P2补全
+            # =============================================
+            # Top 20 表大小
+            cursor.execute("""
+                SELECT 
+                    table_schema, table_name,
+                    ROUND(SUM(data_length + index_length) / 1024 / 1024, 2) as size_mb,
+                    table_rows
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+                GROUP BY table_schema, table_name, table_rows
+                ORDER BY size_mb DESC
+                LIMIT 20
+            """)
+            table_size_top20 = []
+            for row in cursor.fetchall():
+                table_size_top20.append({
+                    "schema": row[0],
+                    "table_name": row[1],
+                    "size_mb": float(row[2]),
+                    "rows": int(row[3]) if row[3] else 0
+                })
+            
+            # 未使用索引
+            unused_indexes = []
+            try:
+                cursor.execute("""
+                    SELECT object_schema, object_name, index_name
+                    FROM performance_schema.table_io_waits_summary_by_index_usage
+                    WHERE index_name IS NOT NULL
+                    GROUP BY object_schema, object_name, index_name
+                    HAVING SUM(count_star) = 0
+                    LIMIT 20
+                """)
+                for row in cursor.fetchall():
+                    unused_indexes.append({
+                        "schema": row[0],
+                        "table": row[1],
+                        "index": row[2]
+                    })
+            except:
+                pass
+            
+            # 冗余索引
+            redundant_indexes = []
+            try:
+                cursor.execute("""
+                    SELECT TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+                    FROM information_schema.STATISTICS
+                    WHERE SEQ_IN_INDEX = 1
+                    GROUP BY TABLE_SCHEMA, TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX
+                    HAVING COUNT(*) > 1
+                    LIMIT 20
+                """)
+                for row in cursor.fetchall():
+                    redundant_indexes.append({
+                        "schema": row[0],
+                        "table": row[1],
+                        "index": row[2]
+                    })
+            except:
+                pass
+            
+            # 表数量统计
+            cursor.execute("""
+                SELECT table_schema, COUNT(*) as table_count
+                FROM information_schema.tables
+                WHERE table_schema NOT IN ('information_schema', 'mysql', 'performance_schema', 'sys')
+                GROUP BY table_schema
+            """)
+            table_count_by_schema = []
+            for row in cursor.fetchall():
+                table_count_by_schema.append({
+                    "schema": row[0],
+                    "count": int(row[1])
+                })
+
         return {
             # 基础信息
             "version": version[:50] + "...",
@@ -1178,6 +1394,8 @@ class MySQLChecker(BaseDBChecker):
             "relay_log_space": relay_log_space,
             "slave_last_error": slave_last_error,
             "gtid_mode": gtid_mode,
+            "master_log_file": master_log_file,
+            "read_master_log_pos": read_master_log_pos,
             
             # 配置参数
             "config_params": config_params,
@@ -1198,7 +1416,13 @@ class MySQLChecker(BaseDBChecker):
             
             # 安全审计
             "max_used_connections": max_used_connections,
-            "have_ssl": have_ssl
+            "have_ssl": have_ssl,
+            
+            # 对象统计
+            "table_size_top20": table_size_top20,
+            "unused_indexes": unused_indexes,
+            "redundant_indexes": redundant_indexes,
+            "table_count_by_schema": table_count_by_schema
         }
 
 
@@ -1582,6 +1806,100 @@ class PostgreSQLChecker(BaseDBChecker):
         wal_level = cur.fetchone()[0]
         cur.execute("SHOW max_wal_senders")
         max_wal_senders = int(cur.fetchone()[0])
+        
+        # WAL延迟
+        try:
+            cur.execute("""
+                SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(),
+                       pg_last_wal_receive_lsn() - pg_last_wal_replay_lsn() as replication_lag
+            """)
+            lag_info = cur.fetchone()
+            last_wal_receive_lsn = str(lag_info[0]) if lag_info[0] else 'N/A'
+            last_wal_replay_lsn = str(lag_info[1]) if lag_info[1] else 'N/A'
+            wal_lag = lag_info[2] if lag_info[2] else 0
+        except:
+            last_wal_receive_lsn = last_wal_replay_lsn = 'N/A'
+            wal_lag = 0
+        
+        # 复制类型
+        try:
+            cur.execute("""
+                SELECT replication_type
+                FROM pg_stat_replication
+                LIMIT 1
+            """)
+            physical_replication_type = cur.fetchone()[0] if cur.fetchone() else 'N/A'
+        except:
+            physical_replication_type = 'N/A'
+
+        # =============================================
+        # 9.5 对象统计 (object) - P2补全
+        # =============================================
+        # Top 20 表大小
+        cur.execute("""
+            SELECT schemaname, tablename, 
+                   pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size_pretty,
+                   pg_total_relation_size(schemaname||'.'||tablename) as size_bytes
+            FROM pg_stat_user_tables
+            ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+            LIMIT 20
+        """)
+        table_size_top20 = []
+        for row in cur.fetchall():
+            table_size_top20.append({
+                "schema": row[0],
+                "table": row[1],
+                "size_pretty": row[2],
+                "size_bytes": int(row[3])
+            })
+        
+        # 未使用索引
+        unused_indexes = []
+        try:
+            cur.execute("""
+                SELECT schemaname, tablename, indexname
+                FROM pg_stat_user_indexes
+                WHERE idx_scan = 0
+                ORDER BY schemaname, tablename
+                LIMIT 20
+            """)
+            for row in cur.fetchall():
+                unused_indexes.append({
+                    "schema": row[0],
+                    "table": row[1],
+                    "index": row[2]
+                })
+        except:
+            pass
+        
+        # 需要VACUUM的表
+        tables_needing_vacuum = []
+        try:
+            cur.execute("""
+                SELECT schemaname, tablename, n_dead_tup, n_live_tup,
+                       ROUND(n_dead_tup::float / NULLIF(n_live_tup + n_dead_tup, 0) * 100, 2) as dead_pct
+                FROM pg_stat_user_tables
+                WHERE n_dead_tup > 1000
+                ORDER BY n_dead_tup DESC
+                LIMIT 20
+            """)
+            for row in cur.fetchall():
+                tables_needing_vacuum.append({
+                    "schema": row[0],
+                    "table": row[1],
+                    "n_dead_tup": int(row[2]),
+                    "n_live_tup": int(row[3]),
+                    "dead_pct": float(row[4]) if row[4] else 0
+                })
+        except:
+            pass
+        
+        # 序列使用
+        cursor.execute("SELECT COUNT(*) FROM pg_sequences")
+        try:
+            sequence_count = int(cur.fetchone()[0])
+        except:
+            sequence_count = 0
 
         # =============================================
         # 9. 配置参数 (config) - P1
@@ -1754,11 +2072,21 @@ class PostgreSQLChecker(BaseDBChecker):
             "top_sql_by_total_time": top_sql_by_total_time,
             "table_scan_stats": table_scan_stats,
             
+            # 对象统计
+            "table_size_top20": table_size_top20,
+            "unused_indexes": unused_indexes,
+            "tables_needing_vacuum": tables_needing_vacuum,
+            "sequence_count": sequence_count,
+            
             # 复制集群
             "is_in_recovery": is_in_recovery,
             "replication_slots": replication_slots,
             "replication_count": replication_count,
             "wal_level": wal_level,
+            "wal_lag": wal_lag,
+            "last_wal_receive_lsn": last_wal_receive_lsn,
+            "last_wal_replay_lsn": last_wal_replay_lsn,
+            "physical_replication_type": physical_replication_type,
             "max_wal_senders": max_wal_senders,
             
             # 配置参数
