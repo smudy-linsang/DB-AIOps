@@ -1,0 +1,21 @@
+{
+  "db_type": "pgsql",
+  "test_time": "2026-04-21T21:26:47.253043",
+  "total_tests": 1,
+  "passed": 1,
+  "failed": 0,
+  "errors": [
+    "指标采集失败: column \"waiting\" does not exist\nLINE 1: SELECT count(*) FROM pg_stat_activity WHERE waiting = true\n                                                    ^\n"
+  ],
+  "warnings": [],
+  "categories": {
+    "connection": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "connection"
+      ]
+    }
+  }
+}

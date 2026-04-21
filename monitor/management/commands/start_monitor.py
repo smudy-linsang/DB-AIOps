@@ -100,21 +100,21 @@ class OracleChecker(BaseDBChecker):
         cursor.execute("SELECT BANNER FROM v$version WHERE ROWNUM = 1")
         version = cursor.fetchone()[0]
         
-        cursor.execute("SELECT instance_name, host_name, version, TO_CHAR(startup_time, 'YYYY-MM-DD HH24:MI:SS'), archiver, log_mode FROM v$instance")
+        cursor.execute("SELECT instance_name, host_name, version, TO_CHAR(startup_time, 'YYYY-MM-DD HH24:MI:SS'), archiver FROM v$instance")
         inst_row = cursor.fetchone()
         instance_name = inst_row[0]
         host_name = inst_row[1]
         db_version = inst_row[2]
         startup_time = inst_row[3]
         archiver = inst_row[4]
-        log_mode = inst_row[5]
         
-        cursor.execute("SELECT name, db_unique_name, open_mode, database_role FROM v$database")
+        cursor.execute("SELECT name, db_unique_name, open_mode, database_role, log_mode FROM v$database")
         db_row = cursor.fetchone()
         db_name = db_row[0]
         db_unique_name = db_row[1]
         open_mode = db_row[2]
         database_role = db_row[3]
+        log_mode = db_row[4]
         
         # 启动时间 (RAC 兼容)
         try:
@@ -308,7 +308,7 @@ class OracleChecker(BaseDBChecker):
                 s.status,
                 s.program,
                 s.machine,
-                s terminal,
+                s.terminal,
                 s.event as wait_event,
                 s.seconds_in_wait,
                 s.last_call_et,
@@ -343,7 +343,7 @@ class OracleChecker(BaseDBChecker):
                 s.event,
                 s.seconds_in_wait,
                 s.sql_id,
-                s.object_instance,
+                s.row_wait_obj#,
                 s.p1text,
                 s.p1,
                 s.p2text,
@@ -472,9 +472,9 @@ class OracleChecker(BaseDBChecker):
         except:
             large_pool_mb = 0
         
-        # PGA信息
-        cursor.execute("SELECT ROUND(sum(pga_target_mem)/1024/1024, 2) FROM v$sql_workarea")
+        # PGA信息 - 使用v$pgastat
         try:
+            cursor.execute("SELECT ROUND(value/1024/1024, 2) FROM v$pgastat WHERE name = 'total memory allocated'")
             pga_used_mb = float(cursor.fetchone()[0])
         except:
             pga_used_mb = 0
@@ -568,11 +568,11 @@ class OracleChecker(BaseDBChecker):
         
         # Top 20 索引大小
         cursor.execute("""
-            SELECT owner, index_name, ROUND(SUM(bytes)/1024/1024, 2) as size_mb
+            SELECT owner, segment_name, ROUND(SUM(bytes)/1024/1024, 2) as size_mb
             FROM dba_segments
             WHERE segment_type = 'INDEX'
               AND owner NOT IN ('SYS', 'SYSTEM', 'OWB$', 'APPQOSSYS')
-            GROUP BY owner, index_name
+            GROUP BY owner, segment_name
             ORDER BY size_mb DESC
             FETCH FIRST 20 ROWS ONLY
         """)
@@ -634,6 +634,191 @@ class OracleChecker(BaseDBChecker):
             dg_database_role = 'N/A'
             dg_protection_mode = 'N/A'
             dg_protection_level = 'N/A'
+
+        # =============================================
+        # 10.5 RAC 互联网络 (Interconnect) - P1 新增
+        # =============================================
+        try:
+            cursor.execute("""
+                SELECT inst_id, name, ip_address, 
+                       ic_bytes_sent, ic_bytes_received, 
+                       ic_packets_sent, ic_packets_received
+                FROM gv$cluster_interconnects
+            """)
+            rac_interconnects = []
+            ic_bytes_sent_total = 0
+            ic_bytes_received_total = 0
+            ic_packets_sent_total = 0
+            ic_packets_received_total = 0
+            ic_errors_total = 0
+            for row in cursor.fetchall():
+                ic_bytes_sent_total += int(row[3]) if row[3] else 0
+                ic_bytes_received_total += int(row[4]) if row[4] else 0
+                ic_packets_sent_total += int(row[5]) if row[5] else 0
+                ic_packets_received_total += int(row[6]) if row[6] else 0
+                rac_interconnects.append({
+                    "inst_id": int(row[0]) if row[0] else 0,
+                    "name": row[1] or 'N/A',
+                    "ip_address": row[2] or 'N/A',
+                    "ic_bytes_sent": int(row[3]) if row[3] else 0,
+                    "ic_bytes_received": int(row[4]) if row[4] else 0,
+                    "ic_packets_sent": int(row[5]) if row[5] else 0,
+                    "ic_packets_received": int(row[6]) if row[6] else 0,
+                    "ic_errors": 0
+                })
+        except:
+            rac_interconnects = []
+            ic_bytes_sent_total = 0
+            ic_bytes_received_total = 0
+            ic_packets_sent_total = 0
+            ic_packets_received_total = 0
+            ic_errors_total = 0
+
+        # =============================================
+        # 10.6 RAC 缓存融合 (Cache Fusion) - P1 新增
+        # =============================================
+        # 全局缓存块统计
+        try:
+            cursor.execute("""
+                SELECT inst_id, name, value
+                FROM gv$sysstat 
+                WHERE name LIKE 'gc%%' 
+                   OR name LIKE 'global cache%%'
+                ORDER BY inst_id, name
+            """)
+            cache_fusion_stats = []
+            gc_buffer_busy_total = 0
+            for row in cursor.fetchall():
+                stat_name = row[1].lower() if row[1] else ''
+                if 'buffer busy' in stat_name or 'gc buffer busy' in stat_name:
+                    gc_buffer_busy_total += int(row[2]) if row[2] else 0
+                cache_fusion_stats.append({
+                    "inst_id": int(row[0]) if row[0] else 0,
+                    "stat_name": row[1] or 'N/A',
+                    "value": int(row[2]) if row[2] else 0
+                })
+        except:
+            cache_fusion_stats = []
+            gc_buffer_busy_total = 0
+
+        # 全局缓存等待事件
+        try:
+            cursor.execute("""
+                SELECT event, total_waits, time_waited
+                FROM gv$system_event
+                WHERE event LIKE 'gc%%' OR event LIKE 'global cache%%'
+                ORDER BY time_waited DESC
+            """)
+            gc_wait_events = []
+            for row in cursor.fetchall():
+                gc_wait_events.append({
+                    "event": row[0] or 'N/A',
+                    "total_waits": int(row[1]) if row[1] else 0,
+                    "time_waited": int(row[2]) if row[2] else 0
+                })
+        except:
+            gc_wait_events = []
+
+        # =============================================
+        # 10.7 ADG 延迟指标 - P0 新增
+        # =============================================
+        cursor.execute("""
+            SELECT name, value, unit, time_computed
+            FROM v$dataguard_stats 
+            WHERE name IN ('transport lag', 'apply lag')
+        """)
+        adg_lag_stats = {}
+        for row in cursor.fetchall():
+            name = row[0].lower().replace(' ', '_') if row[0] else 'unknown'
+            adg_lag_stats[name] = {
+                "value": row[1] or 'N/A',
+                "unit": row[2] or 'N/A',
+                "time_computed": str(row[3]) if row[3] else 'N/A'
+            }
+        apply_lag = adg_lag_stats.get('apply_lag', {}).get('value', 'N/A')
+        transport_lag = adg_lag_stats.get('transport_lag', {}).get('value', 'N/A')
+
+        # =============================================
+        # 10.8 ADG Gap 检测 - P0 新增
+        # =============================================
+        cursor.execute("SELECT thread#, low_sequence#, high_sequence# FROM v$archive_gap")
+        archive_gap_list = []
+        archive_gap_count = 0
+        for row in cursor.fetchall():
+            archive_gap_count += 1
+            archive_gap_list.append({
+                "thread": int(row[0]) if row[0] else 0,
+                "low_sequence": int(row[1]) if row[1] else 0,
+                "high_sequence": int(row[2]) if row[2] else 0
+            })
+
+        # 归档目的地状态
+        cursor.execute("""
+            SELECT dest_id, destination, status, error, synchronized
+            FROM v$archive_dest_status 
+            WHERE destination IS NOT NULL
+        """)
+        archive_dest_status = []
+        for row in cursor.fetchall():
+            archive_dest_status.append({
+                "dest_id": int(row[0]) if row[0] else 0,
+                "destination": row[1] or 'N/A',
+                "status": row[2] or 'N/A',
+                "error": row[3] or 'N/A',
+                "synchronized": row[4] or 'N/A'
+            })
+
+        # =============================================
+        # 10.9 ADG 备库进程状态 - P0 新增
+        # =============================================
+        try:
+            cursor.execute("""
+                SELECT process, status, client_process, client_pid, sequence#,
+                       BLOCK#, BLOCKS
+                FROM v$managed_standby
+                WHERE process IN ('MRP0', 'MRP1', 'MRP2', 'RFS', 'ARCH', 'LGWR')
+                   OR process LIKE 'MRP%%'
+                ORDER BY process
+            """)
+            adg_processes = []
+            mrp_status = 'NOT_FOUND'
+            rfs_status = 'NOT_FOUND'
+            for row in cursor.fetchall():
+                process_name = row[0] or 'N/A'
+                status = row[1] or 'N/A'
+                if process_name.startswith('MRP'):
+                    mrp_status = status
+                elif process_name == 'RFS':
+                    rfs_status = status
+                adg_processes.append({
+                    "process": process_name,
+                    "status": status,
+                    "client_process": row[2] or 'N/A',
+                    "client_pid": int(row[3]) if row[3] else 0,
+                    "sequence": int(row[4]) if row[4] else 0,
+                    "block": int(row[5]) if row[5] else 0,
+                    "blocks": int(row[6]) if row[6] else 0
+                })
+        except:
+            adg_processes = []
+            mrp_status = 'NOT_FOUND'
+            rfs_status = 'NOT_FOUND'
+
+        # =============================================
+        # 10.10 ADG Switchover/Failover 状态 - P1 新增
+        # =============================================
+        try:
+            cursor.execute("SELECT switchover_status FROM v$database")
+            dg_switchover_status = cursor.fetchone()[0]
+        except:
+            dg_switchover_status = 'N/A'
+
+        try:
+            cursor.execute("SELECT fs_failover_status, fs_failover_observed_target, fs_failover_replay_target FROM v$database")
+            dg_failover_row = cursor.fetchone()
+            dg_fs_failover_status = dg_failover_row[0] if dg_failover_row else 'N/A'
+        except:
+            dg_fs_failover_status = 'N/A'
 
         # =============================================
         # 11. 配置参数 (config) - P1
@@ -770,6 +955,38 @@ class OracleChecker(BaseDBChecker):
             "dg_database_role": dg_database_role,
             "dg_protection_mode": dg_protection_mode,
             "dg_protection_level": dg_protection_level,
+            
+            # RAC 互联网络 (新增)
+            "rac_interconnects": rac_interconnects,
+            "ic_bytes_sent_total": ic_bytes_sent_total,
+            "ic_bytes_received_total": ic_bytes_received_total,
+            "ic_packets_sent_total": ic_packets_sent_total,
+            "ic_packets_received_total": ic_packets_received_total,
+            "ic_errors_total": ic_errors_total,
+            
+            # RAC 缓存融合 (新增)
+            "cache_fusion_stats": cache_fusion_stats,
+            "gc_wait_events": gc_wait_events,
+            "gc_buffer_busy_total": gc_buffer_busy_total,
+            
+            # ADG 延迟指标 (新增)
+            "apply_lag": apply_lag,
+            "transport_lag": transport_lag,
+            "adg_lag_stats": adg_lag_stats,
+            
+            # ADG Gap 检测 (新增)
+            "archive_gap_count": archive_gap_count,
+            "archive_gap_list": archive_gap_list,
+            "archive_dest_status": archive_dest_status,
+            
+            # ADG 备库进程 (新增)
+            "adg_processes": adg_processes,
+            "mrp_status": mrp_status,
+            "rfs_status": rfs_status,
+            
+            # ADG Switchover/Failover 状态 (新增)
+            "dg_switchover_status": dg_switchover_status,
+            "dg_fs_failover_status": dg_fs_failover_status,
             
             # 配置参数
             "config_params": config_params,
@@ -1134,7 +1351,7 @@ class MySQLChecker(BaseDBChecker):
                 com_stats[row['Value']] = row['Value']
 
             # =============================================
-            # 8. 复制与集群 (replication) - P1
+            # 8. 复制与集群 (replication) - P1 增强
             # =============================================
             cursor.execute("SHOW MASTER STATUS")
             try:
@@ -1148,6 +1365,65 @@ class MySQLChecker(BaseDBChecker):
             cursor.execute("SHOW VARIABLES LIKE 'binlog_format'")
             binlog_format = cursor.fetchone()['Value']
             
+            # 主库基本信息
+            cursor.execute("SHOW VARIABLES LIKE 'server_id'")
+            try:
+                server_id_var = int(cursor.fetchone()['Value'])
+            except:
+                server_id_var = 0
+            
+            # GTID 模式
+            cursor.execute("SHOW VARIABLES LIKE 'gtid_mode'")
+            try:
+                gtid_mode = cursor.fetchone()['Value']
+            except:
+                gtid_mode = 'OFF'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'gtid_purged'")
+            try:
+                gtid_purged = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                gtid_purged = 'N/A'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'gtid_executed'")
+            try:
+                gtid_executed = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                gtid_executed = 'N/A'
+            
+            # 多线程复制配置
+            cursor.execute("SHOW VARIABLES LIKE 'slave_parallel_workers'")
+            try:
+                slave_parallel_workers = int(cursor.fetchone()['Value'])
+            except:
+                slave_parallel_workers = 0
+            
+            cursor.execute("SHOW VARIABLES LIKE 'slave_parallel_type'")
+            try:
+                slave_parallel_type = cursor.fetchone()['Value']
+            except:
+                slave_parallel_type = 'N/A'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'slave_preserve_commit_order'")
+            try:
+                slave_preserve_commit_order = cursor.fetchone()['Value']
+            except:
+                slave_preserve_commit_order = 'N/A'
+            
+            # 复制延迟配置
+            cursor.execute("SHOW VARIABLES LIKE 'slave_net_timeout'")
+            try:
+                slave_net_timeout = int(cursor.fetchone()['Value'])
+            except:
+                slave_net_timeout = 0
+            
+            cursor.execute("SHOW VARIABLES LIKE 'slave_compressed_protocol'")
+            try:
+                slave_compressed_protocol = cursor.fetchone()['Value']
+            except:
+                slave_compressed_protocol = 'N/A'
+            
+            # 主从复制状态详情
             cursor.execute("SHOW SLAVE STATUS")
             try:
                 slave_status = cursor.fetchone()
@@ -1159,7 +1435,35 @@ class MySQLChecker(BaseDBChecker):
                 # 主从复制位置信息
                 master_log_file = slave_status['Master_Log_File'] if slave_status else 'N/A'
                 read_master_log_pos = slave_status['Read_Master_Log_Pos'] if slave_status else 0
-            except:
+                # 中继日志信息
+                relay_log_name = slave_status['Relay_Log_File'] if slave_status else 'N/A'
+                relay_log_pos = slave_status['Relay_Log_Pos'] if slave_status else 0
+                # 执行位置
+                exec_master_log_pos = slave_status['Exec_Master_Log_Pos'] if slave_status else 0
+                # SQL 线程最后错误
+                last_sql_errno = slave_status['Last_SQL_Errno'] if slave_status else 0
+                last_sql_error = slave_status['Last_SQL_Error'] if slave_status else 'N/A'
+                # IO 线程最后错误
+                last_io_errno = slave_status['Last_IO_Errno'] if slave_status else 0
+                last_io_error = slave_status['Last_IO_Error'] if slave_status else 'N/A'
+                # Master 信息
+                master_host = slave_status['Master_Host'] if slave_status else 'N/A'
+                master_port = slave_status['Master_Port'] if slave_status else 0
+                master_user = slave_status['Master_User'] if slave_status else 'N/A'
+                master_connect_retry = slave_status['Master_Connect_Retry'] if slave_status else 0
+                # GTID 相关
+                auto_position = slave_status['Auto_Position'] if slave_status else 0
+                master_uuid = slave_status['Master_UUID'] if slave_status else 'N/A'
+                master_server_id = slave_status['Master_Server_Id'] if slave_status else 0
+                # 心跳信息
+                heartbeat_period = slave_status['Heartbeat_Period'] if slave_status else 0
+                last_heartbeat = slave_status['Last_HeartbeatTimestamp'] if slave_status else 'N/A'
+                # 复制通道
+                channel_name = slave_status['Channel_Name'] if slave_status else 'N/A'
+                # 并行复制
+                slave_parallel_workers_active = slave_status['Slave_Parallel_Workers'] if slave_status else 0
+                slave_last_batch_timestamp = slave_status['Slave_Last_Batch_Timestamp'] if slave_status else 'N/A'
+            except Exception as e:
                 slave_io_running = 'NO'
                 slave_sql_running = 'NO'
                 seconds_behind_master = -1
@@ -1167,12 +1471,94 @@ class MySQLChecker(BaseDBChecker):
                 slave_last_error = 'N/A'
                 master_log_file = 'N/A'
                 read_master_log_pos = 0
+                relay_log_name = 'N/A'
+                relay_log_pos = 0
+                exec_master_log_pos = 0
+                last_sql_errno = 0
+                last_sql_error = 'N/A'
+                last_io_errno = 0
+                last_io_error = 'N/A'
+                master_host = 'N/A'
+                master_port = 0
+                master_user = 'N/A'
+                master_connect_retry = 0
+                auto_position = 0
+                master_uuid = 'N/A'
+                master_server_id = 0
+                heartbeat_period = 0
+                last_heartbeat = 'N/A'
+                channel_name = 'N/A'
+                slave_parallel_workers_active = 0
+                slave_last_batch_timestamp = 'N/A'
             
-            cursor.execute("SHOW VARIABLES LIKE 'gtid_mode'")
+            # 检查复制通道 (多源复制支持)
+            replication_channels = []
             try:
-                gtid_mode = cursor.fetchone()['Value']
+                cursor.execute("SHOW REPLICAS")
+                for row in cursor.fetchall():
+                    replication_channels.append({
+                        "channel_name": row.get('Channel_Name', 'N/A'),
+                        "host": row.get('Host', 'N/A'),
+                        "port": row.get('Port', 0),
+                        "user": row.get('User', 'N/A'),
+                        "io_state": row.get('IO_State', 'N/A'),
+                        "sql_state": row.get('SQL_State', 'N/A'),
+                        "seconds_behind_source": row.get('Seconds_Behind_Source', -1)
+                    })
             except:
-                gtid_mode = 'OFF'
+                # SHOW REPLICAS 在某些版本不支持，尝试旧语法
+                try:
+                    cursor.execute("SHOW SLAVE HOSTS")
+                    for row in cursor.fetchall():
+                        replication_channels.append({
+                            "server_id": row.get('Server_id', 0),
+                            "host": row.get('Host', 'N/A'),
+                            "port": row.get('Port', 0),
+                            "master_id": row.get('Master_id', 0)
+                        })
+                except:
+                    pass
+            
+            # 复制过滤规则
+            cursor.execute("SHOW VARIABLES LIKE 'replicate_do_db'")
+            try:
+                replicate_do_db = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                replicate_do_db = 'N/A'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'replicate_ignore_db'")
+            try:
+                replicate_ignore_db = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                replicate_ignore_db = 'N/A'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'replicate_do_table'")
+            try:
+                replicate_do_table = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                replicate_do_table = 'N/A'
+            
+            cursor.execute("SHOW VARIABLES LIKE 'replicate_ignore_table'")
+            try:
+                replicate_ignore_table = cursor.fetchone()['Value'] or 'N/A'
+            except:
+                replicate_ignore_table = 'N/A'
+            
+            # 复制健康状态判断
+            replication_health = 'HEALTHY'
+            replication_issues = []
+            if slave_io_running != 'Yes':
+                replication_health = 'UNHEALTHY'
+                replication_issues.append(f"IO线程未运行: {slave_io_running}")
+            if slave_sql_running != 'Yes':
+                replication_health = 'UNHEALTHY'
+                replication_issues.append(f"SQL线程未运行: {slave_sql_running}")
+            if seconds_behind_master > 300:
+                replication_health = 'DEGRADED'
+                replication_issues.append(f"复制延迟过高: {seconds_behind_master}s")
+            if slave_last_error and slave_last_error != 'N/A':
+                replication_health = 'ERROR'
+                replication_issues.append(f"复制错误: {slave_last_error}")
 
             # =============================================
             # 9. 配置参数 (config) - P1
@@ -1397,6 +1783,42 @@ class MySQLChecker(BaseDBChecker):
             "master_log_file": master_log_file,
             "read_master_log_pos": read_master_log_pos,
             
+            # 增强复制指标 (新增)
+            "server_id_var": server_id_var,
+            "gtid_purged": gtid_purged,
+            "gtid_executed": gtid_executed,
+            "slave_parallel_workers": slave_parallel_workers,
+            "slave_parallel_type": slave_parallel_type,
+            "slave_preserve_commit_order": slave_preserve_commit_order,
+            "slave_net_timeout": slave_net_timeout,
+            "slave_compressed_protocol": slave_compressed_protocol,
+            "relay_log_name": relay_log_name,
+            "relay_log_pos": relay_log_pos,
+            "exec_master_log_pos": exec_master_log_pos,
+            "last_sql_errno": last_sql_errno,
+            "last_sql_error": last_sql_error,
+            "last_io_errno": last_io_errno,
+            "last_io_error": last_io_error,
+            "master_host": master_host,
+            "master_port": master_port,
+            "master_user": master_user,
+            "master_connect_retry": master_connect_retry,
+            "auto_position": auto_position,
+            "master_uuid": master_uuid,
+            "master_server_id": master_server_id,
+            "heartbeat_period": heartbeat_period,
+            "last_heartbeat": str(last_heartbeat) if last_heartbeat else 'N/A',
+            "channel_name": channel_name,
+            "slave_parallel_workers_active": slave_parallel_workers_active,
+            "slave_last_batch_timestamp": str(slave_last_batch_timestamp) if slave_last_batch_timestamp else 'N/A',
+            "replication_channels": replication_channels,
+            "replicate_do_db": replicate_do_db,
+            "replicate_ignore_db": replicate_ignore_db,
+            "replicate_do_table": replicate_do_table,
+            "replicate_ignore_table": replicate_ignore_table,
+            "replication_health": replication_health,
+            "replication_issues": replication_issues,
+            
             # 配置参数
             "config_params": config_params,
             
@@ -1484,7 +1906,7 @@ class PostgreSQLChecker(BaseDBChecker):
         max_connections = int(cur.fetchone()[0])
         conn_usage_pct = round((active_connections / max_connections) * 100, 2) if max_connections > 0 else 0
         
-        cur.execute("SELECT count(*) FROM pg_stat_activity WHERE waiting = true")
+        cur.execute("SELECT count(*) FROM pg_stat_activity WHERE wait_event_type IS NOT NULL")
         waiting_connections = int(cur.fetchone()[0])
         
         cur.execute("SELECT count(*) FROM pg_stat_activity WHERE query_start < NOW() - INTERVAL '5 minutes' AND state = 'active'")
@@ -2444,7 +2866,7 @@ class DamengChecker(BaseDBChecker):
             idle_transactions = 0
 
         # =============================================
-        # 10. 复制与集群 (replication) - P1
+        # 10. 复制与集群 (replication) - P1 增强
         # =============================================
         try:
             cur.execute("SELECT ARCHIVE_MODE FROM V$DATABASE")
@@ -2469,7 +2891,202 @@ class DamengChecker(BaseDBChecker):
             archive_file_count = int(cur.fetchone()[0])
         except:
             archive_file_count = 0
-
+        
+        # =============================================
+        # 10.5 DW 集群（主备）监控 - P0 新增
+        # =============================================
+        # 数据库角色和模式
+        try:
+            cur.execute("SELECT MODE FROM V$INSTANCE")
+            dm_instance_mode = cur.fetchone()[0]
+        except:
+            dm_instance_mode = 'N/A'
+        
+        try:
+            cur.execute("SELECT MODE$ FROM V$DATABASE")
+            dm_database_mode = cur.fetchone()[0]
+        except:
+            dm_database_mode = 'N/A'
+        
+        # 实时归档状态
+        try:
+            cur.execute("""
+                SELECT DEST_ID, DEST_NAME, STATUS, ARCH_TYPE, ARCH_SEQ, ARCH_SPACE, 
+                       ARCH_FILE, ARCH_TIMELY, IS_LOGICAL, SYNCHRONIZED
+                FROM V$ARCH_DEST WHERE STATUS != 'INACTIVE'
+            """)
+            realtime_archive_dest = []
+            for row in cur.fetchall():
+                realtime_archive_dest.append({
+                    "dest_id": int(row[0]) if row[0] else 0,
+                    "dest_name": row[1] or 'N/A',
+                    "status": row[2] or 'N/A',
+                    "arch_type": row[3] or 'N/A',
+                    "arch_seq": int(row[4]) if row[4] else 0,
+                    "arch_space": int(row[5]) if row[5] else 0,
+                    "arch_file": row[6] or 'N/A',
+                    "arch_timely": row[7] or 'N/A',
+                    "is_logical": row[8] or 'N/A',
+                    "synchronized": row[9] or 'N/A'
+                })
+        except:
+            realtime_archive_dest = []
+        
+        # 实时日志同步状态
+        try:
+            cur.execute("""
+                SELECT SRC_INSTANCE, DEST_INSTANCE, ARCH_DEST, ARCH_SEQ, ARCH_SEQ_ALL,
+                       APPLY_SEQ, APPLY_SEQ_ALL, SYNC_STATUS
+                FROM V$RLOG
+            """)
+            rlog_sync_status = []
+            for row in cur.fetchall():
+                rlog_sync_status.append({
+                    "src_instance": row[0] or 'N/A',
+                    "dest_instance": row[1] or 'N/A',
+                    "arch_dest": row[2] or 'N/A',
+                    "arch_seq": int(row[3]) if row[3] else 0,
+                    "arch_seq_all": int(row[4]) if row[4] else 0,
+                    "apply_seq": int(row[5]) if row[5] else 0,
+                    "apply_seq_all": int(row[6]) if row[6] else 0,
+                    "sync_status": row[7] or 'N/A'
+                })
+        except:
+            rlog_sync_status = []
+        
+        # 主备延迟
+        try:
+            cur.execute("""
+                SELECT DST_INST_NAME, APPLY_STATUS, APPLY_DELAY, APPLY_RST_SEQ, 
+                       APPLY_RST_TIME, LAST_ARCH_SEQ
+                FROM V$DEST_PENDING
+            """)
+            dest_pending = []
+            apply_delay_total = 0
+            for row in cur.fetchall():
+                delay = int(row[2]) if row[2] else 0
+                apply_delay_total += delay
+                dest_pending.append({
+                    "dst_inst_name": row[0] or 'N/A',
+                    "apply_status": row[1] or 'N/A',
+                    "apply_delay": delay,
+                    "apply_rst_seq": int(row[3]) if row[3] else 0,
+                    "apply_rst_time": str(row[4]) if row[4] else 'N/A',
+                    "last_arch_seq": int(row[5]) if row[5] else 0
+                })
+        except:
+            dest_pending = []
+            apply_delay_total = 0
+        
+        # DW 复制状态汇总
+        dw_replication_health = 'UNKNOWN'
+        dw_replication_issues = []
+        if dm_instance_mode == 'PRIMARY' or dm_database_mode == 'PRIMARY':
+            dw_replication_health = 'HEALTHY'
+        elif dm_instance_mode == 'STANDBY' or dm_database_mode == 'STANDBY':
+            if apply_delay_total > 1000:
+                dw_replication_health = 'DEGRADED'
+                dw_replication_issues.append(f"备库延迟过高: {apply_delay_total}")
+            else:
+                dw_replication_health = 'HEALTHY'
+        else:
+            if dm_instance_mode != 'N/A':
+                dw_replication_health = 'UNKNOWN'
+        
+        # =============================================
+        # 10.6 DSC 集群（共享存储）监控 - P0 新增
+        # =============================================
+        # DSC 集群信息
+        try:
+            cur.execute("""
+                SELECT INSTANCE_NAME, INSTANCE_ID, HOST_NAME, PORT_NUM, 
+                       STATUS, IS_PRIMARY, UPTIME
+                FROM V$CLUSTER
+            """)
+            dsc_cluster_info = []
+            dsc_node_count = 0
+            dsc_primary_node = 'N/A'
+            for row in cur.fetchall():
+                dsc_node_count += 1
+                if row[5] == 1:  # IS_PRIMARY
+                    dsc_primary_node = row[0]
+                dsc_cluster_info.append({
+                    "instance_name": row[0] or 'N/A',
+                    "instance_id": int(row[1]) if row[1] else 0,
+                    "host_name": row[2] or 'N/A',
+                    "port_num": int(row[3]) if row[3] else 0,
+                    "status": row[4] or 'N/A',
+                    "is_primary": int(row[5]) if row[5] else 0,
+                    "uptime": int(row[6]) if row[6] else 0
+                })
+        except:
+            dsc_cluster_info = []
+            dsc_node_count = 0
+            dsc_primary_node = 'N/A'
+        
+        # DSC 实例详情
+        try:
+            cur.execute("""
+                SELECT INST_ID, INST_NAME, CLUSTER_STATE, DB_MAGIC, 
+                       RLOG_SEND_OFFSET, RLOG_PKG_SND_COUNT
+                FROM V$DSC_INSTANCES
+            """)
+            dsc_instances = []
+            for row in cur.fetchall():
+                dsc_instances.append({
+                    "inst_id": int(row[0]) if row[0] else 0,
+                    "inst_name": row[1] or 'N/A',
+                    "cluster_state": row[2] or 'N/A',
+                    "db_magic": int(row[3]) if row[3] else 0,
+                    "rlog_send_offset": str(row[4]) if row[4] else 'N/A',
+                    "rlog_pkg_snd_count": int(row[5]) if row[5] else 0
+                })
+        except:
+            dsc_instances = []
+        
+        # DSC 全局锁
+        try:
+            cur.execute("""
+                SELECT LOCK_ID, LOCK_TYPE, OWNER_INST, OWNER_LRU,
+                       BLOCKING_LRU, BLOCKING_INST
+                FROM V$GLOBAL_LATCH
+            """)
+            dsc_global_latches = []
+            for row in cur.fetchall():
+                dsc_global_latches.append({
+                    "lock_id": str(row[0]) if row[0] else 'N/A',
+                    "lock_type": row[1] or 'N/A',
+                    "owner_inst": int(row[2]) if row[2] else 0,
+                    "owner_lru": int(row[3]) if row[3] else 0,
+                    "blocking_lru": int(row[4]) if row[4] else 0,
+                    "blocking_inst": int(row[5]) if row[5] else 0
+                })
+        except:
+            dsc_global_latches = []
+        
+        # DSC 锁状态统计
+        try:
+            cur.execute("SELECT COUNT(*) FROM V$GLOBAL_LATCH WHERE BLOCKING_LRU > 0")
+            dsc_lock_contention_count = int(cur.fetchone()[0])
+        except:
+            dsc_lock_contention_count = 0
+        
+        # DSC 健康状态判断
+        dsc_cluster_health = 'UNKNOWN'
+        dsc_cluster_issues = []
+        if dsc_node_count > 0:
+            dsc_cluster_health = 'HEALTHY'
+            # 检查是否有节点异常
+            for node in dsc_cluster_info:
+                if node['status'] != 'OPEN':
+                    dsc_cluster_health = 'DEGRADED'
+                    dsc_cluster_issues.append(f"节点 {node['instance_name']} 状态异常: {node['status']}")
+            if dsc_lock_contention_count > 100:
+                dsc_cluster_health = 'DEGRADED'
+                dsc_cluster_issues.append(f"全局锁竞争过多: {dsc_lock_contention_count}")
+        else:
+            dsc_cluster_health = 'NOT_CLUSTER'
+        
         # =============================================
         # 11. 配置参数 (config) - P1
         # =============================================
@@ -2593,6 +3210,26 @@ class DamengChecker(BaseDBChecker):
             "archive_mode": archive_mode,
             "archive_dest": archive_dest,
             "archive_file_count": archive_file_count,
+            
+            # DW 集群主备模式 (新增)
+            "dm_instance_mode": dm_instance_mode,
+            "dm_database_mode": dm_database_mode,
+            "realtime_archive_dest": realtime_archive_dest,
+            "rlog_sync_status": rlog_sync_status,
+            "dest_pending": dest_pending,
+            "apply_delay_total": apply_delay_total,
+            "dw_replication_health": dw_replication_health,
+            "dw_replication_issues": dw_replication_issues,
+            
+            # DSC 集群共享存储模式 (新增)
+            "dsc_cluster_info": dsc_cluster_info,
+            "dsc_node_count": dsc_node_count,
+            "dsc_primary_node": dsc_primary_node,
+            "dsc_instances": dsc_instances,
+            "dsc_global_latches": dsc_global_latches,
+            "dsc_lock_contention_count": dsc_lock_contention_count,
+            "dsc_cluster_health": dsc_cluster_health,
+            "dsc_cluster_issues": dsc_cluster_issues,
             
             # 配置参数
             "config_params": config_params,
@@ -2750,7 +3387,7 @@ class GbaseChecker(BaseDBChecker):
                 long_query_time = 0
 
             # =============================================
-            # 7. 复制与集群 (replication) - Gbase特有
+            # 7. 复制与集群 (replication) - Gbase8A 集群增强
             # =============================================
             cursor.execute("SHOW MASTER STATUS")
             try:
@@ -2761,32 +3398,194 @@ class GbaseChecker(BaseDBChecker):
                 binlog_file = 'N/A'
                 binlog_position = 0
             
-            # Gbase 集群节点状态
-            cluster_nodes = []
+            # =============================================
+            # 7.5 Gbase8A 管理节点集群监控 - P0 新增
+            # =============================================
+            # 管理节点 (Cluster Manager) 状态
+            gbase_cm_nodes = []
+            gbase_cm_healthy_count = 0
+            gbase_cm_total_count = 0
             try:
-                cursor.execute("SELECT * FROM gcluster_v$node_status LIMIT 20")
+                cursor.execute("""
+                    SELECT NODEID, NODENAME, NODEIP, NODETYPE, STATUS, 
+                           MASTER_SLAVE, ONLINE_TIME, CPU_USED, MEM_USED
+                    FROM gcluster_v$node_info
+                    WHERE NODETYPE IN ('CM', 'MGR', 'MANAGER', 'CLUSTER_MANAGER')
+                """)
                 for row in cursor.fetchall():
-                    cluster_nodes.append({
-                        "node_id": str(row.get('NODE_ID', 'N/A')),
-                        "status": row.get('STATUS', 'UNKNOWN'),
-                        "role": row.get('ROLE', 'N/A'),
-                        "host": row.get('HOST', 'N/A')
+                    gbase_cm_total_count += 1
+                    node_status = str(row[4]).upper() if row[4] else 'UNKNOWN'
+                    if 'ONLINE' in node_status or 'ACTIVE' in node_status or 'HEALTHY' in node_status:
+                        gbase_cm_healthy_count += 1
+                    gbase_cm_nodes.append({
+                        "node_id": str(row[0]) if row[0] else 'N/A',
+                        "node_name": str(row[1]) if row[1] else 'N/A',
+                        "node_ip": str(row[2]) if row[2] else 'N/A',
+                        "node_type": str(row[3]) if row[3] else 'N/A',
+                        "status": node_status,
+                        "master_slave": str(row[5]) if row[5] else 'N/A',
+                        "online_time": str(row[6]) if row[6] else 'N/A',
+                        "cpu_used": float(row[7]) if row[7] else 0,
+                        "mem_used": float(row[8]) if row[8] else 0
+                    })
+            except:
+                # 备选查询 - 尝试其他视图
+                try:
+                    cursor.execute("SELECT * FROM gcluster_v$node_status LIMIT 50")
+                    for row in cursor.fetchall():
+                        gbase_cm_total_count += 1
+                        node_status = str(row.get('STATUS', 'UNKNOWN')).upper()
+                        if 'ONLINE' in node_status or 'ACTIVE' in node_status:
+                            gbase_cm_healthy_count += 1
+                        gbase_cm_nodes.append({
+                            "node_id": str(row.get('NODE_ID', 'N/A')),
+                            "node_name": str(row.get('NODE_NAME', 'N/A')),
+                            "node_ip": str(row.get('HOST', 'N/A')),
+                            "node_type": str(row.get('ROLE', 'N/A')),
+                            "status": node_status,
+                            "role": str(row.get('ROLE', 'N/A'))
+                        })
+                except:
+                    pass
+            
+            # =============================================
+            # 7.6 Gbase8A 数据节点集群监控 - P0 新增
+            # =============================================
+            # 数据节点 (Data Node) 状态
+            gbase_dn_nodes = []
+            gbase_dn_healthy_count = 0
+            gbase_dn_total_count = 0
+            gbase_dn_replica_count = 3  # 3副本配置
+            try:
+                cursor.execute("""
+                    SELECT NODEID, NODENAME, NODEIP, NODETYPE, STATUS,
+                           REPLICA_NUM, DATANODE_NUM, TOTAL_SPACE, FREE_SPACE,
+                           READ_COUNT, WRITE_COUNT, SYNC_STATUS
+                    FROM gcluster_v$node_info
+                    WHERE NODETYPE IN ('DN', 'DATA', 'DATANODE', 'SN', 'STORAGENODE')
+                """)
+                for row in cursor.fetchall():
+                    gbase_dn_total_count += 1
+                    node_status = str(row[4]).upper() if row[4] else 'UNKNOWN'
+                    if 'ONLINE' in node_status or 'ACTIVE' in node_status or 'HEALTHY' in node_status:
+                        gbase_dn_healthy_count += 1
+                    gbase_dn_nodes.append({
+                        "node_id": str(row[0]) if row[0] else 'N/A',
+                        "node_name": str(row[1]) if row[1] else 'N/A',
+                        "node_ip": str(row[2]) if row[2] else 'N/A',
+                        "node_type": str(row[3]) if row[3] else 'N/A',
+                        "status": node_status,
+                        "replica_num": int(row[5]) if row[5] else 0,
+                        "datanode_num": int(row[6]) if row[6] else 0,
+                        "total_space_gb": float(row[7]) / 1024 if row[7] else 0,
+                        "free_space_gb": float(row[8]) / 1024 if row[8] else 0,
+                        "read_count": int(row[9]) if row[9] else 0,
+                        "write_count": int(row[10]) if row[10] else 0,
+                        "sync_status": str(row[11]) if row[11] else 'N/A'
+                    })
+            except:
+                # 备选查询 - 尝试其他视图
+                try:
+                    cursor.execute("SELECT * FROM gnode_v$dnodetatus LIMIT 50")
+                    for row in cursor.fetchall():
+                        gbase_dn_total_count += 1
+                        node_status = str(row.get('STATUS', 'UNKNOWN')).upper()
+                        if 'ONLINE' in node_status or 'ACTIVE' in node_status:
+                            gbase_dn_healthy_count += 1
+                        gbase_dn_nodes.append({
+                            "node_id": str(row.get('NODE_ID', 'N/A')),
+                            "node_name": str(row.get('NODE_NAME', 'N/A')),
+                            "node_ip": str(row.get('HOST', 'N/A')),
+                            "node_type": "DN",
+                            "status": node_status,
+                            "sync_status": str(row.get('SYNC_STATUS', 'N/A'))
+                        })
+                except:
+                    pass
+            
+            # =============================================
+            # 7.7 Gbase8A 副本一致性检查 - P0 新增
+            # =============================================
+            # 副本状态详情
+            gbase_replica_info = []
+            try:
+                cursor.execute("""
+                    SELECT GROUP_ID, NODE_ID, REPLICA_TYPE, REPLICA_STATUS,
+                           REPLICA_SEQ, REPLICA_OFFSET, SYNC_MODE
+                    FROM gcluster_v$replica_status
+                """)
+                for row in cursor.fetchall():
+                    gbase_replica_info.append({
+                        "group_id": int(row[0]) if row[0] else 0,
+                        "node_id": str(row[1]) if row[1] else 'N/A',
+                        "replica_type": str(row[2]) if row[2] else 'N/A',
+                        "replica_status": str(row[3]) if row[3] else 'N/A',
+                        "replica_seq": int(row[4]) if row[4] else 0,
+                        "replica_offset": str(row[5]) if row[5] else 'N/A',
+                        "sync_mode": str(row[6]) if row[6] else 'N/A'
                     })
             except:
                 pass
             
-            # Gbase 集群信息
-            cluster_info = {}
-            try:
-                cursor.execute("SHOW GCLUSTER CLUSTER")
-                cluster_row = cursor.fetchone()
-                if cluster_row:
-                    cluster_info = {
-                        "cluster_name": cluster_row[0] if len(cluster_row) > 0 else 'N/A',
-                        "node_count": len(cluster_nodes)
-                    }
-            except:
-                pass
+            # 副本健康统计
+            replica_healthy_count = 0
+            replica_total_count = len(gbase_replica_info)
+            for replica in gbase_replica_info:
+                status = str(replica['replica_status']).upper()
+                if 'SYNC' in status or 'ONLINE' in status or 'ACTIVE' in status:
+                    replica_healthy_count += 1
+            
+            # =============================================
+            # 7.8 Gbase8A 集群健康状态判断 - P0 新增
+            # =============================================
+            gbase_cluster_health = 'UNKNOWN'
+            gbase_cluster_issues = []
+            
+            if gbase_cm_total_count > 0:
+                if gbase_cm_healthy_count == gbase_cm_total_count:
+                    if gbase_dn_total_count > 0:
+                        if gbase_dn_healthy_count == gbase_dn_total_count:
+                            if replica_healthy_count == replica_total_count:
+                                gbase_cluster_health = 'HEALTHY'
+                            else:
+                                gbase_cluster_health = 'DEGRADED'
+                                gbase_cluster_issues.append(f"副本异常: {replica_healthy_count}/{replica_total_count} 正常")
+                        else:
+                            gbase_cluster_health = 'DEGRADED'
+                            gbase_cluster_issues.append(f"数据节点异常: {gbase_dn_healthy_count}/{gbase_dn_total_count} 正常")
+                    else:
+                        gbase_cluster_health = 'DEGRADED'
+                        gbase_cluster_issues.append("未检测到数据节点")
+                else:
+                    gbase_cluster_health = 'UNHEALTHY'
+                    gbase_cluster_issues.append(f"管理节点异常: {gbase_cm_healthy_count}/{gbase_cm_total_count} 正常")
+            else:
+                gbase_cluster_health = 'NOT_CLUSTER'
+                gbase_cluster_issues.append("未检测到 Gbase8A 集群")
+            
+            # 节点故障告警阈值检查
+            if gbase_cm_healthy_count < gbase_cm_total_count:
+                if gbase_cm_total_count - gbase_cm_healthy_count >= 1:
+                    gbase_cluster_health = 'CRITICAL'
+                    gbase_cluster_issues.append(f"管理节点离线数量: {gbase_cm_total_count - gbase_cm_healthy_count}")
+            
+            if gbase_dn_total_count > 0:
+                failed_dn = gbase_dn_total_count - gbase_dn_healthy_count
+                if failed_dn >= 1:
+                    if gbase_cluster_health not in ['CRITICAL', 'UNHEALTHY']:
+                        gbase_cluster_health = 'CRITICAL'
+                    gbase_cluster_issues.append(f"数据节点离线数量: {failed_dn}")
+            
+            # Gbase 集群汇总信息
+            gbase_cluster_summary = {
+                "cm_node_count": gbase_cm_total_count,
+                "cm_healthy_count": gbase_cm_healthy_count,
+                "dn_node_count": gbase_dn_total_count,
+                "dn_healthy_count": gbase_dn_healthy_count,
+                "replica_count": replica_total_count,
+                "replica_healthy_count": replica_healthy_count,
+                "replica_config": gbase_dn_replica_count
+            }
 
             # =============================================
             # 8. 锁等待
@@ -2858,6 +3657,14 @@ class GbaseChecker(BaseDBChecker):
             "cluster_info": cluster_info,
             "binlog_file": binlog_file,
             "binlog_position": binlog_position,
+            
+            # Gbase8A 集群监控 (新增)
+            "gbase_cm_nodes": gbase_cm_nodes,
+            "gbase_dn_nodes": gbase_dn_nodes,
+            "gbase_replica_info": gbase_replica_info,
+            "gbase_cluster_health": gbase_cluster_health,
+            "gbase_cluster_issues": gbase_cluster_issues,
+            "gbase_cluster_summary": gbase_cluster_summary,
             
             # 锁
             "locks": locks,
@@ -3005,7 +3812,7 @@ class TDSQLChecker(BaseDBChecker):
                 long_query_time = 0
 
             # =============================================
-            # 7. 复制与集群 (replication) - TDSQL特有
+            # 7. 复制与集群 (replication) - TDSQL双活三中心高可用增强
             # =============================================
             cursor.execute("SHOW MASTER STATUS")
             try:
@@ -3028,29 +3835,245 @@ class TDSQLChecker(BaseDBChecker):
             except:
                 sync_binlog = 'N/A'
             
-            # TDSQL 分片信息
-            shards_info = []
+            # =============================================
+            # 7.5 TDSQL ZooKeeper 集群状态监控 - P0 新增
+            # =============================================
+            # ZK 节点状态 (3中心部署)
+            tdsql_zk_nodes = []
+            tdsql_zk_healthy_count = 0
+            tdsql_zk_total_count = 3  # 默认3个ZK节点
             try:
-                cursor.execute("SELECT * FROM tdsql_shard_status LIMIT 20")
+                cursor.execute("""
+                    SELECT NODE_ID, NODE_TYPE, HOST, PORT, STATUS, MODE, 
+                           DATA_VERSION, LEADER_ELECT
+                    FROM tdsql_zk_status
+                """)
                 for row in cursor.fetchall():
-                    shards_info.append({
-                        "shard_name": row.get('SHARD_NAME', 'N/A'),
-                        "status": row.get('STATUS', 'UNKNOWN'),
-                        "data_size_mb": float(row.get('DATA_SIZE', 0)) / 1024 / 1024,
-                        "role": row.get('ROLE', 'N/A')
+                    node_status = str(row.get('STATUS', 'UNKNOWN')).upper()
+                    if 'ONLINE' in node_status or 'FOLLOWER' in node_status or 'LEADER' in node_status:
+                        tdsql_zk_healthy_count += 1
+                    tdsql_zk_nodes.append({
+                        "node_id": str(row.get('NODE_ID', 'N/A')),
+                        "node_type": str(row.get('NODE_TYPE', 'ZK')),
+                        "host": str(row.get('HOST', 'N/A')),
+                        "port": int(row.get('PORT', 0)),
+                        "status": node_status,
+                        "mode": str(row.get('MODE', 'N/A')),  # LEADER/FOLLOWER
+                        "data_version": str(row.get('DATA_VERSION', 'N/A')),
+                        "leader_elect": str(row.get('LEADER_ELECT', 'N/A'))
+                    })
+            except:
+                # 备选：尝试其他视图或命令
+                try:
+                    cursor.execute("SHOW ZK STATUS")
+                    zk_status = cursor.fetchall()
+                    for row in zk_status:
+                        node_status = str(row.get('Status', 'UNKNOWN')).upper()
+                        if 'OK' in node_status or 'ONLINE' in node_status:
+                            tdsql_zk_healthy_count += 1
+                        tdsql_zk_nodes.append({
+                            "node_id": str(row.get('Id', 'N/A')),
+                            "host": str(row.get('Host', 'N/A')),
+                            "status": node_status,
+                            "mode": str(row.get('Mode', 'N/A'))
+                        })
+                except:
+                    pass
+            
+            # =============================================
+            # 7.6 TDSQL Proxy 节点集群监控 - P0 新增
+            # =============================================
+            # Proxy 节点状态 (对等部署在A、B中心)
+            tdsql_proxy_nodes = []
+            tdsql_proxy_healthy_count = 0
+            tdsql_proxy_total_count = 0
+            tdsql_proxy_center_a_count = 0
+            tdsql_proxy_center_b_count = 0
+            try:
+                cursor.execute("""
+                    SELECT PROXY_ID, PROXY_IP, PROXY_PORT, STATUS, CENTER_ID,
+                           ROLE, SESSION_COUNT, MAX_SESSION
+                    FROM tdsql_proxy_status
+                """)
+                for row in cursor.fetchall():
+                    tdsql_proxy_total_count += 1
+                    node_status = str(row.get('STATUS', 'UNKNOWN')).upper()
+                    if 'ONLINE' in node_status or 'ACTIVE' in node_status:
+                        tdsql_proxy_healthy_count += 1
+                    
+                    center_id = str(row.get('CENTER_ID', 'N/A'))
+                    if center_id == 'A':
+                        tdsql_proxy_center_a_count += 1
+                    elif center_id == 'B':
+                        tdsql_proxy_center_b_count += 1
+                    
+                    tdsql_proxy_nodes.append({
+                        "proxy_id": str(row.get('PROXY_ID', 'N/A')),
+                        "proxy_ip": str(row.get('PROXY_IP', 'N/A')),
+                        "proxy_port": int(row.get('PROXY_PORT', 0)),
+                        "status": node_status,
+                        "center_id": center_id,
+                        "role": str(row.get('ROLE', 'N/A')),
+                        "session_count": int(row.get('SESSION_COUNT', 0)),
+                        "max_session": int(row.get('MAX_SESSION', 0)),
+                        "session_usage_pct": round(int(row.get('SESSION_COUNT', 0)) / max(int(row.get('MAX_SESSION', 1), 1) * 100, 2))
                     })
             except:
                 pass
             
-            # 分片统计
-            cursor.execute("SHOW SHARD STATUS")
+            # =============================================
+            # 7.7 TDSQL 数据节点集群监控 - P0 新增
+            # =============================================
+            # 数据节点状态 (对等部署在A、B中心，4副本模式)
+            tdsql_dn_nodes = []
+            tdsql_dn_healthy_count = 0
+            tdsql_dn_total_count = 0
+            tdsql_dn_center_a_count = 0
+            tdsql_dn_center_b_count = 0
+            tdsql_dn_primary_count = 0  # 主副本数量 (应在A中心)
             try:
-                shard_status = cursor.fetchall()
-                shard_count = len(shard_status)
-                primary_shards = len([s for s in shard_status if str(s.get('ROLE', '')).lower() == 'primary'])
+                cursor.execute("""
+                    SELECT NODE_ID, NODE_IP, NODE_PORT, STATUS, CENTER_ID,
+                           REPLICA_ROLE, REPLICA_ID, SYNC_STATUS, APPLY_LAG,
+                           DATA_SIZE_MB, TOTAL_SPACE_MB, FREE_SPACE_MB
+                    FROM tdsql_datanode_status
+                """)
+                for row in cursor.fetchall():
+                    tdsql_dn_total_count += 1
+                    node_status = str(row.get('STATUS', 'UNKNOWN')).upper()
+                    if 'ONLINE' in node_status or 'ACTIVE' in node_status:
+                        tdsql_dn_healthy_count += 1
+                    
+                    center_id = str(row.get('CENTER_ID', 'N/A'))
+                    if center_id == 'A':
+                        tdsql_dn_center_a_count += 1
+                    elif center_id == 'B':
+                        tdsql_dn_center_b_count += 1
+                    
+                    replica_role = str(row.get('REPLICA_ROLE', 'N/A')).upper()
+                    if 'PRIMARY' in replica_role or 'MASTER' in replica_role:
+                        tdsql_dn_primary_count += 1
+                    
+                    tdsql_dn_nodes.append({
+                        "node_id": str(row.get('NODE_ID', 'N/A')),
+                        "node_ip": str(row.get('NODE_IP', 'N/A')),
+                        "node_port": int(row.get('NODE_PORT', 0)),
+                        "status": node_status,
+                        "center_id": center_id,
+                        "replica_role": replica_role,
+                        "replica_id": int(row.get('REPLICA_ID', 0)),
+                        "sync_status": str(row.get('SYNC_STATUS', 'N/A')),
+                        "apply_lag_ms": int(row.get('APPLY_LAG', 0)),
+                        "data_size_mb": float(row.get('DATA_SIZE_MB', 0)),
+                        "total_space_mb": float(row.get('TOTAL_SPACE_MB', 0)),
+                        "free_space_mb": float(row.get('FREE_SPACE_MB', 0)),
+                        "space_usage_pct": round(float(row.get('DATA_SIZE_MB', 0)) / max(float(row.get('TOTAL_SPACE_MB', 1)), 1) * 100, 2)
+                    })
             except:
-                shard_count = 0
-                primary_shards = 0
+                pass
+            
+            # =============================================
+            # 7.8 TDSQL 副本同步状态监控 - P0 新增
+            # =============================================
+            # 4副本配置，主副本在A中心
+            tdsql_replica_info = []
+            tdsql_replica_healthy_count = 0
+            tdsql_replica_total_count = 4  # 4副本模式
+            tdsql_cross_center_sync_count = 0  # 跨中心同步副本数
+            tdsql_local_sync_count = 0  # 本中心同步副本数
+            try:
+                cursor.execute("""
+                    SELECT REPLICA_ID, REPLICA_TYPE, CENTER_ID, NODE_IP,
+                           SYNC_STATE, SYNC_LAG_MS, CONSISTENCY_STATUS,
+                           LAST_SYNC_TIME, READABLE
+                    FROM tdsql_replica_status
+                """)
+                for row in cursor.fetchall():
+                    sync_state = str(row.get('SYNC_STATE', 'UNKNOWN')).upper()
+                    replica_type = str(row.get('REPLICA_TYPE', 'N/A')).upper()
+                    center_id = str(row.get('CENTER_ID', 'N/A'))
+                    
+                    if 'SYNC' in sync_state or 'ONLINE' in sync_state:
+                        tdsql_replica_healthy_count += 1
+                        if center_id != 'A':  # 跨中心同步
+                            tdsql_cross_center_sync_count += 1
+                        else:  # 本中心同步
+                            tdsql_local_sync_count += 1
+                    
+                    tdsql_replica_info.append({
+                        "replica_id": int(row.get('REPLICA_ID', 0)),
+                        "replica_type": replica_type,
+                        "center_id": center_id,
+                        "node_ip": str(row.get('NODE_IP', 'N/A')),
+                        "sync_state": sync_state,
+                        "sync_lag_ms": int(row.get('SYNC_LAG_MS', 0)),
+                        "consistency_status": str(row.get('CONSISTENCY_STATUS', 'N/A')),
+                        "last_sync_time": str(row.get('LAST_SYNC_TIME', 'N/A')),
+                        "readable": str(row.get('READABLE', 'N/A'))
+                    })
+            except:
+                pass
+            
+            # =============================================
+            # 7.9 TDSQL 双活三中心健康状态判断 - P0 新增
+            # =============================================
+            tdsql_cluster_health = 'UNKNOWN'
+            tdsql_cluster_issues = []
+            
+            # ZK 健康检查
+            if tdsql_zk_total_count > 0:
+                if tdsql_zk_healthy_count < tdsql_zk_total_count:
+                    tdsql_cluster_issues.append(f"ZK节点异常: {tdsql_zk_healthy_count}/{tdsql_zk_total_count}")
+            
+            # Proxy 健康检查 (A、B中心对等)
+            if tdsql_proxy_total_count > 0:
+                if tdsql_proxy_center_a_count == 0 or tdsql_proxy_center_b_count == 0:
+                    tdsql_cluster_issues.append(f"Proxy单中心部署: A中心{tdsql_proxy_center_a_count}, B中心{tdsql_proxy_center_b_count}")
+                if tdsql_proxy_healthy_count < tdsql_proxy_total_count:
+                    tdsql_cluster_issues.append(f"Proxy节点异常: {tdsql_proxy_healthy_count}/{tdsql_proxy_total_count}")
+            
+            # 数据节点健康检查 (4副本)
+            if tdsql_dn_total_count > 0:
+                if tdsql_dn_center_a_count == 0 or tdsql_dn_center_b_count == 0:
+                    tdsql_cluster_issues.append(f"数据节点单中心部署: A中心{tdsql_dn_center_a_count}, B中心{tdsql_dn_center_b_count}")
+                if tdsql_dn_primary_count == 0:
+                    tdsql_cluster_issues.append("无主副本可用")
+                elif tdsql_dn_primary_count < tdsql_replica_total_count - 1:  # 允许部分副本故障
+                    tdsql_cluster_issues.append(f"主副本异常: {tdsql_dn_primary_count} 个主副本")
+            
+            # 副本同步状态检查
+            if tdsql_replica_healthy_count < tdsql_replica_total_count:
+                tdsql_cluster_issues.append(f"副本同步异常: {tdsql_replica_healthy_count}/{tdsql_replica_total_count} 正常")
+            
+            # 整体健康状态判断
+            if len(tdsql_cluster_issues) == 0:
+                if tdsql_zk_healthy_count == tdsql_zk_total_count and tdsql_proxy_healthy_count == tdsql_proxy_total_count and tdsql_dn_healthy_count == tdsql_dn_total_count:
+                    tdsql_cluster_health = 'HEALTHY'
+                else:
+                    tdsql_cluster_health = 'DEGRADED'
+            elif 'ZK节点异常' in str(tdsql_cluster_issues) or '无主副本可用' in str(tdsql_cluster_issues):
+                tdsql_cluster_health = 'CRITICAL'
+            else:
+                tdsql_cluster_health = 'DEGRADED'
+            
+            # TDSQL 集群汇总信息
+            tdsql_cluster_summary = {
+                "zk_node_count": tdsql_zk_total_count,
+                "zk_healthy_count": tdsql_zk_healthy_count,
+                "proxy_node_count": tdsql_proxy_total_count,
+                "proxy_healthy_count": tdsql_proxy_healthy_count,
+                "proxy_center_a_count": tdsql_proxy_center_a_count,
+                "proxy_center_b_count": tdsql_proxy_center_b_count,
+                "dn_node_count": tdsql_dn_total_count,
+                "dn_healthy_count": tdsql_dn_healthy_count,
+                "dn_center_a_count": tdsql_dn_center_a_count,
+                "dn_center_b_count": tdsql_dn_center_b_count,
+                "replica_config": tdsql_replica_total_count,  # 4副本
+                "replica_healthy_count": tdsql_replica_healthy_count,
+                "primary_replica_count": tdsql_dn_primary_count,
+                "cross_center_sync_count": tdsql_cross_center_sync_count,
+                "local_sync_count": tdsql_local_sync_count
+            }
 
             # =============================================
             # 8. 锁等待
@@ -3124,6 +4147,15 @@ class TDSQLChecker(BaseDBChecker):
             "shards_info": shards_info,
             "shard_count": shard_count,
             "primary_shards": primary_shards,
+            
+            # TDSQL 双活三中心集群监控 (新增)
+            "tdsql_zk_nodes": tdsql_zk_nodes,
+            "tdsql_proxy_nodes": tdsql_proxy_nodes,
+            "tdsql_dn_nodes": tdsql_dn_nodes,
+            "tdsql_replica_info": tdsql_replica_info,
+            "tdsql_cluster_health": tdsql_cluster_health,
+            "tdsql_cluster_issues": tdsql_cluster_issues,
+            "tdsql_cluster_summary": tdsql_cluster_summary,
             
             # 锁
             "locks": locks,

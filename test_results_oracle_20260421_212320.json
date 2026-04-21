@@ -1,0 +1,21 @@
+{
+  "db_type": "oracle",
+  "test_time": "2026-04-21T21:23:20.454893",
+  "total_tests": 1,
+  "passed": 1,
+  "failed": 0,
+  "errors": [
+    "指标采集失败: ORA-00904: \"S\": invalid identifier\nHelp: https://docs.oracle.com/error-help/db/ora-00904/"
+  ],
+  "warnings": [],
+  "categories": {
+    "connection": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "connection"
+      ]
+    }
+  }
+}
