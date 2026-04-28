@@ -207,3 +207,31 @@ class AlertLog(models.Model):
 
     def __str__(self):
         return f"{self.config.name} | {self.alert_type} | {self.status}"
+
+
+# ==========================================
+# 用户配置（用于 RBAC 权限控制）
+# ==========================================
+class UserProfile(models.Model):
+    """用户配置信息，用于角色和权限管理"""
+    
+    ROLE_CHOICES = (
+        ('admin', '管理员'),
+        ('supervisor', 'Supervisor'),
+        ('user', '普通用户'),
+        ('readonly', '只读用户'),
+    )
+    
+    user = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='profile', verbose_name="用户")
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user', verbose_name="角色")
+    allowed_databases = models.JSONField(null=True, blank=True, verbose_name="可访问数据库列表", help_text="为空表示可访问所有数据库，列表形式指定可访问的数据库ID")
+    
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+    
+    def __str__(self):
+        return f"{self.user.username} - {self.get_role_display()}"
+    
+    class Meta:
+        verbose_name = "用户配置"
+        verbose_name_plural = "用户配置列表"

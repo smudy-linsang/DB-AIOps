@@ -71,7 +71,7 @@ class HealthCheckView(JSONResponseMixin, View):
         # 检查采集状态（最近5分钟有日志的数据库数）
         recent_time = datetime.now() - timedelta(minutes=5)
         active_dbs = MonitorLog.objects.filter(
-            created_at__gte=recent_time
+            create_time__gte=recent_time
         ).values('config_id').distinct().count()
         
         # 检查活跃告警数
@@ -175,25 +175,29 @@ class DatabaseListView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         
         # 查询数据库配置
-        # 这里使用 MonitorConfig 模型，需要根据实际模型名称调整
-        from .models import MonitorConfig
+        from .models import DatabaseConfig
         
         if allowed_db_ids is not None:
-            configs = MonitorConfig.objects.filter(id__in=allowed_db_ids, is_active=True)
+            configs = DatabaseConfig.objects.filter(id__in=allowed_db_ids, is_active=True)
         else:
-            configs = MonitorConfig.objects.filter(is_active=True)
+            configs = DatabaseConfig.objects.filter(is_active=True)
         
         result = []
         for config in configs:
+            # 获取最新采集状态
+            latest_log = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+            
             result.append({
                 'id': config.id,
                 'name': config.name,
                 'db_type': config.db_type,
                 'host': config.host,
                 'port': config.port,
-                'environment': config.environment,
+                'service_name': config.service_name or '',
                 'is_active': config.is_active,
-                'created_at': config.created_at.isoformat() if config.created_at else None
+                'status': latest_log.status if latest_log else 'UNKNOWN',
+                'last_collect_time': latest_log.create_time.isoformat() if latest_log else None,
+                'create_time': config.create_time.isoformat() if config.create_time else None
             })
         
         return self.json_response({
@@ -223,22 +227,22 @@ class DatabaseStatusView(JSONResponseMixin, View):
         # 获取最新采集日志
         latest = MonitorLog.objects.filter(
             config_id=config_id
-        ).order_by('-created_at').first()
+        ).order_by('-create_time').first()
         
         if not latest:
             return self.error_response('No data for this database', 404)
         
         # 解析存储的指标数据
         try:
-            metrics = json.loads(latest.metrics) if latest.metrics else {}
+            metrics = json.loads(latest.message) if latest.message else {}
         except (json.JSONDecodeError, TypeError):
             metrics = {}
         
         data = {
             'config_id': config_id,
             'status': latest.status,
-            'collected_at': latest.created_at.isoformat(),
-            'collection_ms': latest.collection_ms,
+            'collected_at': latest.create_time.isoformat(),
+            'message': latest.message,
             'metrics': metrics
         }
         
@@ -266,12 +270,25 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         # 解析查询参数
         start_time = request.GET.get('start')
         end_time = request.GET.get('end')
+        time_param = request.GET.get('time')  # 支持 1h, 6h, 24h, 7d 等格式
         metric_name = request.GET.get('metric')
         limit = int(request.GET.get('limit', 1000))
         
-        # 解析时间
+        # 解析时间范围
         if start_time:
             start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        elif time_param:
+            # 解析时间参数 (1h, 6h, 24h, 7d, 30d)
+            time_map = {
+                '1h': 1,
+                '6h': 6,
+                '12h': 12,
+                '24h': 24,
+                '7d': 168,
+                '30d': 720
+            }
+            hours = time_map.get(time_param, 24)
+            start_dt = datetime.now() - timedelta(hours=hours)
         else:
             start_dt = datetime.now() - timedelta(hours=24)
         
@@ -283,34 +300,112 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         # 查询日志
         logs = MonitorLog.objects.filter(
             config_id=config_id,
-            created_at__gte=start_dt,
-            created_at__lte=end_dt
-        ).order_by('-created_at')[:limit]
+            create_time__gte=start_dt,
+            create_time__lte=end_dt
+        ).order_by('-create_time')[:limit]
         
         result = []
         for log in logs:
             try:
-                metrics = json.loads(log.metrics) if log.metrics else {}
+                metrics = json.loads(log.message) if log.message else {}
             except (json.JSONDecodeError, TypeError):
                 metrics = {}
             
             # 过滤指定指标
             if metric_name:
-                if metric_name in metrics:
+                # 处理表空间指标 (格式: tablespace_<name>_used_pct)
+                if metric_name.startswith('tablespace_'):
+                    # 格式: tablespace_<name>_used_pct -> 去掉前缀后分割
+                    # 例如: tablespace_SYSTEM_used_pct -> SYSTEM
+                    tbs_metric = metric_name[11:]  # 去掉 'tablespace_' 前缀 -> 'SYSTEM_used_pct'
+                    tbs_parts = tbs_metric.rsplit('_', 2)  # ['SYSTEM', 'used', 'pct']
+                    if len(tbs_parts) >= 3 and tbs_parts[-2] == 'used' and tbs_parts[-1] == 'pct':
+                        tbs_name = tbs_parts[0]
+                        found = False
+                        # 从 tablespaces 查找 (主表空间有 used_pct)
+                        tablespaces = metrics.get('tablespaces', [])
+                        for tbs in tablespaces:
+                            if tbs.get('name') == tbs_name:
+                                result.append({
+                                    'timestamp': log.create_time.isoformat(),
+                                    'metric': metric_name,
+                                    'value': tbs.get('used_pct'),
+                                    'status': log.status
+                                })
+                                found = True
+                                break
+                        # 如果没找到，尝试 temp_tablespaces (可能没有 used_pct)
+                        if not found:
+                            temp_tablespaces = metrics.get('temp_tablespaces', [])
+                            for tbs in temp_tablespaces:
+                                if tbs.get('name') == tbs_name:
+                                    # temp_tablespaces 没有 used_pct，跳过或返回 null
+                                    result.append({
+                                        'timestamp': log.create_time.isoformat(),
+                                        'metric': metric_name,
+                                        'value': None,
+                                        'status': log.status
+                                    })
+                                    found = True
+                                    break
+                        # 如果没找到，尝试 undo_tablespaces
+                        if not found:
+                            undo_tablespaces = metrics.get('undo_tablespaces', [])
+                            for tbs in undo_tablespaces:
+                                if tbs.get('name') == tbs_name:
+                                    result.append({
+                                        'timestamp': log.create_time.isoformat(),
+                                        'metric': metric_name,
+                                        'value': None,
+                                        'status': log.status
+                                    })
+                                    break
+                # 处理等待事件指标 (格式: wait_event_<event_name>)
+                elif metric_name.startswith('wait_event_'):
+                    event_name = metric_name[10:]  # 去掉 'wait_event_' 前缀
+                    found = False
+                    # 从 top_wait_events 中查找
+                    top_wait_events = metrics.get('top_wait_events', [])
+                    for evt in top_wait_events:
+                        if evt.get('event') == event_name:
+                            result.append({
+                                'timestamp': log.create_time.isoformat(),
+                                'metric': metric_name,
+                                'value': evt.get('total_waits'),
+                                'status': log.status
+                            })
+                            found = True
+                            break
+                    # 如果没找到，从 wait_events 中查找
+                    if not found:
+                        wait_events = metrics.get('wait_events', [])
+                        for evt in wait_events:
+                            if evt.get('event') == event_name:
+                                result.append({
+                                    'timestamp': log.create_time.isoformat(),
+                                    'metric': metric_name,
+                                    'value': evt.get('total_waits'),
+                                    'status': log.status
+                                })
+                                break
+                # 普通指标直接查找
+                elif metric_name in metrics:
                     result.append({
-                        'timestamp': log.created_at.isoformat(),
+                        'timestamp': log.create_time.isoformat(),
                         'metric': metric_name,
                         'value': metrics[metric_name],
                         'status': log.status
                     })
             else:
+                # 返回所有简单指标（排除数组类型）
                 for key, value in metrics.items():
-                    result.append({
-                        'timestamp': log.created_at.isoformat(),
-                        'metric': key,
-                        'value': value,
-                        'status': log.status
-                    })
+                    if isinstance(value, (str, int, float, bool)):
+                        result.append({
+                            'timestamp': log.create_time.isoformat(),
+                            'metric': key,
+                            'value': value,
+                            'status': log.status
+                        })
         
         return self.json_response({
             'config_id': config_id,
@@ -489,7 +584,7 @@ class AlertListView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         
         # 构建查询
-        queryset = AlertLog.objects.all().order_by('-created_at')
+        queryset = AlertLog.objects.all().order_by('-create_time')
         
         if status:
             queryset = queryset.filter(status=status)
@@ -504,10 +599,10 @@ class AlertListView(JSONResponseMixin, View):
         
         if start_time:
             start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            queryset = queryset.filter(created_at__gte=start_dt)
+            queryset = queryset.filter(create_time__gte=start_dt)
         if end_time:
             end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            queryset = queryset.filter(created_at__lte=end_dt)
+            queryset = queryset.filter(create_time__lte=end_dt)
         
         queryset = queryset[:limit]
         
@@ -519,15 +614,12 @@ class AlertListView(JSONResponseMixin, View):
                 'alert_type': alert.alert_type,
                 'severity': alert.severity,
                 'metric_key': alert.metric_key,
-                'current_value': float(alert.current_value) if alert.current_value else None,
-                'baseline_value': float(alert.baseline_value) if alert.baseline_value else None,
                 'title': alert.title,
                 'description': alert.description,
                 'status': alert.status,
-                'acknowledged_by': alert.acknowledged_by,
-                'acknowledged_at': alert.acknowledged_at.isoformat() if alert.acknowledged_at else None,
+                'last_notified_at': alert.last_notified_at.isoformat() if alert.last_notified_at else None,
                 'resolved_at': alert.resolved_at.isoformat() if alert.resolved_at else None,
-                'created_at': alert.created_at.isoformat() if alert.created_at else None
+                'create_time': alert.create_time.isoformat() if alert.create_time else None
             })
         
         return self.json_response({
@@ -562,14 +654,68 @@ class AlertAcknowledgeView(JSONResponseMixin, View):
         
         # 更新告警状态
         alert.status = 'acknowledged'
-        alert.acknowledged_by = request.user.username
-        alert.acknowledged_at = datetime.now()
         alert.save()
         
         return self.json_response({
             'status': 'success',
             'message': 'Alert acknowledged',
             'alert_id': alert_id
+        })
+
+
+class DatabaseAlertsView(JSONResponseMixin, View):
+    """数据库关联告警列表 API"""
+    
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+    
+    def get(self, request, config_id: int):
+        """
+        GET /api/v1/databases/{id}/alerts/
+        获取指定数据库的告警列表
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+        
+        # 解析查询参数
+        status = request.GET.get('status')
+        severity = request.GET.get('severity')
+        limit = int(request.GET.get('limit', 100))
+        
+        # 构建查询
+        queryset = AlertLog.objects.filter(config_id=config_id).order_by('-create_time')
+        
+        if status:
+            queryset = queryset.filter(status=status)
+        if severity:
+            queryset = queryset.filter(severity=severity)
+        
+        queryset = queryset[:limit]
+        
+        result = []
+        for alert in queryset:
+            result.append({
+                'id': alert.id,
+                'config_id': alert.config_id,
+                'alert_type': alert.alert_type,
+                'severity': alert.severity,
+                'metric_key': alert.metric_key,
+                'title': alert.title,
+                'description': alert.description,
+                'status': alert.status,
+                'last_notified_at': alert.last_notified_at.isoformat() if alert.last_notified_at else None,
+                'resolved_at': alert.resolved_at.isoformat() if alert.resolved_at else None,
+                'create_time': alert.create_time.isoformat() if alert.create_time else None
+            })
+        
+        return self.json_response({
+            'config_id': config_id,
+            'total': len(result),
+            'alerts': result
         })
 
 
@@ -596,7 +742,7 @@ class AuditLogListView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         
         # 构建查询
-        queryset = AuditLog.objects.all().order_by('-created_at')
+        queryset = AuditLog.objects.all().order_by('-create_time')
         
         if status:
             queryset = queryset.filter(status=status)
@@ -616,20 +762,17 @@ class AuditLogListView(JSONResponseMixin, View):
             result.append({
                 'id': log.id,
                 'config_id': log.config_id,
-                'source': log.source,
                 'action_type': log.action_type,
                 'risk_level': log.risk_level,
                 'description': log.description,
+                'sql_command': log.sql_command,
                 'status': log.status,
-                'created_by': log.created_by,
-                'approver_1': log.approver_1,
-                'approve_1_at': log.approve_1_at.isoformat() if log.approve_1_at else None,
-                'approver_2': log.approver_2,
-                'approve_2_at': log.approve_2_at.isoformat() if log.approve_2_at else None,
+                'approver': log.approver,
+                'approve_time': log.approve_time.isoformat() if log.approve_time else None,
                 'executor': log.executor,
-                'execute_at': log.execute_at.isoformat() if log.execute_at else None,
-                'result': log.result,
-                'created_at': log.created_at.isoformat() if log.created_at else None
+                'execute_time': log.execute_time.isoformat() if log.execute_time else None,
+                'execution_result': log.execution_result,
+                'create_time': log.create_time.isoformat() if log.create_time else None
             })
         
         return self.json_response({

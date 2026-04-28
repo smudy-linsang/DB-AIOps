@@ -304,6 +304,7 @@ def require_auth(func: Callable) -> Callable:
             }, status=403)
         
         # 将用户附加到请求对象
+        request.user = user  # 设置 request.user
         request.auth_token = token
         request.token_data = token_data
         

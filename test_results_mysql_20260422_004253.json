@@ -1,0 +1,145 @@
+{
+  "db_type": "mysql",
+  "test_time": "2026-04-22T00:42:53.344955",
+  "total_tests": 41,
+  "passed": 40,
+  "failed": 1,
+  "errors": [
+    "[transaction] active_transactions: 值为 None (必填)"
+  ],
+  "warnings": [],
+  "categories": {
+    "connection": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "connection"
+      ]
+    },
+    "basic": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "metrics": [
+        "version",
+        "uptime_seconds",
+        "server_id",
+        "port"
+      ]
+    },
+    "session": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "metrics": [
+        "active_connections",
+        "total_connections",
+        "max_connections",
+        "conn_usage_pct"
+      ]
+    },
+    "space": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "tablespaces",
+        "datafile_count"
+      ]
+    },
+    "performance": {
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "metrics": [
+        "qps",
+        "tps",
+        "buffer_hit_ratio"
+      ]
+    },
+    "lock": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "locks",
+        "lock_wait_count"
+      ]
+    },
+    "buffer": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "innodb_buffer_pool_size_mb",
+        "buffer_hit_ratio"
+      ]
+    },
+    "transaction": {
+      "tests": 1,
+      "passed": 0,
+      "failed": 1,
+      "metrics": [
+        "active_transactions"
+      ]
+    },
+    "sql": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "slow_queries_total"
+      ]
+    },
+    "replication": {
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "metrics": [
+        "slave_io_running",
+        "slave_sql_running",
+        "seconds_behind_master"
+      ]
+    },
+    "config": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "config_params"
+      ]
+    },
+    "log": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "binlog_file",
+        "binlog_position"
+      ]
+    },
+    "mysql_replication": {
+      "tests": 15,
+      "passed": 15,
+      "failed": 0,
+      "metrics": [
+        "gtid_mode",
+        "gtid_purged",
+        "gtid_executed",
+        "slave_parallel_workers",
+        "slave_parallel_type",
+        "replication_channels",
+        "relay_log_name",
+        "exec_master_log_pos",
+        "last_sql_errno",
+        "last_io_errno",
+        "master_host",
+        "master_uuid",
+        "replication_health",
+        "replicate_do_db",
+        "replicate_ignore_db"
+      ]
+    }
+  }
+}

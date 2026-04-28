@@ -34,7 +34,7 @@ const AlertList = () => {
     setLoading(true)
     try {
       const response = await alertAPI.list({ limit: 100 })
-      const alertList = response.data?.alerts || []
+      const alertList = response?.alerts || []
       setAlerts(alertList)
       
       // 统计

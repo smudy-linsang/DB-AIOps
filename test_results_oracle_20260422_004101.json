@@ -1,0 +1,160 @@
+{
+  "db_type": "oracle",
+  "test_time": "2026-04-22T00:41:00.974144",
+  "total_tests": 49,
+  "passed": 48,
+  "failed": 1,
+  "errors": [
+    "[session] total_connections: 值为 None (必填)"
+  ],
+  "warnings": [],
+  "categories": {
+    "connection": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "connection"
+      ]
+    },
+    "basic": {
+      "tests": 9,
+      "passed": 9,
+      "failed": 0,
+      "metrics": [
+        "version",
+        "uptime_seconds",
+        "instance_name",
+        "host_name",
+        "db_name",
+        "db_unique_name",
+        "open_mode",
+        "database_role",
+        "log_mode"
+      ]
+    },
+    "session": {
+      "tests": 4,
+      "passed": 3,
+      "failed": 1,
+      "metrics": [
+        "active_connections",
+        "total_connections",
+        "max_connections",
+        "conn_usage_pct"
+      ]
+    },
+    "space": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "tablespaces",
+        "datafile_count"
+      ]
+    },
+    "performance": {
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "metrics": [
+        "qps",
+        "tps",
+        "logical_reads",
+        "physical_reads",
+        "physical_writes"
+      ]
+    },
+    "lock": {
+      "tests": 2,
+      "passed": 2,
+      "failed": 0,
+      "metrics": [
+        "locks",
+        "lock_wait_count"
+      ]
+    },
+    "buffer": {
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "metrics": [
+        "buffer_pools",
+        "buffer_cache_mb",
+        "shared_pool_mb"
+      ]
+    },
+    "transaction": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "active_transactions"
+      ]
+    },
+    "sql": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "slow_queries_total"
+      ]
+    },
+    "replication": {
+      "tests": 4,
+      "passed": 4,
+      "failed": 0,
+      "metrics": [
+        "rac_instance_count",
+        "rac_instances",
+        "dg_database_role",
+        "dg_protection_mode"
+      ]
+    },
+    "config": {
+      "tests": 1,
+      "passed": 1,
+      "failed": 0,
+      "metrics": [
+        "config_params"
+      ]
+    },
+    "log": {
+      "tests": 3,
+      "passed": 3,
+      "failed": 0,
+      "metrics": [
+        "log_current",
+        "log_active",
+        "archive_logs_1day"
+      ]
+    },
+    "rac": {
+      "tests": 5,
+      "passed": 5,
+      "failed": 0,
+      "metrics": [
+        "rac_interconnects",
+        "ic_bytes_sent_total",
+        "ic_bytes_received_total",
+        "cache_fusion_stats",
+        "gc_wait_events"
+      ]
+    },
+    "adg": {
+      "tests": 8,
+      "passed": 8,
+      "failed": 0,
+      "metrics": [
+        "apply_lag",
+        "transport_lag",
+        "archive_gap_count",
+        "archive_gap_list",
+        "adg_processes",
+        "mrp_status",
+        "rfs_status",
+        "dg_switchover_status"
+      ]
+    }
+  }
+}

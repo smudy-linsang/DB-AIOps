@@ -28,7 +28,7 @@ const DatabaseList = () => {
     setLoading(true)
     try {
       const response = await databaseAPI.list()
-      setDatabases(response.data?.databases || [])
+      setDatabases(response?.databases || [])
       message.success('数据加载成功')
     } catch (error) {
       console.error('获取数据失败:', error)
@@ -56,7 +56,7 @@ const DatabaseList = () => {
     const typeMap = {
       oracle: { color: 'red', text: 'Oracle' },
       mysql: { color: 'blue', text: 'MySQL' },
-      postgresql: { color: 'green', text: 'PostgreSQL' },
+      pgsql: { color: 'green', text: 'PostgreSQL' },
       dm: { color: 'purple', text: 'DM达梦' },
       gbase: { color: 'cyan', text: 'GBase' },
       tdsql: { color: 'orange', text: 'TDSQL' }
@@ -195,7 +195,7 @@ const DatabaseList = () => {
             <Option value="all">全部类型</Option>
             <Option value="oracle">Oracle</Option>
             <Option value="mysql">MySQL</Option>
-            <Option value="postgresql">PostgreSQL</Option>
+            <Option value="pgsql">PostgreSQL</Option>
             <Option value="dm">DM达梦</Option>
             <Option value="gbase">GBase</Option>
             <Option value="tdsql">TDSQL</Option>

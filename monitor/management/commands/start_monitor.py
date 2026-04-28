@@ -887,7 +887,7 @@ class OracleChecker(BaseDBChecker):
             "active_connections": active_sessions,
             "inactive_connections": inactive_sessions,
             "background_sessions": background_sessions,
-            "total_sessions": total_sessions,
+            "total_connections": total_sessions,
             "max_connections": max_conn,
             "conn_usage_pct": conn_usage_pct,
             
@@ -1730,6 +1730,9 @@ class MySQLChecker(BaseDBChecker):
             "conn_usage_pct": conn_usage_pct,
             "aborted_connects": aborted_connects,
             "aborted_clients": aborted_clients,
+            # 兼容字段名
+            "active_connections": threads_running,
+            "total_connections": threads_connected,
             
             # 空间
             "database_sizes": database_sizes,
@@ -1759,6 +1762,7 @@ class MySQLChecker(BaseDBChecker):
             "table_locks_immediate": table_locks_immediate,
             "table_locks_waited": table_locks_waited,
             "locks": locks,
+            "lock_wait_count": innodb_row_lock_waits,
             
             # 会话详情
             "session_list": session_list,
@@ -1830,6 +1834,7 @@ class MySQLChecker(BaseDBChecker):
             "innodb_trx_count": innodb_trx_count,
             "innodb_trx_committed": innodb_trx_committed,
             "innodb_trx_rolled_back": innodb_trx_rolled_back,
+            "active_transactions": innodb_trx_count,
             
             # 日志
             "binlog_count": binlog_count,
@@ -1855,10 +1860,12 @@ class PostgreSQLChecker(BaseDBChecker):
     
     def get_connection(self, config):
         dbname = config.service_name if config.service_name else 'postgres'
-        return psycopg2.connect(
+        conn = psycopg2.connect(
             database=dbname, user=config.username, password=config.get_password(),
             host=config.host, port=config.port, connect_timeout=5
         )
+        conn.autocommit = True  # Avoid "current transaction aborted" errors
+        return conn
     
     def collect_metrics(self, config, conn):
         cur = conn.cursor()
@@ -2259,11 +2266,11 @@ class PostgreSQLChecker(BaseDBChecker):
         # =============================================
         # Top 20 表大小
         cur.execute("""
-            SELECT schemaname, tablename, 
-                   pg_size_pretty(pg_total_relation_size(schemaname||'.'||tablename)) as size_pretty,
-                   pg_total_relation_size(schemaname||'.'||tablename) as size_bytes
+            SELECT schemaname, relname, 
+                   pg_size_pretty(pg_total_relation_size(schemaname||'.'||relname)) as size_pretty,
+                   pg_total_relation_size(schemaname||'.'||relname) as size_bytes
             FROM pg_stat_user_tables
-            ORDER BY pg_total_relation_size(schemaname||'.'||tablename) DESC
+            ORDER BY pg_total_relation_size(schemaname||'.'||relname) DESC
             LIMIT 20
         """)
         table_size_top20 = []
@@ -2279,10 +2286,10 @@ class PostgreSQLChecker(BaseDBChecker):
         unused_indexes = []
         try:
             cur.execute("""
-                SELECT schemaname, tablename, indexname
+                SELECT schemaname, relname, indexname
                 FROM pg_stat_user_indexes
                 WHERE idx_scan = 0
-                ORDER BY schemaname, tablename
+                ORDER BY schemaname, relname
                 LIMIT 20
             """)
             for row in cur.fetchall():
@@ -2298,7 +2305,7 @@ class PostgreSQLChecker(BaseDBChecker):
         tables_needing_vacuum = []
         try:
             cur.execute("""
-                SELECT schemaname, tablename, n_dead_tup, n_live_tup,
+                SELECT schemaname, relname, n_dead_tup, n_live_tup,
                        ROUND(n_dead_tup::float / NULLIF(n_live_tup + n_dead_tup, 0) * 100, 2) as dead_pct
                 FROM pg_stat_user_tables
                 WHERE n_dead_tup > 1000
@@ -2317,8 +2324,8 @@ class PostgreSQLChecker(BaseDBChecker):
             pass
         
         # 序列使用
-        cursor.execute("SELECT COUNT(*) FROM pg_sequences")
         try:
+            cur.execute("SELECT COUNT(*) FROM pg_sequences")
             sequence_count = int(cur.fetchone()[0])
         except:
             sequence_count = 0
@@ -2589,7 +2596,7 @@ class DamengChecker(BaseDBChecker):
         # =============================================
         # 2. 连接与会话 (session)
         # =============================================
-        cur.execute("SELECT count(*) FROM v$sessions WHERE STATUS='ACTIVE'")
+        cur.execute("SELECT count(*) FROM v$sessions WHERE STATE='ACTIVE'")
         active_sessions = int(cur.fetchone()[0])
         
         cur.execute("SELECT count(*) FROM v$sessions")
@@ -2761,19 +2768,19 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("""
                 SELECT 
-                    SESS_ID, USER_NAME, STATUS, PROGRAM, IP, HOST,
+                    SESS_ID, USER_NAME, STATE, PROGRAM, IP, HOST,
                     SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT,
                     TRX_ID, TRANSACTION_ID
                 FROM V$SESSIONS
                 WHERE USER_NAME IS NOT NULL
-                ORDER BY STATUS, SESS_ID
+                ORDER BY STATE, SESS_ID
                 LIMIT 100
             """)
             for row in cur.fetchall():
                 session_list.append({
                     "sess_id": str(row[0]),
                     "user_name": row[1] or 'N/A',
-                    "status": row[2] or 'N/A',
+                    "state": row[2] or 'N/A',
                     "program": row[3] or 'N/A',
                     "ip": row[4] or 'N/A',
                     "host": row[5] or 'N/A',
@@ -3127,7 +3134,7 @@ class DamengChecker(BaseDBChecker):
             cur.execute("""
                 SELECT USER_NAME, COUNT(*) as CNT
                 FROM V$SESSIONS
-                WHERE STATUS = 'FAILED'
+                WHERE STATE = 'FAILED'
                 GROUP BY USER_NAME
             """)
             failed_logins = []
@@ -4245,7 +4252,7 @@ class Command(BaseCommand):
                 try:
                     future.result(timeout=COLLECT_TIMEOUT_SEC)
                 except FuturesTimeoutError:
-                    print(f"  ⏱️ [{cfg.name}] 采集超时{COLLECT_TIMEOUT_SEC}s），记录 DOWN")
+                    print(f"  [TIMEOUT] [{cfg.name}] 采集超时{COLLECT_TIMEOUT_SEC}s），记录 DOWN")
                     self.process_result(cfg, 'DOWN', {'error': f'采集超时{COLLECT_TIMEOUT_SEC}s'})
                 except Exception as e:
                     print(f"  [{cfg.name}] 采集线程异常：{e}")
@@ -4263,9 +4270,9 @@ class Command(BaseCommand):
         am.fire_or_resolve(
             condition=(current_status == 'DOWN'),
             alert_type='down', metric_key='',
-            fire_title='🔴 故障告警',
+            fire_title='[DOWN] 故障告警',
             fire_body=f"数据库无法连接\n错误：{data.get('error', '未知错误')}",
-            resolve_title='🟢 恢复通知',
+            resolve_title='[RECOVERED] 恢复通知',
             resolve_body='数据库已重新恢复连接',
             severity='critical',
         )
@@ -4279,9 +4286,9 @@ class Command(BaseCommand):
             am.fire_or_resolve(
                 condition=bool(tbs_warn),
                 alert_type='tablespace', metric_key='',
-                fire_title='🟠 容量告警',
+                fire_title='[WARNING] 容量告警',
                 fire_body=f"表空间使用率超过 {TBS_THRESHOLD}%：\n{', '.join(tbs_warn)}",
-                resolve_title='🟢 容量恢复',
+                resolve_title='[RECOVERED] 容量恢复',
                 resolve_body='所有表空间使用率已降至阈值以下',
             )
 
@@ -4290,11 +4297,11 @@ class Command(BaseCommand):
             am.fire_or_resolve(
                 condition=(conn_usage > CONN_THRESHOLD_PCT),
                 alert_type='connection', metric_key='conn_usage_pct',
-                fire_title='🟠 连接数告警',
+                fire_title='[WARNING] 连接数告警',
                 fire_body=(f"连接数使用率已达 {conn_usage}%\n"
                            f"当前连接：{data.get('active_connections', 0)}\n"
                            f"最大连接：{data.get('max_connections', 0)}"),
-                resolve_title='🟢 连接数恢复',
+                resolve_title='[RECOVERED] 连接数恢复',
                 resolve_body=f"连接数使用率已恢复正常（当前 {conn_usage}%）",
             )
 
@@ -4303,14 +4310,14 @@ class Command(BaseCommand):
             am.fire_or_resolve(
                 condition=bool(current_locks),
                 alert_type='lock', metric_key='',
-                fire_title='🔴 性能告警：锁等待',
+                fire_title='[CRITICAL] 性能告警：锁等待',
                 fire_body=self._build_lock_msg(current_locks),
-                resolve_title='🟢 锁等待解除',
+                resolve_title='[RECOVERED] 锁等待解除',
                 resolve_body='数据库阻塞已全部解除',
                 severity='critical',
             )
             if current_locks:
-                print(f"  🛑 [锁等待] {len(current_locks)} 个阻塞会话")
+                print(f"  [LOCK] {len(current_locks)} 个阻塞会话")
 
             # ======================================
             # D. Phase 2: 智能引擎分析
@@ -4357,7 +4364,7 @@ class Command(BaseCommand):
                     # 计算正常范围
                     normal_range = f"{baseline.normal_min:.2f} ~ {baseline.normal_max:.2f}"
                     direction_label = '暴涨' if anomaly_type == 'high' else '骤降'
-                    emoji = '🔴' if alert_result['severity'] == 'critical' else '🟡'
+                    emoji = '[CRITICAL]' if alert_result['severity'] == 'critical' else '[WARNING]'
                     body = (
                         f"指标：{metric_name}\n"
                         f"当前值：{current_val}\n"
@@ -4373,9 +4380,9 @@ class Command(BaseCommand):
                         title=f'{emoji} 基线异常：{metric_name}', description=body,
                         severity=alert_result['severity'],
                     )
-                    print(f"  📊 [基线] {metric_name}={current_val} 偏离（{direction_label}） [{alert_result['severity']}]")
+                    print(f"  [BASELINE] {metric_name}={current_val} 偏离（{direction_label}） [{alert_result['severity']}]")
                 else:
-                    print(f"  📊 [基线-收敛] {metric_name}={current_val} 检测到异常但处于收敛窗口内")
+                    print(f"  [BASELINE-CONVERGE] {metric_name}={current_val} 检测到异常但处于收敛窗口内")
 
             # 对本轮已恢复的基线异常发送恢复通知
             from monitor.models import AlertLog
@@ -4386,12 +4393,12 @@ class Command(BaseCommand):
                 if al.metric_key not in anomaly_keys:
                     am.resolve(
                         alert_type='baseline', metric_key=al.metric_key,
-                        recovery_title=f'🟢 基线恢复：{al.metric_key}',
+                        recovery_title=f'[RECOVERED] 基线恢复：{al.metric_key}',
                         recovery_body=f'指标 {al.metric_key} 已恢复至正常范围',
                     )
 
         except Exception as e:
-            print(f"  ⚠️ 基线检测异常：{e}")
+            print(f"  [WARNING] 基线检测异常：{e}")
 
         # --- D2. RCA 根因分析 ---
         try:
@@ -4408,11 +4415,11 @@ class Command(BaseCommand):
                         )
                         am.fire(
                             alert_type='rca', metric_key=diag['rule_id'],
-                            title=f"🔴 RCA根因：{diag['name']}",
+                            title=f"[CRITICAL] RCA根因：{diag['name']}",
                             description=body,
                             severity='critical',
                         )
-                        print(f"  🔍 [RCA] {diag['rule_id']} - {diag['name']}")
+                        print(f"  [RCA] {diag['rule_id']} - {diag['name']}")
 
             # 复合故障告警
             if rca_report.get('compound_diagnoses'):
@@ -4424,14 +4431,14 @@ class Command(BaseCommand):
                     )
                     am.fire(
                         alert_type='rca_compound', metric_key=compound['id'],
-                        title=f"🚨 复合故障：{compound['name']}",
+                        title=f"[CRITICAL] 复合故障：{compound['name']}",
                         description=body,
                         severity='critical',
                     )
-                    print(f"  🚨 [RCA复合] {compound['id']} - {compound['name']}")
+                    print(f"  [RCA-COMPOUND] {compound['id']} - {compound['name']}")
 
         except Exception as e:
-            print(f"  ⚠️ RCA分析异常：{e}")
+            print(f"  [WARNING] RCA分析异常：{e}")
 
         # --- D3. 健康评分 (每小时一次) ---
         try:
@@ -4448,7 +4455,7 @@ class Command(BaseCommand):
 
                 # 评分低于C级发送告警
                 if health_report['grade'] in ('D', 'F'):
-                    emoji = '🔴' if health_report['grade'] == 'F' else '🟠'
+                    emoji = '[CRITICAL]' if health_report['grade'] == 'F' else '[WARNING]'
                     body = (
                         f"健康评分：{health_report['overall_score']} 分\n"
                         f"等级：{health_report['grade']} ({health_report['grade_description']})\n\n"
@@ -4464,12 +4471,12 @@ class Command(BaseCommand):
                         description=body,
                         severity='critical' if health_report['grade'] == 'F' else 'warning',
                     )
-                    print(f"  💚 [健康] 评分={health_report['overall_score']} {health_report['grade']}级")
+                    print(f"  [HEALTH] 评分={health_report['overall_score']} {health_report['grade']}级")
                 else:
-                    print(f"  💚 [健康] 评分={health_report['overall_score']} {health_report['grade']}级 (正常)")
+                    print(f"  [HEALTH] 评分={health_report['overall_score']} {health_report['grade']}级 (正常)")
 
         except Exception as e:
-            print(f"  ⚠️ 健康评分异常：{e}")
+            print(f"  [WARNING] 健康评分异常：{e}")
 
         # --- D4. 容量预测 (每天一次) ---
         try:
@@ -4486,8 +4493,8 @@ class Command(BaseCommand):
 
                 if capacity_report.get('alerts'):
                     for alert in capacity_report['alerts']:
-                        emoji = '🚨' if alert['severity'] == 'emergency' else \
-                                '🔴' if alert['severity'] == 'critical' else '🟠'
+                        emoji = '[EMERGENCY]' if alert['severity'] == 'emergency' else \
+                                '[CRITICAL]' if alert['severity'] == 'critical' else '[WARNING]'
                         body = (
                             f"类型：{alert['type']}\n"
                             f"当前值：{alert['current']}%\n"
@@ -4500,10 +4507,10 @@ class Command(BaseCommand):
                             description=body,
                             severity=alert['severity'],
                         )
-                        print(f"  📈 [容量] {alert['type']} - {alert['message']}")
+                        print(f"  [CAPACITY] {alert['type']} - {alert['message']}")
 
         except Exception as e:
-            print(f"  ⚠️ 容量预测异常：{e}")
+            print(f"  [WARNING] 容量预测异常：{e}")
 
     def _build_lock_msg(self, locks):
         """构建锁等待告警消"""

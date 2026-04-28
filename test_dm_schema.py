@@ -6,7 +6,7 @@ os.environ["PYTHONIOENCODING"] = "utf-8"
 def inspect_dm_schema() -> None:
     import pyodbc
 
-    conn_str = "DRIVER={DM8 ODBC DRIVER};SERVER=localhost:5236;UID=SYSDBA;PWD=Abcd@1234;"
+    conn_str = "DRIVER={DM8 ODBC DRIVER};SERVER=127.0.0.1:5236;UID=SYSDBA;PWD=Abcd1234!;"
     conn = pyodbc.connect(conn_str, timeout=5)
     cur = conn.cursor()
 
