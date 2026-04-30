@@ -128,6 +128,10 @@ const DatabaseList = () => {
     order: 'desc'
   })
 
+  // 批量选择状态
+  const [selectedRowKeys, setSelectedRowKeys] = useState([])
+  const [batchDeleteLoading, setBatchDeleteLoading] = useState(false)
+
   // 添加数据库弹窗状态
   const [addModalVisible, setAddModalVisible] = useState(false)
   const [addModalLoading, setAddModalLoading] = useState(false)
@@ -292,6 +296,63 @@ const DatabaseList = () => {
       console.error('删除数据库失败:', error)
       message.error(error.response?.data?.error || '删除数据库失败')
     }
+  }
+
+  // 批量删除选中的数据库
+  const handleBatchDelete = async () => {
+    if (selectedRowKeys.length === 0) return
+    
+    const selectedDbs = databases.filter(db => selectedRowKeys.includes(db.id))
+    const dbNames = selectedDbs.map(db => db.name).join('、')
+    
+    Modal.confirm({
+      title: '确认批量删除',
+      icon: <ExclamationCircleOutlined />,
+      content: (
+        <div>
+          <p>确定要删除以下 {selectedRowKeys.length} 个数据库吗？</p>
+          <ul style={{ maxHeight: 200, overflow: 'auto', paddingLeft: 20, margin: '10px 0' }}>
+            {selectedDbs.map(db => (
+              <li key={db.id} style={{ color: '#ff4d4f', marginBottom: 4 }}>
+                {db.name}（{db.host}:{db.port}）
+              </li>
+            ))}
+          </ul>
+          <p style={{ color: '#ff4d4f', fontWeight: 500 }}>
+            所有关联的监控日志、告警记录、健康评分、基线模型、容量预测数据将一并删除！
+          </p>
+        </div>
+      ),
+      okText: '确认删除',
+      cancelText: '取消',
+      okButtonProps: { danger: true, loading: batchDeleteLoading },
+      onOk: async () => {
+        setBatchDeleteLoading(true)
+        let successCount = 0
+        let failCount = 0
+        const failedDbs = []
+        
+        for (const db of selectedDbs) {
+          try {
+            await databaseAPI.delete(db.id)
+            successCount++
+          } catch (error) {
+            failCount++
+            failedDbs.push(db.name)
+          }
+        }
+        
+        setBatchDeleteLoading(false)
+        setSelectedRowKeys([])
+        fetchDatabases()
+        
+        if (failCount === 0) {
+          message.success(`已成功删除 ${successCount} 个数据库及其关联监控数据`)
+        } else {
+          message.warning(`成功删除 ${successCount} 个，失败 ${failCount} 个（${failedDbs.join('、')}）`)
+        }
+      }
+    })
   }
 
   // 获取单个数据库的状态
@@ -1046,6 +1107,17 @@ const DatabaseList = () => {
                   {sortConfig.order === 'asc' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
                 </Button>
               </Dropdown>
+              {selectedRowKeys.length > 0 && (
+                <Button
+                  type="primary"
+                  danger
+                  icon={<CloseCircleOutlined />}
+                  onClick={handleBatchDelete}
+                  loading={batchDeleteLoading}
+                >
+                  批量删除（{selectedRowKeys.length}）
+                </Button>
+              )}
               <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
                 添加数据库
               </Button>
@@ -1076,7 +1148,12 @@ const DatabaseList = () => {
         dataSource={filteredAndSortedDatabases}
         rowKey="id"
         loading={loading}
-        scroll={{ x: 1200 }}
+        scroll={{ x: 1400 }}
+        rowSelection={{
+          selectedRowKeys,
+          onChange: setSelectedRowKeys,
+          columnWidth: 50
+        }}
         pagination={{
           defaultPageSize: 20,
           showSizeChanger: true,
@@ -1091,7 +1168,15 @@ const DatabaseList = () => {
           return ''
         }}
         onRow={(record) => ({
-          onClick: () => navigate(`/databases/${record.id}`),
+          onClick: (e) => {
+            // 如果点击的是复选框、操作按钮或链接，不跳转详情
+            const target = e.target
+            if (target.type === 'checkbox' || target.closest('.ant-table-selection') ||
+                target.closest('.ant-btn') || target.tagName === 'A') {
+              return
+            }
+            navigate(`/databases/${record.id}`)
+          },
           style: { cursor: 'pointer' }
         })}
       />
