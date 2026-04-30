@@ -13,7 +13,8 @@ from monitor.views_enhanced import (
 )
 from monitor.api_views import (
     HealthCheckView, LoginView, LogoutView, DatabaseListView,
-    DatabaseTestConnectionView, DatabaseStatusView, DatabaseMetricsView,
+    DatabaseTestConnectionView, DatabaseConfigDetailView,
+    DatabaseStatusView, DatabaseMetricsView,
     DatabaseBaselineView, DatabasePredictionView, DatabaseHealthView,
     DatabaseAlertsView, AlertListView, AlertAcknowledgeView,
     AuditLogListView, AuditLogApproveView, AuditLogRejectView,
@@ -55,6 +56,7 @@ urlpatterns = [
     path('api/v1/auth/logout/', LogoutView.as_view()),
     path('api/v1/databases/', DatabaseListView.as_view()),
     path('api/v1/databases/test-connection/', DatabaseTestConnectionView.as_view()),
+    path('api/v1/databases/<int:config_id>/', DatabaseConfigDetailView.as_view()),
     path('api/v1/databases/<int:config_id>/status/', DatabaseStatusView.as_view()),
     path('api/v1/databases/<int:config_id>/metrics/', DatabaseMetricsView.as_view()),
     path('api/v1/databases/<int:config_id>/baseline/', DatabaseBaselineView.as_view()),

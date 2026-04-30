@@ -12,7 +12,7 @@ import {
   ClockCircleOutlined, WarningOutlined, QuestionCircleOutlined,
   ExclamationCircleOutlined, SortAscendingOutlined,
   ArrowUpOutlined, ArrowDownOutlined, SyncOutlined,
-  InfoCircleOutlined, FireOutlined
+  InfoCircleOutlined, FireOutlined, EditOutlined
 } from '@ant-design/icons'
 import { databaseAPI, alertAPI } from '../services/api'
 import dayjs from 'dayjs'
@@ -135,6 +135,14 @@ const DatabaseList = () => {
   const [testResult, setTestResult] = useState(null) // { success, message, version }
   const [form] = Form.useForm()
 
+  // 编辑数据库弹窗状态
+  const [editModalVisible, setEditModalVisible] = useState(false)
+  const [editModalLoading, setEditModalLoading] = useState(false)
+  const [editTestLoading, setEditTestLoading] = useState(false)
+  const [editTestResult, setEditTestResult] = useState(null)
+  const [editingDb, setEditingDb] = useState(null) // 当前正在编辑的数据库
+  const [editForm] = Form.useForm()
+
   // 获取数据库列表
   const fetchDatabases = useCallback(async () => {
     setLoading(true)
@@ -199,6 +207,79 @@ const DatabaseList = () => {
   // 数据库类型变更时自动设置默认端口
   const handleDbTypeChange = (dbType) => {
     form.setFieldsValue({ port: DEFAULT_PORTS[dbType] || 3306 })
+  }
+
+  // 打开编辑数据库弹窗
+  const openEditModal = async (db) => {
+    setEditingDb(db)
+    setEditTestResult(null)
+    // 获取最新配置详情
+    try {
+      const detail = await databaseAPI.getDetail(db.id)
+      editForm.setFieldsValue({
+        name: detail.name,
+        db_type: detail.db_type,
+        host: detail.host,
+        port: detail.port,
+        username: detail.username,
+        password: '',
+        service_name: detail.service_name || ''
+      })
+      setEditModalVisible(true)
+    } catch (error) {
+      message.error('获取数据库详情失败')
+    }
+  }
+
+  // 提交编辑数据库表单
+  const handleEditDatabase = async (values) => {
+    if (!editingDb) return
+    setEditModalLoading(true)
+    try {
+      // 如果密码为空，不提交密码字段
+      const submitData = { ...values }
+      if (!submitData.password) {
+        delete submitData.password
+      }
+      await databaseAPI.update(editingDb.id, submitData)
+      message.success('数据库配置更新成功')
+      setEditModalVisible(false)
+      setEditingDb(null)
+      editForm.resetFields()
+      setEditTestResult(null)
+      fetchDatabases()
+    } catch (error) {
+      console.error('更新数据库失败:', error)
+      message.error(error.response?.data?.error || '更新数据库失败')
+    } finally {
+      setEditModalLoading(false)
+    }
+  }
+
+  // 测试编辑后的数据库连接
+  const handleEditTestConnection = async () => {
+    try {
+      const values = await editForm.validateFields()
+      setEditTestLoading(true)
+      setEditTestResult(null)
+      const response = await databaseAPI.testConnection(values)
+      setEditTestResult(response)
+    } catch (error) {
+      if (error.errorFields) {
+        return
+      }
+      setEditTestResult({
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || '连接测试请求失败'
+      })
+    } finally {
+      setEditTestLoading(false)
+    }
+  }
+
+  // 编辑弹窗中数据库类型变更
+  const handleEditDbTypeChange = (dbType) => {
+    editForm.setFieldsValue({ port: DEFAULT_PORTS[dbType] || 3306 })
   }
 
   // 获取单个数据库的状态
@@ -706,7 +787,7 @@ const DatabaseList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 100,
+      width: 160,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -715,6 +796,14 @@ const DatabaseList = () => {
               详情
             </Button>
           </Link>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={(e) => { e.stopPropagation(); openEditModal(record) }}
+          >
+            编辑
+          </Button>
         </Space>
       )
     }
@@ -1090,6 +1179,136 @@ const DatabaseList = () => {
                   <Button onClick={() => { setAddModalVisible(false); setTestResult(null) }}>取消</Button>
                   <Button type="primary" htmlType="submit" loading={addModalLoading}>
                     添加
+                  </Button>
+                </Space>
+              </Col>
+            </Row>
+          </Form.Item>
+        </Form>
+      </Modal>
+
+      {/* 编辑数据库弹窗 */}
+      <Modal
+        title={`编辑数据库 - ${editingDb?.name || ''}`}
+        open={editModalVisible}
+        onCancel={() => { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }}
+        footer={null}
+        width={500}
+        destroyOnClose
+      >
+        <Form
+          form={editForm}
+          layout="vertical"
+          onFinish={handleEditDatabase}
+          initialValues={{
+            port: 3306
+          }}
+        >
+          <Form.Item
+            name="name"
+            label="数据库名称"
+            rules={[{ required: true, message: '请输入数据库名称' }]}
+          >
+            <Input placeholder="例如: 核心交易库_主节点" />
+          </Form.Item>
+
+          <Form.Item
+            name="db_type"
+            label="数据库类型"
+            rules={[{ required: true, message: '请选择数据库类型' }]}
+          >
+            <Select placeholder="请选择数据库类型" onChange={handleEditDbTypeChange}>
+              {Object.entries(DB_TYPE_MAP).map(([key, name]) => (
+                <Select.Option key={key} value={key}>
+                  {name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={16}>
+              <Form.Item
+                name="host"
+                label="主机地址"
+                rules={[{ required: true, message: '请输入主机地址' }]}
+              >
+                <Input placeholder="例如: 192.168.1.100 或 localhost" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="port"
+                label="端口"
+                rules={[{ required: true, message: '请输入端口' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[{ required: true, message: '请输入用户名' }]}
+          >
+            <Input placeholder="请输入数据库用户名" />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="密码"
+            extra="留空则不修改密码"
+          >
+            <Input.Password placeholder="留空则不修改密码" />
+          </Form.Item>
+
+          <Form.Item
+            name="service_name"
+            label="服务名/数据库名"
+            extra="Oracle: 服务名(SID), MySQL/PG: 数据库名, 其他类型可留空"
+          >
+            <Input placeholder="Oracle必填，其他可留空" />
+          </Form.Item>
+
+          {/* 测试连接结果显示 */}
+          {editTestResult && (
+            <Form.Item style={{ marginBottom: 16 }}>
+              <Alert
+                type={editTestResult.success ? 'success' : 'error'}
+                showIcon
+                message={
+                  <Space direction="vertical" size={2}>
+                    <Text strong>{editTestResult.success ? '✅ 连接成功' : '❌ 连接失败'}</Text>
+                    <Text>{editTestResult.message}</Text>
+                    {editTestResult.version && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        版本: {editTestResult.version}
+                      </Text>
+                    )}
+                  </Space>
+                }
+              />
+            </Form.Item>
+          )}
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Row gutter={8} justify="end">
+              <Col>
+                <Button
+                  icon={<SyncOutlined spin={editTestLoading} />}
+                  onClick={handleEditTestConnection}
+                  loading={editTestLoading}
+                  disabled={editModalLoading}
+                >
+                  测试连接
+                </Button>
+              </Col>
+              <Col>
+                <Space>
+                  <Button onClick={() => { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }}>取消</Button>
+                  <Button type="primary" htmlType="submit" loading={editModalLoading}>
+                    保存修改
                   </Button>
                 </Space>
               </Col>

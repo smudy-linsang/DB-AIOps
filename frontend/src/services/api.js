@@ -79,6 +79,12 @@ export const databaseAPI = {
   // 获取数据库详情
   getDetail: (id) => api.get(`/databases/${id}/`),
   
+  // 更新数据库配置
+  update: (id, data) => api.put(`/databases/${id}/`, data),
+  
+  // 删除数据库配置
+  delete: (id) => api.delete(`/databases/${id}/`),
+  
   // 获取数据库状态
   getStatus: (id) => api.get(`/databases/${id}/status/`),
   
