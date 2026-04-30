@@ -3,7 +3,8 @@ import { Link, useNavigate } from 'react-router-dom'
 import {
   Table, Tag, Space, Button, Input, Select, Card,
   Typography, Tooltip, Statistic, Row, Col, message,
-  Badge, Progress, Switch, Dropdown, Alert
+  Badge, Progress, Switch, Dropdown, Alert, Modal, Form,
+  InputNumber, Popconfirm
 } from 'antd'
 import {
   SearchOutlined, ReloadOutlined, PlusOutlined,
@@ -44,6 +45,18 @@ const DB_TYPE_COLORS = {
   'tdsql': '#FF9800',
   'mongo': '#4DB6AC',
   'redis': '#FF6370'
+}
+
+// 数据库默认端口
+const DEFAULT_PORTS = {
+  'oracle': 1521,
+  'mysql': 3306,
+  'pgsql': 5432,
+  'dm': 5236,
+  'gbase': 5258,
+  'tdsql': 3306,
+  'mongo': 27017,
+  'redis': 6379
 }
 
 // 状态配置
@@ -115,6 +128,11 @@ const DatabaseList = () => {
     order: 'desc'
   })
 
+  // 添加数据库弹窗状态
+  const [addModalVisible, setAddModalVisible] = useState(false)
+  const [addModalLoading, setAddModalLoading] = useState(false)
+  const [form] = Form.useForm()
+
   // 获取数据库列表
   const fetchDatabases = useCallback(async () => {
     setLoading(true)
@@ -128,6 +146,34 @@ const DatabaseList = () => {
       setLoading(false)
     }
   }, [])
+
+  // 打开添加数据库弹窗
+  const openAddModal = () => {
+    form.resetFields()
+    setAddModalVisible(true)
+  }
+
+  // 提交添加数据库表单
+  const handleAddDatabase = async (values) => {
+    setAddModalLoading(true)
+    try {
+      await databaseAPI.create(values)
+      message.success('数据库配置添加成功')
+      setAddModalVisible(false)
+      form.resetFields()
+      fetchDatabases()
+    } catch (error) {
+      console.error('添加数据库失败:', error)
+      message.error(error.response?.data?.error || '添加数据库失败')
+    } finally {
+      setAddModalLoading(false)
+    }
+  }
+
+  // 数据库类型变更时自动设置默认端口
+  const handleDbTypeChange = (dbType) => {
+    form.setFieldsValue({ port: DEFAULT_PORTS[dbType] || 3306 })
+  }
 
   // 获取单个数据库的状态
   const fetchDbStatus = useCallback(async (dbId) => {
@@ -846,7 +892,7 @@ const DatabaseList = () => {
                   {sortConfig.order === 'asc' ? <ArrowUpOutlined /> : <ArrowDownOutlined />}
                 </Button>
               </Dropdown>
-              <Button type="primary" icon={<PlusOutlined />} onClick={() => message.info('添加数据库功能开发中')}>
+              <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
                 添加数据库
               </Button>
             </Space>
@@ -895,6 +941,101 @@ const DatabaseList = () => {
           style: { cursor: 'pointer' }
         })}
       />
+
+      {/* 添加数据库弹窗 */}
+      <Modal
+        title="添加数据库"
+        open={addModalVisible}
+        onCancel={() => setAddModalVisible(false)}
+        footer={null}
+        width={500}
+        destroyOnClose
+      >
+        <Form
+          form={form}
+          layout="vertical"
+          onFinish={handleAddDatabase}
+          initialValues={{
+            port: 3306
+          }}
+        >
+          <Form.Item
+            name="name"
+            label="数据库名称"
+            rules={[{ required: true, message: '请输入数据库名称' }]}
+          >
+            <Input placeholder="例如: 核心交易库_主节点" />
+          </Form.Item>
+
+          <Form.Item
+            name="db_type"
+            label="数据库类型"
+            rules={[{ required: true, message: '请选择数据库类型' }]}
+          >
+            <Select placeholder="请选择数据库类型" onChange={handleDbTypeChange}>
+              {Object.entries(DB_TYPE_MAP).map(([key, name]) => (
+                <Select.Option key={key} value={key}>
+                  {name}
+                </Select.Option>
+              ))}
+            </Select>
+          </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={16}>
+              <Form.Item
+                name="host"
+                label="主机地址"
+                rules={[{ required: true, message: '请输入主机地址' }]}
+              >
+                <Input placeholder="例如: 192.168.1.100 或 localhost" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="port"
+                label="端口"
+                rules={[{ required: true, message: '请输入端口' }]}
+              >
+                <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+              </Form.Item>
+            </Col>
+          </Row>
+
+          <Form.Item
+            name="username"
+            label="用户名"
+            rules={[{ required: true, message: '请输入用户名' }]}
+          >
+            <Input placeholder="请输入数据库用户名" />
+          </Form.Item>
+
+          <Form.Item
+            name="password"
+            label="密码"
+            rules={[{ required: true, message: '请输入密码' }]}
+          >
+            <Input.Password placeholder="请输入数据库密码" />
+          </Form.Item>
+
+          <Form.Item
+            name="service_name"
+            label="服务名/数据库名"
+            extra="Oracle: 服务名(SID), MySQL/PG: 数据库名, 其他类型可留空"
+          >
+            <Input placeholder="Oracle必填，其他可留空" />
+          </Form.Item>
+
+          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
+            <Space>
+              <Button onClick={() => setAddModalVisible(false)}>取消</Button>
+              <Button type="primary" htmlType="submit" loading={addModalLoading}>
+                添加
+              </Button>
+            </Space>
+          </Form.Item>
+        </Form>
+      </Modal>
 
       {/* 自定义样式 */}
       <style>{`

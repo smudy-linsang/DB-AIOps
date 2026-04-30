@@ -204,6 +204,78 @@ class DatabaseListView(JSONResponseMixin, View):
             'total': len(result),
             'databases': result
         })
+    
+    def post(self, request):
+        """
+        POST /api/v1/databases/
+        创建新的数据库配置
+        """
+        try:
+            import json
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return self.error_response('Invalid JSON', 400)
+        
+        # 验证必填字段
+        required_fields = ['name', 'db_type', 'host', 'port', 'username', 'password']
+        for field in required_fields:
+            if not data.get(field):
+                return self.error_response(f'Missing required field: {field}', 400)
+        
+        name = data['name'].strip()
+        db_type = data['db_type']
+        host = data['host'].strip()
+        port = data['port']
+        username = data['username'].strip()
+        password = data['password']
+        service_name = data.get('service_name', '').strip() or None
+        
+        # 验证端口
+        try:
+            port = int(port)
+            if port <= 0 or port > 65535:
+                return self.error_response('Invalid port number', 400)
+        except (ValueError, TypeError):
+            return self.error_response('Port must be a valid number', 400)
+        
+        # 验证数据库类型
+        valid_db_types = ['oracle', 'mysql', 'pgsql', 'dm', 'gbase', 'tdsql', 'mongo', 'redis']
+        if db_type not in valid_db_types:
+            return self.error_response(f'Invalid db_type. Must be one of: {", ".join(valid_db_types)}', 400)
+        
+        # 检查是否已存在同名配置
+        from .models import DatabaseConfig
+        if DatabaseConfig.objects.filter(name=name).exists():
+            return self.error_response(f'Database with name "{name}" already exists', 400)
+        
+        # 加密密码并保存
+        from .crypto import encrypt_password
+        encrypted_password = encrypt_password(password)
+        
+        try:
+            config = DatabaseConfig.objects.create(
+                name=name,
+                db_type=db_type,
+                host=host,
+                port=port,
+                username=username,
+                password=encrypted_password,
+                service_name=service_name,
+                is_active=True
+            )
+            
+            return self.json_response({
+                'id': config.id,
+                'name': config.name,
+                'db_type': config.db_type,
+                'host': config.host,
+                'port': config.port,
+                'service_name': config.service_name or '',
+                'is_active': config.is_active,
+                'create_time': config.create_time.isoformat() if config.create_time else None
+            }, status=201)
+        except Exception as e:
+            return self.error_response(f'Failed to create database config: {str(e)}', 500)
 
 
 class DatabaseStatusView(JSONResponseMixin, View):

@@ -70,6 +70,9 @@ export const databaseAPI = {
   // 获取数据库列表
   list: () => api.get('/databases/'),
   
+  // 创建数据库配置
+  create: (data) => api.post('/databases/', data),
+  
   // 获取数据库详情
   getDetail: (id) => api.get(`/databases/${id}/`),
   
