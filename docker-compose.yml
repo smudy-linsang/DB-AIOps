@@ -57,6 +57,31 @@ services:
       retries: 10
 
   # ----------------------------------------
+  # Standalone PostgreSQL (Test Database)
+  # Host port: 5433
+  # User: postgres / postgres123
+  # Database: postgres
+  # ----------------------------------------
+  postgres:
+    image: postgres:16-alpine
+    container_name: dbmonitor-postgres
+    environment:
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+      POSTGRES_DB: postgres
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ----------------------------------------
   # TimescaleDB (PostgreSQL with time-series extensions)
   # Host port: 5432
   # User: postgres / postgres123
@@ -234,6 +259,7 @@ services:
 
 volumes:
   mysql_data:
+  postgres_data:
   timeseries_data:
   redis_data:
   es_data:
