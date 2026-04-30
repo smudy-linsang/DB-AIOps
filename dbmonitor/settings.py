@@ -39,7 +39,7 @@ else:
     DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
 # 允许的主机
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1').split(',')
+ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,web,frontend').split(',')
 
 # CSRF 信任来源
 CSRF_TRUSTED_ORIGINS = [

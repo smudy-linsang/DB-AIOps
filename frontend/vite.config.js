@@ -8,16 +8,16 @@ export default defineConfig({
     proxy: {
       // API 请求代理到 Django 后端
       '/api': {
-        target: 'http://host.docker.internal:8000',
+        target: 'http://web:8000',
         changeOrigin: true,
       },
       // 静态文件和媒体文件
       '/static': {
-        target: 'http://host.docker.internal:8000',
+        target: 'http://web:8000',
         changeOrigin: true,
       },
       '/media': {
-        target: 'http://host.docker.internal:8000',
+        target: 'http://web:8000',
         changeOrigin: true,
       }
     }
