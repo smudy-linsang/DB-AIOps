@@ -282,6 +282,18 @@ const DatabaseList = () => {
     editForm.setFieldsValue({ port: DEFAULT_PORTS[dbType] || 3306 })
   }
 
+  // 删除数据库（级联删除所有关联监控数据）
+  const handleDeleteDatabase = async (db) => {
+    try {
+      const response = await databaseAPI.delete(db.id)
+      message.success(response?.message || `数据库「${db.name}」及关联监控数据已删除`)
+      fetchDatabases()
+    } catch (error) {
+      console.error('删除数据库失败:', error)
+      message.error(error.response?.data?.error || '删除数据库失败')
+    }
+  }
+
   // 获取单个数据库的状态
   const fetchDbStatus = useCallback(async (dbId) => {
     const cacheKey = `${CACHE_CONFIG.status.key}${dbId}`
@@ -787,7 +799,7 @@ const DatabaseList = () => {
     {
       title: '操作',
       key: 'action',
-      width: 160,
+      width: 220,
       fixed: 'right',
       render: (_, record) => (
         <Space size="small">
@@ -804,6 +816,33 @@ const DatabaseList = () => {
           >
             编辑
           </Button>
+          <Popconfirm
+            title="确认删除"
+            description={
+              <span>
+                确定要删除数据库「{record.name}」吗？<br />
+                <Text type="danger" style={{ fontSize: 12 }}>
+                  所有关联的监控日志、告警记录、健康评分、基线模型、容量预测数据将一并删除！
+                </Text>
+              </span>
+            }
+            onConfirm={(e) => { e?.stopPropagation(); handleDeleteDatabase(record) }}
+            onCancel={(e) => e?.stopPropagation()}
+            okText="确认删除"
+            cancelText="取消"
+            okButtonProps={{ danger: true }}
+            placement="left"
+          >
+            <Button
+              type="link"
+              size="small"
+              danger
+              icon={<CloseCircleOutlined />}
+              onClick={(e) => e.stopPropagation()}
+            >
+              删除
+            </Button>
+          </Popconfirm>
         </Space>
       )
     }

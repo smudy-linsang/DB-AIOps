@@ -471,14 +471,35 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
     def delete(self, request, config_id: int):
         """
         DELETE /api/v1/databases/<config_id>/
-        删除数据库配置
+        删除数据库配置及所有关联的监控数据（级联删除）
         """
-        from .models import DatabaseConfig
+        from .models import DatabaseConfig, MonitorLog, AlertLog, HealthScore, BaselineModel, PredictionResult
         try:
             config = DatabaseConfig.objects.get(id=config_id)
+            config_name = config.name
+
+            # 统计将要删除的关联数据量
+            stats = {
+                'monitor_logs': MonitorLog.objects.filter(config=config).count(),
+                'alert_logs': AlertLog.objects.filter(config=config).count(),
+                'health_scores': HealthScore.objects.filter(config=config).count(),
+                'baseline_models': BaselineModel.objects.filter(config=config).count(),
+                'predictions': PredictionResult.objects.filter(config=config).count(),
+            }
+
+            # 级联删除所有关联数据（先删除子表数据，再删除主表）
+            MonitorLog.objects.filter(config=config).delete()
+            AlertLog.objects.filter(config=config).delete()
+            HealthScore.objects.filter(config=config).delete()
+            BaselineModel.objects.filter(config=config).delete()
+            PredictionResult.objects.filter(config=config).delete()
+
+            # 最后删除数据库配置本身
             config.delete()
+
             return self.json_response({
-                'message': '数据库配置已删除'
+                'message': f'数据库配置「{config_name}」及所有关联监控数据已删除',
+                'deleted_stats': stats
             })
         except DatabaseConfig.DoesNotExist:
             return self.error_response('Database config not found', 404)
