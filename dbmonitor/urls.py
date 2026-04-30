@@ -20,6 +20,7 @@ from monitor.api_views import (
     AuditLogExecuteDryRunView, UserListView, UserDetailView,
     UserPasswordView, CurrentUserView,
 )
+from monitor.observability import prometheus_metrics_view
 
 FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
@@ -93,6 +94,10 @@ urlpatterns = [
     path('monitor/db/<int:config_id>/edit/', db_edit),
     path('monitor/db/<int:config_id>/delete/', db_delete),
     path('monitor/db/<int:config_id>/toggle/', db_toggle_active),
+
+    # ========== Observability ==========
+    path('metrics', prometheus_metrics_view, name='prometheus-metrics'),
+    path('metrics/', prometheus_metrics_view, name='prometheus-metrics-slash'),
 ]
 
 # Frontend routes - serve React app

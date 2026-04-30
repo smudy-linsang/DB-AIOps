@@ -92,18 +92,23 @@ services:
     container_name: dbmonitor-web
     environment:
       - DJANGO_ENV=production
+      - USE_POSTGRESQL=True
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=db_monitor
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - TIMESCALEDB_ENABLED=True
+      - TIMESCALEDB_HOST=timescaledb
+      - TIMESCALEDB_PORT=5432
+      - TIMESCALEDB_NAME=timeseriesdb
+      - TIMESCALEDB_USER=postgres
+      - TIMESCALEDB_PASSWORD=postgres123
+      - ES_ENABLED=True
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
       - REDIS_HOST=redis
       - REDIS_PORT=6379
-      - DB_HOST=mysql
-      - DB_PORT=3306
-      - DB_NAME=testdb
-      - DB_USER=monitor
-      - DB_PASSWORD=monitor123
-      - TIMESERIES_DB_HOST=timescaledb
-      - TIMESERIES_DB_PORT=5432
-      - TIMESERIES_DB_NAME=timeseriesdb
-      - TIMESERIES_DB_USER=postgres
-      - TIMESERIES_DB_PASSWORD=postgres123
     ports:
       - "8000:8000"
     volumes:
@@ -115,6 +120,10 @@ services:
         condition: service_healthy
       redis:
         condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - dbmonitor-net
     command: >
@@ -145,35 +154,89 @@ services:
              npm run dev -- --host 0.0.0.0 --port 3000"
 
   # ----------------------------------------
-  # APScheduler / Celery Worker (Optional)
+  # 数据采集守护进程
+  # 每5分钟采集所有数据库的指标数据
   # ----------------------------------------
-  # celery-worker:
-  #   build:
-  #     context: .
-  #     dockerfile: Dockerfile
-  #   container_name: dbmonitor-celery
-  #   environment:
-  #     - DJANGO_ENV=production
-  #     - REDIS_HOST=redis
-  #     - REDIS_PORT=6379
-  #     - DB_HOST=mysql
-  #     - DB_PORT=3306
-  #     - DB_NAME=testdb
-  #     - DB_USER=monitor
-  #     - DB_PASSWORD=monitor123
-  #   volumes:
-  #     - .:/app
-  #   depends_on:
-  #     - redis
-  #     - mysql
-  #   networks:
-  #     - dbmonitor-net
-  #   command: celery -A dbmonitor worker -l info
+  collector:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: dbmonitor-collector
+    environment:
+      - DJANGO_ENV=production
+      - USE_POSTGRESQL=True
+      - POSTGRES_HOST=timescaledb
+      - POSTGRES_PORT=5432
+      - POSTGRES_DB=db_monitor
+      - POSTGRES_USER=postgres
+      - POSTGRES_PASSWORD=postgres123
+      - TIMESCALEDB_ENABLED=True
+      - TIMESCALEDB_HOST=timescaledb
+      - TIMESCALEDB_PORT=5432
+      - TIMESCALEDB_NAME=timeseriesdb
+      - TIMESCALEDB_USER=postgres
+      - TIMESCALEDB_PASSWORD=postgres123
+      - ES_ENABLED=True
+      - ES_HOST=elasticsearch
+      - ES_PORT=9200
+      - REDIS_HOST=redis
+      - REDIS_PORT=6379
+    volumes:
+      - .:/app
+    depends_on:
+      mysql:
+        condition: service_healthy
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+      elasticsearch:
+        condition: service_healthy
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
+    networks:
+      - dbmonitor-net
+    command: python manage.py start_monitor
+    restart: unless-stopped
+
+  # ----------------------------------------
+  # Elasticsearch 8.x - 时序指标存储
+  # Host port: 9200 (HTTP API)
+  # ----------------------------------------
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: dbmonitor-elasticsearch
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - xpack.security.http.ssl.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+      - cluster.name=dbmonitor-es
+      - bootstrap.memory_lock=true
+    ports:
+      - "9200:9200"
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    networks:
+      - dbmonitor-net
+    healthcheck:
+      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+    ulimits:
+      memlock:
+        soft: -1
+        hard: -1
+      nofile:
+        soft: 65536
+        hard: 65536
 
 volumes:
   mysql_data:
   timeseries_data:
   redis_data:
+  es_data:
 
 networks:
   dbmonitor-net:

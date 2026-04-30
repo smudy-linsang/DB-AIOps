@@ -128,15 +128,17 @@ WSGI_APPLICATION = 'dbmonitor.wsgi.application'
 # ============================================================================
 # 数据库配置
 # ============================================================================
-USE_POSTGRESQL = os.environ.get('USE_POSTGRESQL', 'False').lower() in ('true', '1', 'yes')
+# 配置数据存储：PostgreSQL（Docker TimescaleDB 容器）
+# 采集指标数据存储：Elasticsearch
+USE_POSTGRESQL = os.environ.get('USE_POSTGRESQL', 'True').lower() in ('true', '1', 'yes')
 
 if USE_POSTGRESQL:
     DATABASES = {
         'default': {
             'ENGINE': 'django.db.backends.postgresql',
             'NAME': os.environ.get('POSTGRES_DB', 'db_monitor'),
-            'USER': os.environ.get('POSTGRES_USER', 'db_monitor'),
-            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', ''),
+            'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres123'),
             'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
             'PORT': os.environ.get('POSTGRES_PORT', '5432'),
             'CONN_MAX_AGE': 600,  # 持久连接 10 分钟
@@ -154,10 +156,16 @@ else:
         }
     }
 
-# TimescaleDB 配置（预留）
-TIMESCALEDB_ENABLED = os.environ.get('TIMESCALEDB_ENABLED', 'False').lower() in ('true', '1', 'yes')
+# Elasticsearch 配置（采集指标存储）
+ES_ENABLED = os.environ.get('ES_ENABLED', 'True').lower() in ('true', '1', 'yes')
+ES_HOST = os.environ.get('ES_HOST', 'localhost')
+ES_PORT = int(os.environ.get('ES_PORT', '9200'))
+ES_URL = os.environ.get('ES_URL', f'http://{ES_HOST}:{ES_PORT}')
 
-# TimescaleDB 连接配置
+# TimescaleDB 配置（监控指标时序存储）
+TIMESCALEDB_ENABLED = os.environ.get('TIMESCALEDB_ENABLED', 'True').lower() in ('true', '1', 'yes')
+
+# TimescaleDB 连接配置（Docker TimescaleDB 容器）
 TIMESCALEDB_HOST = os.environ.get('TIMESCALEDB_HOST', 'localhost')
 TIMESCALEDB_PORT = os.environ.get('TIMESCALEDB_PORT', '5432')
 TIMESCALEDB_NAME = os.environ.get('TIMESCALEDB_NAME', 'timeseriesdb')

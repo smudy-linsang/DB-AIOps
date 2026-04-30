@@ -4332,6 +4332,23 @@ class Command(BaseCommand):
             message=json.dumps(data, ensure_ascii=False, default=str)
         )
 
+        # --- 4. 同步写入 TimescaleDB（指标时序数据） ---
+        try:
+            from monitor.timeseries import get_timeseries_storage
+            ts = get_timeseries_storage()
+            if ts.enabled:
+                # 提取数值型指标写入 TimescaleDB
+                numeric_metrics = {}
+                for key, value in data.items():
+                    if isinstance(value, (int, float)) and value is not None and not isinstance(value, bool):
+                        numeric_metrics[key] = float(value)
+                if numeric_metrics:
+                    ts.write_metrics_batch(config.id, numeric_metrics, status=current_status)
+                # 写入采集快照
+                ts.write_snapshot(config.id, current_status, data)
+        except Exception as ts_err:
+            print(f"  [TSDB] 写入 TimescaleDB 失败: {ts_err}")
+
     def _run_phase2_analysis(self, config, data, am):
         """
         Phase 2 智能引擎分析

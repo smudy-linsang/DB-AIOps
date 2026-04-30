@@ -218,13 +218,43 @@ class DatabaseStatusView(JSONResponseMixin, View):
         """
         GET /api/v1/databases/{id}/status/
         获取指定数据库当前状态（最新采集结果）
+        双引擎：TimescaleDB（指标）→ SQLite（回退）
         """
         # RBAC 检查
         allowed_db_ids = get_user_database_ids(request.user)
         if allowed_db_ids is not None and config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
         
-        # 获取最新采集日志
+        # 优先从 TimescaleDB 获取最新快照
+        try:
+            from .timeseries import get_timeseries_storage
+            ts = get_timeseries_storage()
+            if ts.enabled:
+                conn = ts._get_connection()
+                if conn:
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT time, status, raw_data FROM collection_snapshot WHERE db_config_id = %s ORDER BY time DESC LIMIT 1",
+                        (config_id,)
+                    )
+                    row = cur.fetchone()
+                    cur.close()
+                    if row:
+                        raw_data = row[2] if row[2] else {}
+                        if isinstance(raw_data, str):
+                            import json as _json
+                            raw_data = _json.loads(raw_data)
+                        return self.json_response({
+                            'config_id': config_id,
+                            'status': row[1],
+                            'collected_at': row[0].isoformat(),
+                            'metrics': raw_data,
+                            'source': 'timescaledb'
+                        })
+        except Exception as ts_err:
+            pass
+        
+        # 回退：从 SQLite 获取最新采集日志
         latest = MonitorLog.objects.filter(
             config_id=config_id
         ).order_by('-create_time').first()
@@ -232,7 +262,6 @@ class DatabaseStatusView(JSONResponseMixin, View):
         if not latest:
             return self.error_response('No data for this database', 404)
         
-        # 解析存储的指标数据
         try:
             metrics = json.loads(latest.message) if latest.message else {}
         except (json.JSONDecodeError, TypeError):
@@ -243,7 +272,8 @@ class DatabaseStatusView(JSONResponseMixin, View):
             'status': latest.status,
             'collected_at': latest.create_time.isoformat(),
             'message': latest.message,
-            'metrics': metrics
+            'metrics': metrics,
+            'source': 'sqlite'
         }
         
         return self.json_response(data)
@@ -261,6 +291,7 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         """
         GET /api/v1/databases/{id}/metrics/
         查询历史指标，支持时间范围和指标名过滤
+        双引擎：TimescaleDB（数值指标）→ SQLite（回退）
         """
         # RBAC 检查
         allowed_db_ids = get_user_database_ids(request.user)
@@ -270,22 +301,18 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         # 解析查询参数
         start_time = request.GET.get('start')
         end_time = request.GET.get('end')
-        time_param = request.GET.get('time')  # 支持 1h, 6h, 24h, 7d 等格式
+        time_param = request.GET.get('time')
         metric_name = request.GET.get('metric')
         limit = int(request.GET.get('limit', 1000))
+        granularity = request.GET.get('granularity', 'raw')  # raw/hourly/daily
         
         # 解析时间范围
         if start_time:
             start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
         elif time_param:
-            # 解析时间参数 (1h, 6h, 24h, 7d, 30d)
             time_map = {
-                '1h': 1,
-                '6h': 6,
-                '12h': 12,
-                '24h': 24,
-                '7d': 168,
-                '30d': 720
+                '1h': 1, '6h': 6, '12h': 12,
+                '24h': 24, '7d': 168, '30d': 720
             }
             hours = time_map.get(time_param, 24)
             start_dt = datetime.now() - timedelta(hours=hours)
@@ -297,7 +324,53 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         else:
             end_dt = datetime.now()
         
-        # 查询日志
+        hours = int((end_dt - start_dt).total_seconds() / 3600)
+        
+        # 优先从 TimescaleDB 查询（数值型指标）
+        if metric_name and not metric_name.startswith('tablespace_') and not metric_name.startswith('wait_event_'):
+            try:
+                from .timeseries import get_timeseries_storage
+                ts = get_timeseries_storage()
+                if ts.enabled:
+                    ts_results = ts.query_metric_history(
+                        db_config_id=config_id,
+                        metric_key=metric_name,
+                        hours=max(hours, 1),
+                        granularity=granularity
+                    )
+                    if ts_results:
+                        result = []
+                        for item in ts_results:
+                            if granularity == 'raw':
+                                result.append({
+                                    'timestamp': item['time'],
+                                    'metric': metric_name,
+                                    'value': item['value'],
+                                    'status': 'normal'
+                                })
+                            else:
+                                result.append({
+                                    'timestamp': item['time'],
+                                    'metric': metric_name,
+                                    'avg': item.get('avg'),
+                                    'min': item.get('min'),
+                                    'max': item.get('max'),
+                                    'p95': item.get('p95'),
+                                    'status': 'normal'
+                                })
+                        return self.json_response({
+                            'config_id': config_id,
+                            'start': start_dt.isoformat(),
+                            'end': end_dt.isoformat(),
+                            'count': len(result),
+                            'metrics': result,
+                            'granularity': granularity,
+                            'source': 'timescaledb'
+                        })
+            except Exception as ts_err:
+                pass
+        
+        # 回退：从 SQLite 查询（支持复杂指标如表空间、等待事件）
         logs = MonitorLog.objects.filter(
             config_id=config_id,
             create_time__gte=start_dt,
@@ -311,20 +384,14 @@ class DatabaseMetricsView(JSONResponseMixin, View):
             except (json.JSONDecodeError, TypeError):
                 metrics = {}
             
-            # 过滤指定指标
             if metric_name:
-                # 处理表空间指标 (格式: tablespace_<name>_used_pct)
                 if metric_name.startswith('tablespace_'):
-                    # 格式: tablespace_<name>_used_pct -> 去掉前缀后分割
-                    # 例如: tablespace_SYSTEM_used_pct -> SYSTEM
-                    tbs_metric = metric_name[11:]  # 去掉 'tablespace_' 前缀 -> 'SYSTEM_used_pct'
-                    tbs_parts = tbs_metric.rsplit('_', 2)  # ['SYSTEM', 'used', 'pct']
+                    tbs_metric = metric_name[11:]
+                    tbs_parts = tbs_metric.rsplit('_', 2)
                     if len(tbs_parts) >= 3 and tbs_parts[-2] == 'used' and tbs_parts[-1] == 'pct':
                         tbs_name = tbs_parts[0]
                         found = False
-                        # 从 tablespaces 查找 (主表空间有 used_pct)
-                        tablespaces = metrics.get('tablespaces', [])
-                        for tbs in tablespaces:
+                        for tbs in metrics.get('tablespaces', []):
                             if tbs.get('name') == tbs_name:
                                 result.append({
                                     'timestamp': log.create_time.isoformat(),
@@ -334,12 +401,9 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                 })
                                 found = True
                                 break
-                        # 如果没找到，尝试 temp_tablespaces (可能没有 used_pct)
                         if not found:
-                            temp_tablespaces = metrics.get('temp_tablespaces', [])
-                            for tbs in temp_tablespaces:
+                            for tbs in metrics.get('temp_tablespaces', []):
                                 if tbs.get('name') == tbs_name:
-                                    # temp_tablespaces 没有 used_pct，跳过或返回 null
                                     result.append({
                                         'timestamp': log.create_time.isoformat(),
                                         'metric': metric_name,
@@ -348,10 +412,8 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                     })
                                     found = True
                                     break
-                        # 如果没找到，尝试 undo_tablespaces
                         if not found:
-                            undo_tablespaces = metrics.get('undo_tablespaces', [])
-                            for tbs in undo_tablespaces:
+                            for tbs in metrics.get('undo_tablespaces', []):
                                 if tbs.get('name') == tbs_name:
                                     result.append({
                                         'timestamp': log.create_time.isoformat(),
@@ -360,13 +422,10 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                         'status': log.status
                                     })
                                     break
-                # 处理等待事件指标 (格式: wait_event_<event_name>)
                 elif metric_name.startswith('wait_event_'):
-                    event_name = metric_name[10:]  # 去掉 'wait_event_' 前缀
+                    event_name = metric_name[10:]
                     found = False
-                    # 从 top_wait_events 中查找
-                    top_wait_events = metrics.get('top_wait_events', [])
-                    for evt in top_wait_events:
+                    for evt in metrics.get('top_wait_events', []):
                         if evt.get('event') == event_name:
                             result.append({
                                 'timestamp': log.create_time.isoformat(),
@@ -376,10 +435,8 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                             })
                             found = True
                             break
-                    # 如果没找到，从 wait_events 中查找
                     if not found:
-                        wait_events = metrics.get('wait_events', [])
-                        for evt in wait_events:
+                        for evt in metrics.get('wait_events', []):
                             if evt.get('event') == event_name:
                                 result.append({
                                     'timestamp': log.create_time.isoformat(),
@@ -388,7 +445,6 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                     'status': log.status
                                 })
                                 break
-                # 普通指标直接查找
                 elif metric_name in metrics:
                     result.append({
                         'timestamp': log.create_time.isoformat(),
@@ -397,7 +453,6 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                         'status': log.status
                     })
             else:
-                # 返回所有简单指标（排除数组类型）
                 for key, value in metrics.items():
                     if isinstance(value, (str, int, float, bool)):
                         result.append({
@@ -412,7 +467,8 @@ class DatabaseMetricsView(JSONResponseMixin, View):
             'start': start_dt.isoformat(),
             'end': end_dt.isoformat(),
             'count': len(result),
-            'metrics': result
+            'metrics': result,
+            'source': 'sqlite'
         })
 
 
@@ -571,6 +627,7 @@ class AlertListView(JSONResponseMixin, View):
         """
         GET /api/v1/alerts/
         查询告警列表，支持状态/级别/时间过滤
+        双引擎：ES（全文检索）→ PostgreSQL（回退）
         """
         # 解析查询参数
         status = request.GET.get('status')
@@ -578,12 +635,51 @@ class AlertListView(JSONResponseMixin, View):
         config_id = request.GET.get('config_id')
         start_time = request.GET.get('start')
         end_time = request.GET.get('end')
+        keyword = request.GET.get('q')  # 全文搜索关键词
         limit = int(request.GET.get('limit', 100))
         
         # RBAC - 只能看有权限的数据库告警
         allowed_db_ids = get_user_database_ids(request.user)
         
-        # 构建查询
+        # 优先从 ES 查询（支持全文检索）
+        try:
+            from .elasticsearch_engine import query_alerts
+            start_dt = None
+            end_dt = None
+            if start_time:
+                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+            if end_time:
+                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+            
+            es_alerts = query_alerts(
+                config_id=int(config_id) if config_id else None,
+                severity=severity,
+                status=status,
+                start_time=start_dt,
+                end_time=end_dt,
+                limit=limit
+            )
+            
+            if es_alerts:
+                # RBAC 过滤
+                if allowed_db_ids is not None:
+                    es_alerts = [a for a in es_alerts if a.get('config_id') in allowed_db_ids]
+                
+                # 全文搜索过滤
+                if keyword:
+                    keyword_lower = keyword.lower()
+                    es_alerts = [a for a in es_alerts
+                                 if keyword_lower in (a.get('title', '') + a.get('description', '')).lower()]
+                
+                return self.json_response({
+                    'total': len(es_alerts),
+                    'alerts': es_alerts,
+                    'source': 'elasticsearch'
+                })
+        except Exception as es_err:
+            pass
+        
+        # 回退：从 PostgreSQL 查询
         queryset = AlertLog.objects.all().order_by('-create_time')
         
         if status:
@@ -591,7 +687,7 @@ class AlertListView(JSONResponseMixin, View):
         if severity:
             queryset = queryset.filter(severity=severity)
         if config_id:
-            if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
                 return self.error_response('Permission denied', 403)
             queryset = queryset.filter(config_id=config_id)
         elif allowed_db_ids is not None:
@@ -603,6 +699,10 @@ class AlertListView(JSONResponseMixin, View):
         if end_time:
             end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
             queryset = queryset.filter(create_time__lte=end_dt)
+        if keyword:
+            queryset = queryset.filter(
+                models.Q(title__icontains=keyword) | models.Q(description__icontains=keyword)
+            )
         
         queryset = queryset[:limit]
         
@@ -624,7 +724,8 @@ class AlertListView(JSONResponseMixin, View):
         
         return self.json_response({
             'total': len(result),
-            'alerts': result
+            'alerts': result,
+            'source': 'postgresql'
         })
 
 
