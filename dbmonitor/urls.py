@@ -13,12 +13,12 @@ from monitor.views_enhanced import (
 )
 from monitor.api_views import (
     HealthCheckView, LoginView, LogoutView, DatabaseListView,
-    DatabaseStatusView, DatabaseMetricsView, DatabaseBaselineView,
-    DatabasePredictionView, DatabaseHealthView, DatabaseAlertsView,
-    AlertListView, AlertAcknowledgeView, AuditLogListView,
-    AuditLogApproveView, AuditLogRejectView, AuditLogExecuteView,
-    AuditLogExecuteDryRunView, UserListView, UserDetailView,
-    UserPasswordView, CurrentUserView,
+    DatabaseTestConnectionView, DatabaseStatusView, DatabaseMetricsView,
+    DatabaseBaselineView, DatabasePredictionView, DatabaseHealthView,
+    DatabaseAlertsView, AlertListView, AlertAcknowledgeView,
+    AuditLogListView, AuditLogApproveView, AuditLogRejectView,
+    AuditLogExecuteView, AuditLogExecuteDryRunView, UserListView,
+    UserDetailView, UserPasswordView, CurrentUserView,
 )
 from monitor.observability import prometheus_metrics_view
 
@@ -54,6 +54,7 @@ urlpatterns = [
     path('api/v1/auth/login/', LoginView.as_view()),
     path('api/v1/auth/logout/', LogoutView.as_view()),
     path('api/v1/databases/', DatabaseListView.as_view()),
+    path('api/v1/databases/test-connection/', DatabaseTestConnectionView.as_view()),
     path('api/v1/databases/<int:config_id>/status/', DatabaseStatusView.as_view()),
     path('api/v1/databases/<int:config_id>/metrics/', DatabaseMetricsView.as_view()),
     path('api/v1/databases/<int:config_id>/baseline/', DatabaseBaselineView.as_view()),

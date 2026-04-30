@@ -278,6 +278,88 @@ class DatabaseListView(JSONResponseMixin, View):
             return self.error_response(f'Failed to create database config: {str(e)}', 500)
 
 
+class DatabaseTestConnectionView(JSONResponseMixin, View):
+    """数据库连接测试 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """
+        POST /api/v1/databases/test-connection/
+        测试数据库连接（不保存配置）
+        请求体: { name, db_type, host, port, username, password, service_name }
+        """
+        try:
+            import json
+            data = json.loads(request.body)
+        except json.JSONDecodeError:
+            return self.error_response('Invalid JSON', 400)
+
+        # 验证必填字段
+        required_fields = ['db_type', 'host', 'port', 'username', 'password']
+        for field in required_fields:
+            if not data.get(field):
+                return self.error_response(f'Missing required field: {field}', 400)
+
+        db_type = data['db_type']
+        host = data['host'].strip()
+        port = data['port']
+        username = data['username'].strip()
+        password = data['password']
+        service_name = data.get('service_name', '').strip() or None
+
+        # 验证端口
+        try:
+            port = int(port)
+            if port <= 0 or port > 65535:
+                return self.error_response('Invalid port number', 400)
+        except (ValueError, TypeError):
+            return self.error_response('Port must be a valid number', 400)
+
+        # 验证数据库类型
+        valid_db_types = ['oracle', 'mysql', 'pgsql', 'dm', 'gbase', 'tdsql', 'mongo', 'redis']
+        if db_type not in valid_db_types:
+            return self.error_response(f'Invalid db_type. Must be one of: {", ".join(valid_db_types)}', 400)
+
+        # 构建临时配置对象进行连接测试
+        from .crypto import encrypt_password
+        encrypted_password = encrypt_password(password)
+
+        class TempConfig:
+            """临时配置对象，用于连接测试"""
+            def __init__(self, db_type, host, port, username, password, service_name):
+                self.db_type = db_type
+                self.host = host
+                self.port = port
+                self.username = username
+                self._password = password
+                self.service_name = service_name
+
+            def get_password(self):
+                return self._password
+
+        temp_config = TempConfig(db_type, host, port, username, password, service_name)
+
+        # 执行连接测试
+        from .db_connector import DbConnector
+        result = DbConnector.test_connection(temp_config)
+
+        if result['success']:
+            return self.json_response({
+                'success': True,
+                'message': '连接成功',
+                'version': result.get('version', '')
+            })
+        else:
+            return self.json_response({
+                'success': False,
+                'message': result.get('message', '连接失败')
+            })
+
+
 class DatabaseStatusView(JSONResponseMixin, View):
     """数据库状态 API"""
     

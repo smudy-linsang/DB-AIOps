@@ -131,6 +131,8 @@ const DatabaseList = () => {
   // 添加数据库弹窗状态
   const [addModalVisible, setAddModalVisible] = useState(false)
   const [addModalLoading, setAddModalLoading] = useState(false)
+  const [testLoading, setTestLoading] = useState(false)
+  const [testResult, setTestResult] = useState(null) // { success, message, version }
   const [form] = Form.useForm()
 
   // 获取数据库列表
@@ -150,6 +152,7 @@ const DatabaseList = () => {
   // 打开添加数据库弹窗
   const openAddModal = () => {
     form.resetFields()
+    setTestResult(null)
     setAddModalVisible(true)
   }
 
@@ -161,12 +164,35 @@ const DatabaseList = () => {
       message.success('数据库配置添加成功')
       setAddModalVisible(false)
       form.resetFields()
+      setTestResult(null)
       fetchDatabases()
     } catch (error) {
       console.error('添加数据库失败:', error)
       message.error(error.response?.data?.error || '添加数据库失败')
     } finally {
       setAddModalLoading(false)
+    }
+  }
+
+  // 测试数据库连接
+  const handleTestConnection = async () => {
+    try {
+      const values = await form.validateFields()
+      setTestLoading(true)
+      setTestResult(null)
+      const response = await databaseAPI.testConnection(values)
+      setTestResult(response)
+    } catch (error) {
+      if (error.errorFields) {
+        // 表单验证未通过，不处理
+        return
+      }
+      setTestResult({
+        success: false,
+        message: error.response?.data?.message || error.response?.data?.error || '连接测试请求失败'
+      })
+    } finally {
+      setTestLoading(false)
     }
   }
 
@@ -1026,13 +1052,48 @@ const DatabaseList = () => {
             <Input placeholder="Oracle必填，其他可留空" />
           </Form.Item>
 
-          <Form.Item style={{ marginBottom: 0, textAlign: 'right' }}>
-            <Space>
-              <Button onClick={() => setAddModalVisible(false)}>取消</Button>
-              <Button type="primary" htmlType="submit" loading={addModalLoading}>
-                添加
-              </Button>
-            </Space>
+          {/* 测试连接结果显示 */}
+          {testResult && (
+            <Form.Item style={{ marginBottom: 16 }}>
+              <Alert
+                type={testResult.success ? 'success' : 'error'}
+                showIcon
+                message={
+                  <Space direction="vertical" size={2}>
+                    <Text strong>{testResult.success ? '✅ 连接成功' : '❌ 连接失败'}</Text>
+                    <Text>{testResult.message}</Text>
+                    {testResult.version && (
+                      <Text type="secondary" style={{ fontSize: 12 }}>
+                        版本: {testResult.version}
+                      </Text>
+                    )}
+                  </Space>
+                }
+              />
+            </Form.Item>
+          )}
+
+          <Form.Item style={{ marginBottom: 0 }}>
+            <Row gutter={8} justify="end">
+              <Col>
+                <Button
+                  icon={<SyncOutlined spin={testLoading} />}
+                  onClick={handleTestConnection}
+                  loading={testLoading}
+                  disabled={addModalLoading}
+                >
+                  测试连接
+                </Button>
+              </Col>
+              <Col>
+                <Space>
+                  <Button onClick={() => { setAddModalVisible(false); setTestResult(null) }}>取消</Button>
+                  <Button type="primary" htmlType="submit" loading={addModalLoading}>
+                    添加
+                  </Button>
+                </Space>
+              </Col>
+            </Row>
           </Form.Item>
         </Form>
       </Modal>

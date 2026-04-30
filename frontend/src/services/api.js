@@ -73,6 +73,9 @@ export const databaseAPI = {
   // 创建数据库配置
   create: (data) => api.post('/databases/', data),
   
+  // 测试数据库连接（不保存）
+  testConnection: (data) => api.post('/databases/test-connection/', data),
+  
   // 获取数据库详情
   getDetail: (id) => api.get(`/databases/${id}/`),
   
@@ -80,7 +83,7 @@ export const databaseAPI = {
   getStatus: (id) => api.get(`/databases/${id}/status/`),
   
   // 获取数据库指标
-  getMetrics: (id, params = {}) => 
+  getMetrics: (id, params = {}) =>
     api.get(`/databases/${id}/metrics/`, { params }),
   
   // 获取基线
