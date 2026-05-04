@@ -23,7 +23,12 @@
       "Bash(git commit -m ' *)",
       "Bash(git push *)",
       "WebSearch",
-      "WebFetch(domain:docs.litellm.ai)"
+      "WebFetch(domain:docs.litellm.ai)",
+      "Bash(xargs wc *)",
+      "Bash(python manage.py migrate monitor 0008)",
+      "Bash(python manage.py check)",
+      "Bash(npm run *)",
+      "Bash(python -c ' *)"
     ]
   },
   "hooks": {

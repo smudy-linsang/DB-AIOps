@@ -116,9 +116,12 @@ export const alertAPI = {
   // 获取告警统计
   getStatistics: () => api.get('/alerts/statistics/'),
   
-  // 确认告警
+  // 确认告警（移入已确认列表，继续抑制重复触发）
   acknowledge: (id) => api.post(`/alerts/${id}/acknowledge/`),
-  
+
+  // 彻底删除告警（删除后该指标可重新触发告警）
+  delete: (id) => api.delete(`/alerts/${id}/`),
+
   // 获取数据库关联告警
   getByDatabase: (dbId) => api.get(`/databases/${dbId}/alerts/`),
 }
@@ -184,6 +187,39 @@ export const dashboardAPI = {
   // 获取告警趋势
   getAlertTrend: (days = 7) => 
     api.get('/dashboard/alert-trend/', { params: { days } }),
+}
+
+// ==========================================
+// 告警规则配置 API
+// ==========================================
+
+export const alertRuleAPI = {
+  // 获取某数据库类型已采集到的所有可用指标键
+  listAvailableMetrics: (db_type) =>
+    api.get('/alert-rules/available-metrics/', { params: { db_type } }),
+
+  // 获取模板列表（可按 db_type 过滤）
+  listTemplates: (db_type) =>
+    api.get('/alert-rules/templates/', { params: db_type ? { db_type } : {} }),
+
+  // 创建模板
+  createTemplate: (data) => api.post('/alert-rules/templates/', data),
+
+  // 更新模板
+  updateTemplate: (id, data) => api.put(`/alert-rules/templates/${id}/`, data),
+
+  // 删除模板
+  deleteTemplate: (id) => api.delete(`/alert-rules/templates/${id}/`),
+
+  // 获取某数据库的覆盖配置（含模板基准值）
+  listOverrides: (dbId) => api.get(`/databases/${dbId}/alert-overrides/`),
+
+  // 保存（新建或更新）某数据库某指标的覆盖配置
+  saveOverride: (dbId, data) => api.post(`/databases/${dbId}/alert-overrides/`, data),
+
+  // 删除覆盖配置（恢复使用模板默认值）
+  deleteOverride: (dbId, metricKey) =>
+    api.delete(`/databases/${dbId}/alert-overrides/${metricKey}/`),
 }
 
 // ==========================================

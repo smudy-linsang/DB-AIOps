@@ -20,6 +20,9 @@ from monitor.api_views import (
     AuditLogListView, AuditLogApproveView, AuditLogRejectView,
     AuditLogExecuteView, AuditLogExecuteDryRunView, UserListView,
     UserDetailView, UserPasswordView, CurrentUserView,
+    AlertThresholdTemplateListView, AlertThresholdTemplateDetailView,
+    DatabaseAlertOverrideListView, DatabaseAlertOverrideDetailView,
+    AlertAvailableMetricsView, AlertDeleteView,
 )
 from monitor.observability import prometheus_metrics_view
 
@@ -65,6 +68,7 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/alerts/', DatabaseAlertsView.as_view()),
     path('api/v1/alerts/', AlertListView.as_view()),
     path('api/v1/alerts/<int:alert_id>/acknowledge/', AlertAcknowledgeView.as_view()),
+    path('api/v1/alerts/<int:alert_id>/', AlertDeleteView.as_view()),
     path('api/v1/auditlogs/', AuditLogListView.as_view()),
     path('api/v1/auditlogs/<int:audit_id>/approve/', AuditLogApproveView.as_view()),
     path('api/v1/auditlogs/<int:audit_id>/reject/', AuditLogRejectView.as_view()),
@@ -74,6 +78,15 @@ urlpatterns = [
     path('api/v1/users/me/', CurrentUserView.as_view()),
     path('api/v1/users/<int:user_id>/', UserDetailView.as_view()),
     path('api/v1/users/<int:user_id>/password/', UserPasswordView.as_view()),
+
+    # Alert rule templates
+    path('api/v1/alert-rules/available-metrics/', AlertAvailableMetricsView.as_view()),
+    path('api/v1/alert-rules/templates/', AlertThresholdTemplateListView.as_view()),
+    path('api/v1/alert-rules/templates/<int:template_id>/', AlertThresholdTemplateDetailView.as_view()),
+
+    # Per-database alert overrides
+    path('api/v1/databases/<int:config_id>/alert-overrides/', DatabaseAlertOverrideListView.as_view()),
+    path('api/v1/databases/<int:config_id>/alert-overrides/<str:metric_key>/', DatabaseAlertOverrideDetailView.as_view()),
 
     # Legacy API
     path('api/metrics/<int:config_id>/', api_latest_metrics),

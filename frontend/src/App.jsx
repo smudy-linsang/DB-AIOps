@@ -9,7 +9,8 @@ import {
   LogoutOutlined,
   SettingOutlined,
   FundOutlined,
-  FileTextOutlined
+  FileTextOutlined,
+  AlertOutlined
 } from '@ant-design/icons'
 import Dashboard from './pages/Dashboard'
 import DatabaseList from './pages/DatabaseList'
@@ -17,6 +18,7 @@ import DatabaseDetail from './pages/DatabaseDetail'
 import AlertList from './pages/AlertList'
 import CapacityPlanning from './pages/CapacityPlanning'
 import TicketManagement from './pages/TicketManagement'
+import AlertConfig from './pages/AlertConfig'
 import Login from './pages/Login'
 import { isAuthenticated, getUser, clearAuthToken, authAPI } from './services/api'
 
@@ -87,7 +89,8 @@ const AuthenticatedLayout = ({ children }) => {
               { key: 'databases', icon: <DatabaseOutlined />, label: <Link to="/databases">数据库</Link> },
               { key: 'alerts', icon: <BellOutlined />, label: <Link to="/alerts">告警</Link> },
               { key: 'capacity', icon: <FundOutlined />, label: <Link to="/capacity">容量规划</Link> },
-              { key: 'tickets', icon: <FileTextOutlined />, label: <Link to="/tickets">工单</Link> }
+              { key: 'tickets', icon: <FileTextOutlined />, label: <Link to="/tickets">工单</Link> },
+              { key: 'alert-config', icon: <AlertOutlined />, label: <Link to="/alert-config">告警配置</Link> }
             ]}
             style={{ flex: 1, minWidth: 0 }}
           />
@@ -131,6 +134,7 @@ function App() {
                 <Route path="/alerts" element={<AlertList />} />
                 <Route path="/capacity" element={<CapacityPlanning />} />
                 <Route path="/tickets" element={<TicketManagement />} />
+                <Route path="/alert-config" element={<AlertConfig />} />
               </Routes>
             </AuthenticatedLayout>
           </PrivateRoute>

@@ -21,9 +21,22 @@ logger = logging.getLogger(__name__)
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def collect_single_db(self, config_id):
-    """采集单个数据库的指标"""
+    """采集单个数据库的指标（v3.0: 使用模块化 Checker）"""
     from monitor.models import DatabaseConfig, MonitorLog
-    from monitor.management.commands.start_monitor import CHECKER_MAP
+    from monitor.checkers import (
+        OracleChecker, MySQLChecker, PostgreSQLChecker,
+        DamengChecker, GbaseChecker, TDSQLChecker
+    )
+
+    # 数据库类型 -> 检查器映射 (与 start_monitor.py 保持一致)
+    CHECKER_MAP = {
+        'oracle': OracleChecker,
+        'mysql': MySQLChecker,
+        'pgsql': PostgreSQLChecker,
+        'dm': DamengChecker,
+        'gbase': GbaseChecker,
+        'tdsql': TDSQLChecker,
+    }
 
     try:
         config = DatabaseConfig.objects.get(id=config_id, is_active=True)
@@ -36,7 +49,7 @@ def collect_single_db(self, config_id):
         logger.warning(f"[Celery] 不支持的数据库类型: {config.db_type}")
         return {'status': 'skipped', 'config_id': config_id, 'reason': 'unsupported_type'}
 
-    # 创建一个简单的命令实例用于process_result
+    # 创建一个简单的命令实例用于process_result（包含 TSDB 写入）
     class TaskCommand:
         def process_result(self, config, status, data):
             MonitorLog.objects.create(
@@ -44,6 +57,20 @@ def collect_single_db(self, config_id):
                 status=status,
                 message=json.dumps(data, ensure_ascii=False, default=str)
             )
+            # 同步写入 TimescaleDB
+            try:
+                from monitor.timeseries import get_timeseries_storage
+                ts = get_timeseries_storage()
+                if ts.enabled:
+                    numeric_metrics = {}
+                    for key, value in data.items():
+                        if isinstance(value, (int, float)) and value is not None and not isinstance(value, bool):
+                            numeric_metrics[key] = float(value)
+                    if numeric_metrics:
+                        ts.write_metrics_batch(config.id, numeric_metrics, status=status)
+                    ts.write_snapshot(config.id, status, data)
+            except Exception as ts_err:
+                logger.warning(f"[Celery] TSDB写入跳过: {ts_err}")
 
     checker = checker_class(TaskCommand())
 

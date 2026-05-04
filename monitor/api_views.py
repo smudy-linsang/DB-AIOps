@@ -1006,12 +1006,14 @@ class AlertListView(JSONResponseMixin, View):
             )
         
         queryset = queryset[:limit]
-        
+
         result = []
-        for alert in queryset:
+        for alert in queryset.select_related('config'):
             result.append({
                 'id': alert.id,
                 'config_id': alert.config_id,
+                'db_name': alert.config.name if alert.config else str(alert.config_id),
+                'db_type': alert.config.db_type if alert.config else '',
                 'alert_type': alert.alert_type,
                 'severity': alert.severity,
                 'metric_key': alert.metric_key,
@@ -1022,7 +1024,7 @@ class AlertListView(JSONResponseMixin, View):
                 'resolved_at': alert.resolved_at.isoformat() if alert.resolved_at else None,
                 'create_time': alert.create_time.isoformat() if alert.create_time else None
             })
-        
+
         return self.json_response({
             'total': len(result),
             'alerts': result,
@@ -1063,6 +1065,32 @@ class AlertAcknowledgeView(JSONResponseMixin, View):
             'message': 'Alert acknowledged',
             'alert_id': alert_id
         })
+
+
+class AlertDeleteView(JSONResponseMixin, View):
+    """
+    DELETE /api/v1/alerts/<id>/
+    彻底删除一条告警记录，删除后该指标可重新触发告警。
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def delete(self, request, alert_id: int):
+        try:
+            alert = AlertLog.objects.get(id=alert_id)
+        except AlertLog.DoesNotExist:
+            return self.error_response('Alert not found', 404)
+
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and alert.config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+
+        alert.delete()
+        return self.json_response({'message': 'Alert deleted, metric can now re-trigger'})
 
 
 class DatabaseAlertsView(JSONResponseMixin, View):
@@ -1749,3 +1777,435 @@ api_views = {
     'user_password': UserPasswordView.as_view,
     'current_user': CurrentUserView.as_view,
 }
+
+
+# =============================================================================
+# 告警阈值模板 API
+# =============================================================================
+
+def _template_to_dict(tpl):
+    return {
+        'id': tpl.id,
+        'db_type': tpl.db_type,
+        'metric_key': tpl.metric_key,
+        'display_name': tpl.display_name,
+        'rule_type': tpl.rule_type,
+        'direction': tpl.direction,
+        'warn_threshold': tpl.warn_threshold,
+        'error_threshold': tpl.error_threshold,
+        'critical_threshold': tpl.critical_threshold,
+        'warn_amplitude_pct': tpl.warn_amplitude_pct,
+        'error_amplitude_pct': tpl.error_amplitude_pct,
+        'critical_amplitude_pct': tpl.critical_amplitude_pct,
+        'unit': tpl.unit or '',
+        'is_enabled': tpl.is_enabled,
+        'description': tpl.description or '',
+        'update_time': tpl.update_time.isoformat() if tpl.update_time else None,
+    }
+
+
+def _override_to_dict(ov):
+    return {
+        'id': ov.id,
+        'db_config_id': ov.db_config_id,
+        'db_config_name': ov.db_config.name,
+        'metric_key': ov.metric_key,
+        'rule_type': ov.rule_type,
+        'direction': ov.direction,
+        'warn_threshold': ov.warn_threshold,
+        'error_threshold': ov.error_threshold,
+        'critical_threshold': ov.critical_threshold,
+        'warn_amplitude_pct': ov.warn_amplitude_pct,
+        'error_amplitude_pct': ov.error_amplitude_pct,
+        'critical_amplitude_pct': ov.critical_amplitude_pct,
+        'is_enabled': ov.is_enabled,
+        'note': ov.note or '',
+        'update_time': ov.update_time.isoformat() if ov.update_time else None,
+    }
+
+
+class AlertAvailableMetricsView(JSONResponseMixin, View):
+    """
+    GET /api/v1/alert-rules/available-metrics/?db_type=oracle
+    返回该数据库类型已采集到的所有数值型指标键，供新增模板时选择。
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import DatabaseConfig, MonitorLog, AlertThresholdTemplate, MetricDefinition
+        import json as _json
+
+        db_type = request.GET.get('db_type', '').strip()
+        if not db_type:
+            return self.error_response('db_type is required', 400)
+
+        # 已有模板的 metric_key 集合（用于标记）
+        existing_keys = set(
+            AlertThresholdTemplate.objects.filter(db_type=db_type).values_list('metric_key', flat=True)
+        )
+
+        # MetricDefinition 显示名映射
+        md_map = {m.metric_key: m.display_name for m in MetricDefinition.objects.all()}
+
+        # 找该类型所有数据库的最新一条 UP 日志
+        configs = DatabaseConfig.objects.filter(db_type=db_type, is_active=True)
+        metric_info = {}  # metric_key -> {display_name, sample_value}
+
+        for cfg in configs:
+            log = (MonitorLog.objects
+                   .filter(config=cfg, status='UP')
+                   .order_by('-create_time')
+                   .first())
+            if not log:
+                continue
+            try:
+                data = _json.loads(log.message)
+            except Exception:
+                continue
+            for key, val in data.items():
+                if key in metric_info:
+                    continue
+                # 只保留数值型标量（排除列表、字典、字符串类指标）
+                if isinstance(val, (int, float)) and not isinstance(val, bool):
+                    metric_info[key] = {
+                        'metric_key': key,
+                        'display_name': md_map.get(key, ''),
+                        'sample_value': round(val, 4),
+                        'has_template': key in existing_keys,
+                    }
+
+        # 补充：已有模板但当前无采集数据的指标也列出来
+        for key in existing_keys:
+            if key not in metric_info:
+                metric_info[key] = {
+                    'metric_key': key,
+                    'display_name': md_map.get(key, ''),
+                    'sample_value': None,
+                    'has_template': True,
+                }
+
+        metrics = sorted(metric_info.values(), key=lambda x: (x['has_template'], x['metric_key']))
+        return self.json_response({'db_type': db_type, 'metrics': metrics})
+
+
+class AlertThresholdTemplateListView(JSONResponseMixin, View):
+    """GET /api/v1/alert-rules/templates/  POST /api/v1/alert-rules/templates/"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import AlertThresholdTemplate
+        db_type = request.GET.get('db_type')
+        qs = AlertThresholdTemplate.objects.all()
+        if db_type:
+            qs = qs.filter(db_type=db_type)
+        return self.json_response({'templates': [_template_to_dict(t) for t in qs]})
+
+    def post(self, request):
+        from .models import AlertThresholdTemplate
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        required = ('db_type', 'metric_key', 'display_name', 'rule_type', 'direction')
+        for f in required:
+            if not data.get(f):
+                return self.error_response(f'Missing field: {f}', 400)
+
+        if AlertThresholdTemplate.objects.filter(
+            db_type=data['db_type'], metric_key=data['metric_key']
+        ).exists():
+            return self.error_response('该数据库类型下此指标已有模板，请直接编辑', 409)
+
+        tpl = AlertThresholdTemplate.objects.create(
+            db_type=data['db_type'],
+            metric_key=data['metric_key'],
+            display_name=data['display_name'],
+            rule_type=data['rule_type'],
+            direction=data['direction'],
+            warn_threshold=data.get('warn_threshold'),
+            error_threshold=data.get('error_threshold'),
+            critical_threshold=data.get('critical_threshold'),
+            warn_amplitude_pct=data.get('warn_amplitude_pct'),
+            error_amplitude_pct=data.get('error_amplitude_pct'),
+            critical_amplitude_pct=data.get('critical_amplitude_pct'),
+            unit=data.get('unit', ''),
+            is_enabled=data.get('is_enabled', True),
+            description=data.get('description', ''),
+        )
+        return self.json_response({'template': _template_to_dict(tpl)}, status=201)
+
+
+class AlertThresholdTemplateDetailView(JSONResponseMixin, View):
+    """GET/PUT/DELETE /api/v1/alert-rules/templates/<id>/"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_obj(self, template_id):
+        from .models import AlertThresholdTemplate
+        try:
+            return AlertThresholdTemplate.objects.get(pk=template_id)
+        except AlertThresholdTemplate.DoesNotExist:
+            return None
+
+    def get(self, request, template_id):
+        obj = self._get_obj(template_id)
+        if not obj:
+            return self.error_response('Not found', 404)
+        return self.json_response({'template': _template_to_dict(obj)})
+
+    def put(self, request, template_id):
+        obj = self._get_obj(template_id)
+        if not obj:
+            return self.error_response('Not found', 404)
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        updatable = (
+            'display_name', 'rule_type', 'direction',
+            'warn_threshold', 'error_threshold', 'critical_threshold',
+            'warn_amplitude_pct', 'error_amplitude_pct', 'critical_amplitude_pct',
+            'unit', 'is_enabled', 'description',
+        )
+        for field in updatable:
+            if field in data:
+                setattr(obj, field, data[field])
+        obj.save()
+        return self.json_response({'template': _template_to_dict(obj)})
+
+    def delete(self, request, template_id):
+        obj = self._get_obj(template_id)
+        if not obj:
+            return self.error_response('Not found', 404)
+        obj.delete()
+        return self.json_response({'message': 'Deleted'})
+
+
+# =============================================================================
+# 数据库告警覆盖配置 API
+# =============================================================================
+
+class DatabaseAlertOverrideListView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/databases/<config_id>/alert-overrides/
+    POST /api/v1/databases/<config_id>/alert-overrides/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_db(self, config_id):
+        from .models import DatabaseConfig
+        try:
+            return DatabaseConfig.objects.get(pk=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return None
+
+    def get(self, request, config_id):
+        from .models import DatabaseAlertOverride, AlertThresholdTemplate
+        db = self._get_db(config_id)
+        if not db:
+            return self.error_response('Database not found', 404)
+
+        overrides = {ov.metric_key: ov for ov in
+                     DatabaseAlertOverride.objects.filter(db_config=db).select_related('db_config')}
+
+        templates = AlertThresholdTemplate.objects.filter(db_type=db.db_type)
+        rows = []
+        for tpl in templates:
+            ov = overrides.get(tpl.metric_key)
+            row = {
+                'metric_key': tpl.metric_key,
+                'display_name': tpl.display_name,
+                'unit': tpl.unit or '',
+                'template': _template_to_dict(tpl),
+                'override': _override_to_dict(ov) if ov else None,
+                'effective': _effective_config(tpl, ov),
+            }
+            rows.append(row)
+
+        # 包含没有对应模板的覆盖（自定义指标）
+        for metric_key, ov in overrides.items():
+            if not any(r['metric_key'] == metric_key for r in rows):
+                rows.append({
+                    'metric_key': metric_key,
+                    'display_name': metric_key,
+                    'unit': '',
+                    'template': None,
+                    'override': _override_to_dict(ov),
+                    'effective': _effective_config(None, ov),
+                })
+
+        return self.json_response({'db_name': db.name, 'db_type': db.db_type, 'rows': rows})
+
+    def post(self, request, config_id):
+        from .models import DatabaseAlertOverride
+        db = self._get_db(config_id)
+        if not db:
+            return self.error_response('Database not found', 404)
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        metric_key = data.get('metric_key', '').strip()
+        if not metric_key:
+            return self.error_response('metric_key is required', 400)
+
+        ov, created = DatabaseAlertOverride.objects.update_or_create(
+            db_config=db,
+            metric_key=metric_key,
+            defaults={
+                'rule_type': data.get('rule_type') or None,
+                'direction': data.get('direction') or None,
+                'warn_threshold': data.get('warn_threshold'),
+                'error_threshold': data.get('error_threshold'),
+                'critical_threshold': data.get('critical_threshold'),
+                'warn_amplitude_pct': data.get('warn_amplitude_pct'),
+                'error_amplitude_pct': data.get('error_amplitude_pct'),
+                'critical_amplitude_pct': data.get('critical_amplitude_pct'),
+                'is_enabled': data.get('is_enabled', True),
+                'note': data.get('note', ''),
+            }
+        )
+        status_code = 201 if created else 200
+        return self.json_response({'override': _override_to_dict(ov)}, status=status_code)
+
+
+class DatabaseAlertOverrideDetailView(JSONResponseMixin, View):
+    """
+    GET/PUT/DELETE /api/v1/databases/<config_id>/alert-overrides/<metric_key>/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_ov(self, config_id, metric_key):
+        from .models import DatabaseAlertOverride
+        try:
+            return DatabaseAlertOverride.objects.select_related('db_config').get(
+                db_config_id=config_id, metric_key=metric_key
+            )
+        except DatabaseAlertOverride.DoesNotExist:
+            return None
+
+    def get(self, request, config_id, metric_key):
+        ov = self._get_ov(config_id, metric_key)
+        if not ov:
+            return self.error_response('Not found', 404)
+        return self.json_response({'override': _override_to_dict(ov)})
+
+    def put(self, request, config_id, metric_key):
+        ov = self._get_ov(config_id, metric_key)
+        if not ov:
+            return self.error_response('Not found', 404)
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        updatable = (
+            'rule_type', 'direction',
+            'warn_threshold', 'error_threshold', 'critical_threshold',
+            'warn_amplitude_pct', 'error_amplitude_pct', 'critical_amplitude_pct',
+            'is_enabled', 'note',
+        )
+        for field in updatable:
+            if field in data:
+                setattr(ov, field, data[field] or None if field in ('rule_type', 'direction') else data[field])
+        ov.save()
+        return self.json_response({'override': _override_to_dict(ov)})
+
+    def delete(self, request, config_id, metric_key):
+        ov = self._get_ov(config_id, metric_key)
+        if not ov:
+            return self.error_response('Not found', 404)
+        ov.delete()
+        return self.json_response({'message': 'Override deleted, will use template defaults'})
+
+
+# =============================================================================
+# 工具函数：获取最终生效的告警配置
+# =============================================================================
+
+def _effective_config(template, override):
+    """合并模板和覆盖配置，覆盖配置中非 None 的字段优先"""
+    if template is None and override is None:
+        return None
+
+    base = {}
+    if template:
+        base.update({
+            'rule_type': template.rule_type,
+            'direction': template.direction,
+            'warn_threshold': template.warn_threshold,
+            'error_threshold': template.error_threshold,
+            'critical_threshold': template.critical_threshold,
+            'warn_amplitude_pct': template.warn_amplitude_pct,
+            'error_amplitude_pct': template.error_amplitude_pct,
+            'critical_amplitude_pct': template.critical_amplitude_pct,
+            'is_enabled': template.is_enabled,
+            'source': 'template',
+        })
+    else:
+        base['source'] = 'override_only'
+
+    if override:
+        if override.rule_type is not None:
+            base['rule_type'] = override.rule_type
+        if override.direction is not None:
+            base['direction'] = override.direction
+        for f in ('warn_threshold', 'error_threshold', 'critical_threshold',
+                  'warn_amplitude_pct', 'error_amplitude_pct', 'critical_amplitude_pct'):
+            if getattr(override, f) is not None:
+                base[f] = getattr(override, f)
+        base['is_enabled'] = override.is_enabled
+        base['source'] = 'override'
+
+    return base
+
+
+def get_effective_alert_config(db_config, metric_key):
+    """
+    外部调用入口：获取某数据库某指标的最终生效告警配置。
+    优先取覆盖配置，退而取类型模板，两者均无则返回 None。
+    """
+    from .models import AlertThresholdTemplate, DatabaseAlertOverride
+
+    override = None
+    try:
+        override = DatabaseAlertOverride.objects.get(db_config=db_config, metric_key=metric_key)
+        if not override.is_enabled:
+            return None
+    except DatabaseAlertOverride.DoesNotExist:
+        pass
+
+    template = None
+    try:
+        template = AlertThresholdTemplate.objects.get(db_type=db_config.db_type, metric_key=metric_key)
+        if template and not template.is_enabled and override is None:
+            return None
+    except AlertThresholdTemplate.DoesNotExist:
+        pass
+
+    if template is None and override is None:
+        return None
+
+    return _effective_config(template, override)

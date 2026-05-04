@@ -273,11 +273,12 @@ class AlertManager:
     # ------------------------------------------------------------------
 
     def _get_active(self, alert_type, metric_key):
+        # 已确认的告警同样视为"存在"，避免重复触发；只有彻底删除后才解除抑制
         return AlertLog.objects.filter(
             config=self.config,
             alert_type=alert_type,
             metric_key=metric_key,
-            status='active',
+            status__in=('active', 'acknowledged'),
         ).first()
 
     # ------------------------------------------------------------------

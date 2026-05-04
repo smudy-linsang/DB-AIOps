@@ -177,8 +177,9 @@ class AlertLog(models.Model):
         ('baseline',   '基线偏离'),
     )
     STATUS_CHOICES = (
-        ('active',   '活跃'),
-        ('resolved', '已恢复'),
+        ('active',       '活跃'),
+        ('acknowledged', '已确认'),
+        ('resolved',     '已恢复'),
     )
 
     config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, verbose_name="数据库")
@@ -528,6 +529,97 @@ class ApprovalRecord(models.Model):
     
     def __str__(self):
         return f"{self.audit_log} | 步骤{self.step_order} | {self.approver} | {self.action}"
+
+
+# ==========================================
+# 告警阈值模板（按数据库类型）
+# ==========================================
+class AlertThresholdTemplate(models.Model):
+    """告警阈值模板，按数据库类型统一定义每个指标的多级告警规则"""
+
+    RULE_TYPE_CHOICES = (
+        ('threshold', '固定阈值'),
+        ('baseline_amplitude', '基线振幅'),
+    )
+    DIRECTION_CHOICES = (
+        ('up', '上升触发'),
+        ('down', '下降触发'),
+        ('both', '双向触发'),
+    )
+
+    db_type = models.CharField(max_length=20, choices=DB_TYPES, verbose_name="数据库类型")
+    metric_key = models.CharField(max_length=100, verbose_name="指标键")
+    display_name = models.CharField(max_length=100, verbose_name="指标显示名")
+    rule_type = models.CharField(max_length=30, choices=RULE_TYPE_CHOICES, default='threshold', verbose_name="规则类型")
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='up', verbose_name="触发方向")
+
+    # 固定阈值模式的三级阈值
+    warn_threshold = models.FloatField(null=True, blank=True, verbose_name="一级告警阈值(warning)")
+    error_threshold = models.FloatField(null=True, blank=True, verbose_name="二级告警阈值(error)")
+    critical_threshold = models.FloatField(null=True, blank=True, verbose_name="三级告警阈值(critical)")
+
+    # 基线振幅模式的三级百分比偏差阈值
+    warn_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="一级振幅阈值(%) warning")
+    error_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="二级振幅阈值(%) error")
+    critical_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="三级振幅阈值(%) critical")
+
+    unit = models.CharField(max_length=20, blank=True, null=True, verbose_name="单位")
+    is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    description = models.TextField(blank=True, null=True, verbose_name="描述")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        return f"[{self.db_type}] {self.display_name} ({self.rule_type})"
+
+    class Meta:
+        verbose_name = "告警阈值模板"
+        verbose_name_plural = "告警阈值模板列表"
+        unique_together = ('db_type', 'metric_key')
+        ordering = ['db_type', 'metric_key']
+
+
+# ==========================================
+# 数据库告警覆盖配置（个性化）
+# ==========================================
+class DatabaseAlertOverride(models.Model):
+    """针对特定数据库的告警配置覆盖，优先级高于类型模板"""
+
+    RULE_TYPE_CHOICES = AlertThresholdTemplate.RULE_TYPE_CHOICES
+    DIRECTION_CHOICES = AlertThresholdTemplate.DIRECTION_CHOICES
+
+    db_config = models.ForeignKey(
+        DatabaseConfig, on_delete=models.CASCADE,
+        related_name='alert_overrides', verbose_name="数据库"
+    )
+    metric_key = models.CharField(max_length=100, verbose_name="指标键")
+
+    rule_type = models.CharField(max_length=30, choices=RULE_TYPE_CHOICES, null=True, blank=True, verbose_name="规则类型覆盖")
+    direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, null=True, blank=True, verbose_name="触发方向覆盖")
+
+    warn_threshold = models.FloatField(null=True, blank=True, verbose_name="一级告警阈值覆盖")
+    error_threshold = models.FloatField(null=True, blank=True, verbose_name="二级告警阈值覆盖")
+    critical_threshold = models.FloatField(null=True, blank=True, verbose_name="三级告警阈值覆盖")
+
+    warn_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="一级振幅阈值覆盖(%)")
+    error_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="二级振幅阈值覆盖(%)")
+    critical_amplitude_pct = models.FloatField(null=True, blank=True, verbose_name="三级振幅阈值覆盖(%)")
+
+    is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    note = models.TextField(blank=True, null=True, verbose_name="备注")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        return f"{self.db_config.name} | {self.metric_key}"
+
+    class Meta:
+        verbose_name = "数据库告警配置覆盖"
+        verbose_name_plural = "数据库告警配置覆盖列表"
+        unique_together = ('db_config', 'metric_key')
+        ordering = ['db_config', 'metric_key']
 
 
 # ==========================================

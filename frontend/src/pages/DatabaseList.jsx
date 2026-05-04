@@ -4,7 +4,7 @@ import {
   Table, Tag, Space, Button, Input, Select, Card,
   Typography, Tooltip, Statistic, Row, Col, message,
   Badge, Progress, Switch, Dropdown, Alert, Modal, Form,
-  InputNumber, Popconfirm
+  InputNumber, Popconfirm, Skeleton
 } from 'antd'
 import {
   SearchOutlined, ReloadOutlined, PlusOutlined,
@@ -107,6 +107,7 @@ const setCachedData = (key, data) => {
 const DatabaseList = () => {
   const navigate = useNavigate()
   const [databases, setDatabases] = useState([])
+  const [initialLoading, setInitialLoading] = useState(true)
   const [loading, setLoading] = useState(false)
   const [refreshing, setRefreshing] = useState(false)
   const [dbDetails, setDbDetails] = useState({}) // 存储每个数据库的详细信息
@@ -115,6 +116,7 @@ const DatabaseList = () => {
   const [autoRefreshInterval, setAutoRefreshInterval] = useState(30) // 秒
   const autoRefreshTimerRef = useRef(null)
   const abortControllerRef = useRef(null)
+  const lastFetchTimeRef = useRef(0)  // 防抖：记录上次 fetchAllDetails 时间
 
   const [filters, setFilters] = useState({
     search: '',
@@ -158,6 +160,7 @@ const DatabaseList = () => {
       message.error('获取数据失败')
     } finally {
       setLoading(false)
+      setInitialLoading(false)
     }
   }, [])
 
@@ -400,15 +403,30 @@ const DatabaseList = () => {
     }
   }, [])
 
-  // 批量获取所有数据库的详细信息
-  const fetchAllDetails = useCallback(async () => {
+  // 批量获取所有数据库的详细信息 (支持 AbortController 取消 + 防抖)
+  const fetchAllDetails = useCallback(async (force = false) => {
     if (databases.length === 0) return
+
+    // 防抖：5 秒内不重复请求（手动刷新除外）
+    const now = Date.now()
+    if (!force && now - lastFetchTimeRef.current < 5000) {
+      return
+    }
+    lastFetchTimeRef.current = now
+
+    // 取消上一次请求
+    if (abortControllerRef.current) {
+      abortControllerRef.current.abort()
+    }
+    const controller = new AbortController()
+    abortControllerRef.current = controller
 
     setRefreshing(true)
     const detailsMap = {}
 
     // 并行获取所有数据库的状态、健康分、告警
     const promises = databases.map(async (db) => {
+      if (controller.signal.aborted) return
       try {
         const [status, health, alerts] = await Promise.all([
           fetchDbStatus(db.id),
@@ -440,6 +458,7 @@ const DatabaseList = () => {
           }
         }
       } catch (err) {
+        if (err?.name === 'AbortError' || controller.signal.aborted) return
         console.error(`获取数据库 ${db.id} 详情失败:`, err)
         detailsMap[db.id] = {
           status: 'UNKNOWN',
@@ -451,9 +470,16 @@ const DatabaseList = () => {
       }
     })
 
-    await Promise.all(promises)
-    setDbDetails(detailsMap)
-    setLastRefresh(dayjs())
+    try {
+      await Promise.all(promises)
+    } catch (e) {
+      if (e?.name !== 'AbortError') console.error('批量获取详情异常:', e)
+    }
+
+    if (!controller.signal.aborted) {
+      setDbDetails(detailsMap)
+      setLastRefresh(dayjs())
+    }
     setRefreshing(false)
   }, [databases, fetchDbStatus, fetchDbHealth, fetchDbAlerts])
 
@@ -462,18 +488,19 @@ const DatabaseList = () => {
     fetchDatabases()
   }, [fetchDatabases])
 
-  // 数据库列表加载后获取详情
+  // 数据库列表加载后获取详情 (首次加载 force=true)
   useEffect(() => {
     if (databases.length > 0) {
-      fetchAllDetails()
+      fetchAllDetails(true)
     }
-  }, [databases, fetchAllDetails])
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [databases])
 
-  // 自动刷新
+  // 自动刷新 (force=false, 受防抖限制)
   useEffect(() => {
     if (autoRefresh) {
       autoRefreshTimerRef.current = setInterval(() => {
-        fetchAllDetails()
+        fetchAllDetails(false)
       }, autoRefreshInterval * 1000)
     }
     return () => {
@@ -481,12 +508,13 @@ const DatabaseList = () => {
         clearInterval(autoRefreshTimerRef.current)
       }
     }
-  }, [autoRefresh, autoRefreshInterval, fetchAllDetails])
+  }, [autoRefresh, autoRefreshInterval])
 
-  // 手动刷新
+  // 手动刷新 (force=true 绕过防抖)
   const handleRefresh = useCallback(() => {
     // 清除缓存
     cache.clear()
+    lastFetchTimeRef.current = 0
     fetchDatabases()
   }, [fetchDatabases])
 
@@ -627,7 +655,7 @@ const DatabaseList = () => {
     const level = getHealthLevel(score)
 
     return (
-      <Tooltip title={`${level} - ${score}分`}>
+      <Tooltip title={`${level} - ${score}分 | 点击查看详情`}>
         <Tag
           color={color}
           style={{
@@ -635,7 +663,12 @@ const DatabaseList = () => {
             fontSize: 14,
             padding: '2px 8px',
             minWidth: 60,
-            textAlign: 'center'
+            textAlign: 'center',
+            cursor: 'pointer'
+          }}
+          onClick={(e) => {
+            e.stopPropagation()
+            navigate(`/databases/${dbId}`)
           }}
         >
           {score}分
@@ -644,32 +677,41 @@ const DatabaseList = () => {
     )
   }
 
-  // 获取告警徽章
+  // 获取告警徽章 (可点击跳转告警列表)
   const getAlertBadge = (dbId) => {
     const detail = dbDetails[dbId] || {}
     const count = detail.alertCount || 0
     const critical = detail.criticalAlerts || 0
 
+    const handleAlertClick = (e) => {
+      e.stopPropagation()
+      navigate(`/alerts?dbId=${dbId}`)
+    }
+
     if (count === 0) {
       return (
-        <Badge
-          count={0}
-          showZero
-          style={{ backgroundColor: '#52c41a' }}
-        />
+        <span onClick={handleAlertClick} style={{ cursor: 'pointer' }}>
+          <Badge
+            count={0}
+            showZero
+            style={{ backgroundColor: '#52c41a' }}
+          />
+        </span>
       )
     }
 
     return (
-      <Tooltip title={critical > 0 ? `${critical}个严重告警` : `${count}个告警`}>
-        <Badge
-          count={count}
-          style={{
-            backgroundColor: critical > 0 ? '#ff4d4f' : '#faad14',
-            fontWeight: 600
-          }}
-          overflowCount={99}
-        />
+      <Tooltip title={critical > 0 ? `${critical}个严重告警 | 点击查看` : `${count}个告警 | 点击查看`}>
+        <span onClick={handleAlertClick} style={{ cursor: 'pointer' }}>
+          <Badge
+            count={count}
+            style={{
+              backgroundColor: critical > 0 ? '#ff4d4f' : '#faad14',
+              fontWeight: 600
+            }}
+            overflowCount={99}
+          />
+        </span>
       </Tooltip>
     )
   }
@@ -963,88 +1005,100 @@ const DatabaseList = () => {
       </div>
 
       {/* 统计卡片 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable>
-            <Statistic
-              title="总数据库"
-              value={stats.total}
-              prefix={<DatabaseOutlined />}
-              valueStyle={{ color: '#1890ff' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable>
-            <Statistic
-              title="正常运行"
-              value={stats.up}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable>
-            <Statistic
-              title="故障"
-              value={stats.down}
-              prefix={<CloseCircleOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable>
-            <Statistic
-              title="未知"
-              value={stats.unknown}
-              prefix={<QuestionCircleOutlined />}
-              valueStyle={{ color: '#999' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable style={{ borderLeft: '3px solid #52c41a' }}>
-            <Statistic
-              title="健康"
-              value={stats.healthy}
-              prefix={<CheckCircleOutlined />}
-              valueStyle={{ color: '#52c41a' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable style={{ borderLeft: '3px solid #faad14' }}>
-            <Statistic
-              title="亚健康"
-              value={stats.warning}
-              prefix={<WarningOutlined />}
-              valueStyle={{ color: '#faad14' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable style={{ borderLeft: '3px solid #ff4d4f' }}>
-            <Statistic
-              title="问题库"
-              value={stats.critical}
-              prefix={<ExclamationCircleOutlined />}
-              valueStyle={{ color: '#ff4d4f' }}
-            />
-          </Card>
-        </Col>
-        <Col xs={12} sm={6} md={3}>
-          <Card size="small" hoverable style={{ borderLeft: '3px solid #722ed1' }}>
-            <Statistic
-              title="告警中"
-              value={stats.withAlerts}
-              prefix={<FireOutlined />}
-              valueStyle={{ color: '#722ed1' }}
-            />
-          </Card>
-        </Col>
-      </Row>
+      {initialLoading ? (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          {[...Array(8)].map((_, i) => (
+            <Col xs={12} sm={6} md={3} key={i}>
+              <Card size="small">
+                <Skeleton paragraph={{ rows: 1 }} active />
+              </Card>
+            </Col>
+          ))}
+        </Row>
+      ) : (
+        <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable>
+              <Statistic
+                title="总数据库"
+                value={stats.total}
+                prefix={<DatabaseOutlined />}
+                valueStyle={{ color: '#1890ff' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable>
+              <Statistic
+                title="正常运行"
+                value={stats.up}
+                prefix={<CheckCircleOutlined />}
+                valueStyle={{ color: '#52c41a' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable>
+              <Statistic
+                title="故障"
+                value={stats.down}
+                prefix={<CloseCircleOutlined />}
+                valueStyle={{ color: '#ff4d4f' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable>
+              <Statistic
+                title="未知"
+                value={stats.unknown}
+                prefix={<QuestionCircleOutlined />}
+                valueStyle={{ color: '#999' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable style={{ borderLeft: '3px solid #52c41a' }}>
+              <Statistic
+                title="健康"
+                value={stats.healthy}
+                prefix={<CheckCircleOutlined />}
+                valueStyle={{ color: '#52c41a' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable style={{ borderLeft: '3px solid #faad14' }}>
+              <Statistic
+                title="亚健康"
+                value={stats.warning}
+                prefix={<WarningOutlined />}
+                valueStyle={{ color: '#faad14' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable style={{ borderLeft: '3px solid #ff4d4f' }}>
+              <Statistic
+                title="问题库"
+                value={stats.critical}
+                prefix={<ExclamationCircleOutlined />}
+                valueStyle={{ color: '#ff4d4f' }}
+              />
+            </Card>
+          </Col>
+          <Col xs={12} sm={6} md={3}>
+            <Card size="small" hoverable style={{ borderLeft: '3px solid #722ed1' }}>
+              <Statistic
+                title="告警中"
+                value={stats.withAlerts}
+                prefix={<FireOutlined />}
+                valueStyle={{ color: '#722ed1' }}
+              />
+            </Card>
+          </Col>
+        </Row>
+      )}
 
       {/* 过滤和排序工具栏 */}
       <Card size="small" style={{ marginBottom: 16 }}>

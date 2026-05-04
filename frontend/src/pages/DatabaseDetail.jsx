@@ -1,8 +1,8 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useMemo } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import { 
   Card, Row, Col, Statistic, Typography, Space, Tag, 
-  Table, Tabs, Button, Descriptions, Spin, Alert, Modal, Empty
+  Table, Tabs, Button, Descriptions, Spin, Alert, Modal, Empty, Progress
 } from 'antd';
 import { 
   ArrowLeftOutlined, ReloadOutlined, DatabaseOutlined,
@@ -14,20 +14,15 @@ import {
   CartesianGrid, Tooltip, Legend, ResponsiveContainer
 } from 'recharts';
 import { databaseAPI, alertAPI } from '../services/api';
+import { 
+  DB_TYPE_LABELS, DB_METRIC_CATEGORIES, 
+  getMetricCategories, formatMetricValue, getMetricThresholdColor,
+  getMetricRawValue
+} from '../config/dbMetricsConfig';
 import dayjs from 'dayjs';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
-
-// 数据库类型映射
-const DB_TYPE_NAME = {
-  'oracle': 'Oracle',
-  'mysql': 'MySQL',
-  'pgsql': 'PostgreSQL',
-  'dm': '达梦数据库',
-  'gbase': 'GBase',
-  'tdsql': 'TDSQL'
-};
 
 const DatabaseDetail = () => {
   const { id } = useParams();
@@ -186,6 +181,9 @@ const DatabaseDetail = () => {
   const metrics = statusData?.metrics || {};
   const dbType = configInfo?.db_type || 'unknown';
 
+  // 获取数据库类型对应的指标分类配置
+  const metricCategories = useMemo(() => getMetricCategories(dbType), [dbType]);
+
   const getStatusTag = (status) => {
     const statusMap = {
       UP: { color: 'green', text: '在线', icon: <CheckCircleOutlined /> },
@@ -243,10 +241,127 @@ const DatabaseDetail = () => {
     tps: '#eb2f96'
   };
 
-  // Oracle 特定指标提取
-  const isOracle = dbType === 'oracle';
-  const isPostgres = dbType === 'pgsql';
-  const isMySQL = dbType === 'mysql';
+  /**
+   * ============================================================
+   * 动态渲染：根据 dbMetricsConfig 配置渲染指标卡片分类
+   * ============================================================
+   */
+  const renderMetricCardsCategory = (category) => {
+    if (category.showWhen && !category.showWhen(metrics)) return null;
+    
+    return (
+      <Card title={category.title} key={category.key} size="small" style={{ marginBottom: 16 }}>
+        <Row gutter={[16, 16]}>
+          {category.metrics.map(metricDef => {
+            // 兼容 fallbackKey: 如果主key无值，尝试备选key
+            let value = metrics[metricDef.key];
+            if ((value === undefined || value === null) && metricDef.fallbackKey) {
+              value = metrics[metricDef.fallbackKey];
+            }
+            const thresholdColor = getMetricThresholdColor(value, metricDef.key);
+            const displayValue = formatMetricValue(value, metricDef.format);
+            
+            return (
+              <Col span={metricDef.highlight ? 6 : 6} key={metricDef.key}>
+                <Card 
+                  size="small" 
+                  hoverable={metricDef.clickable !== false} 
+                  onClick={() => metricDef.clickable !== false && handleMetricClick(metricDef.key, metricDef.label, value)}
+                >
+                  <Statistic
+                    title={metricDef.label}
+                    value={displayValue}
+                    valueStyle={{ 
+                      color: thresholdColor || (metricDef.highlight ? '#1890ff' : undefined),
+                      fontSize: 20,
+                      cursor: metricDef.clickable !== false ? 'pointer' : 'default'
+                    }}
+                  />
+                </Card>
+              </Col>
+            );
+          })}
+        </Row>
+      </Card>
+    );
+  };
+
+  /**
+   * 渲染表格型指标分类
+   */
+  const renderTableCategory = (category) => {
+    if (category.showWhen && !category.showWhen(metrics)) return null;
+    
+    const dataSource = (metrics[category.key] || []).map((item, idx) => ({
+      ...item,
+      _key: item.name || item.event || item.id || item.pid || idx,
+    }));
+    
+    if (dataSource.length === 0 && !category.showWhen) return null;
+
+    return (
+      <Card title={category.title} key={category.key} size="small" style={{ marginBottom: 16 }}>
+        <Table
+          dataSource={dataSource}
+          size="small"
+          pagination={category.pagination ? { pageSize: 10 } : false}
+          scroll={category.columns.length > 6 ? { x: 'max-content' } : undefined}
+          onRow={(record) => {
+            if (!category.rowClick) return {};
+            return {
+              onClick: () => {
+                if (category.rowClick === 'tablespace') handleTablespaceClick(record);
+                else if (category.rowClick === 'waitEvent') handleWaitEventClick(record);
+              },
+              style: { cursor: 'pointer' }
+            };
+          }}
+          columns={category.columns.map(col => ({
+            title: col.title,
+            dataIndex: col.key,
+            key: col.key,
+            ellipsis: col.key === 'event' || col.key === 'sql_text' || col.key === 'query' || col.key === 'info' || col.key === 'wait_event' || col.key === 'sql_id',
+            render: (val) => {
+              if (val === null || val === undefined) return '-';
+              // 使用率列显示颜色标签
+              if (col.key === 'used_pct') {
+                const v = Number(val);
+                const color = v > 90 ? '#ff4d4f' : v > 80 ? '#faad14' : '#52c41a';
+                return <Tag color={color}>{v.toFixed(2)}%</Tag>;
+              }
+              // 状态列
+              if (col.key === 'status' || col.key === 'state' || col.key === 'node_state') {
+                const colorMap = {
+                  'ACTIVE': 'green', 'OPEN': 'green', 'UP': 'green', '正常': 'green',
+                  'HEALTHY': 'green', 'ONLINE': 'green', 'running': 'green',
+                  'INACTIVE': 'default', 'DOWN': 'red', 'OFFLINE': 'red',
+                  'STANDBY': 'blue', 'UNKNOWN': 'default',
+                };
+                return <Tag color={colorMap[val] || 'default'}>{val}</Tag>;
+              }
+              // 格式化
+              if (col.format) return formatMetricValue(val, col.format);
+              // 大数字格式化
+              if (typeof val === 'number' && (col.key === 'total_waits' || col.key === 'time_waited' || col.key === 'buffer_gets' || col.key === 'exec_count' || col.key === 'rows_examined' || col.key === 'rows' || col.key === 'calls')) {
+                return formatNumber(val);
+              }
+              return String(val);
+            }
+          }))}
+        />
+      </Card>
+    );
+  };
+
+  /**
+   * 渲染单个分类区块
+   */
+  const renderCategory = (category) => {
+    if (category.type === 'table') {
+      return renderTableCategory(category);
+    }
+    return renderMetricCardsCategory(category);
+  };
 
   return (
     <div className="database-detail" style={{ padding: 24 }}>
@@ -259,11 +374,11 @@ const DatabaseDetail = () => {
             <DatabaseOutlined /> {configInfo?.name || '数据库详情'}
           </Title>
           {getStatusTag(statusData?.status)}
-          <Tag>{DB_TYPE_NAME[dbType] || dbType}</Tag>
+          <Tag color="blue">{DB_TYPE_LABELS[dbType] || dbType}</Tag>
         </Space>
         <Button 
           icon={<ReloadOutlined />} 
-          onClick={fetchData}
+          onClick={() => fetchData(timeRange)}
           loading={loading}
           style={{ float: 'right' }}
         >
@@ -276,328 +391,18 @@ const DatabaseDetail = () => {
         <Descriptions column={4} size="small">
           <Descriptions.Item label="主机地址">{configInfo?.host || '-'}</Descriptions.Item>
           <Descriptions.Item label="端口">{configInfo?.port || '-'}</Descriptions.Item>
-          <Descriptions.Item label="数据库类型">{DB_TYPE_NAME[dbType] || dbType}</Descriptions.Item>
+          <Descriptions.Item label="数据库类型">{DB_TYPE_LABELS[dbType] || dbType}</Descriptions.Item>
           <Descriptions.Item label="服务名/库名">{configInfo?.service_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="最后检查">{statusData?.collected_at ? dayjs(statusData.collected_at).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
           <Descriptions.Item label="监控状态">{getStatusTag(statusData?.status)}</Descriptions.Item>
         </Descriptions>
       </Card>
 
-      {/* Oracle 数据库核心指标 */}
-      {isOracle && (
-        <>
-          {/* Oracle 基础信息 */}
-          <Card title="Oracle 实例信息" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={4}><Statistic title="实例名" value={metrics.instance_name || '-'} /></Col>
-              <Col span={4}><Statistic title="主机名" value={metrics.host_name || '-'} /></Col>
-              <Col span={4}><Statistic title="数据库版本" value={(metrics.version || '').substring(0, 30) || '-'} /></Col>
-              <Col span={4}><Statistic title="打开模式" value={metrics.open_mode || '-'} /></Col>
-              <Col span={4}><Statistic title="数据库角色" value={metrics.database_role || '-'} /></Col>
-              <Col span={4}><Statistic title="运行时间" value={metrics.uptime_seconds ? `${Math.floor(metrics.uptime_seconds / 86400)}天` : '-'} /></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle 会话与连接 */}
-          <Row gutter={16} style={{ marginBottom: 16 }}>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('active_connections', '活跃会话', metrics.active_connections || metrics.active_sessions || 0)}>
-                <Statistic 
-                  title="活跃会话" 
-                  value={metrics.active_connections || metrics.active_sessions || 0}
-                  prefix={<ThunderboltOutlined />}
-                  valueStyle={{ color: (metrics.active_connections || 0) > 80 ? '#ff4d4f' : '#52c41a', cursor: 'pointer' }}
-                />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('total_connections', '总会话数', metrics.total_connections || metrics.total_sessions || 0)}>
-                <Statistic 
-                  title="总会话数" 
-                  value={metrics.total_connections || metrics.total_sessions || 0}
-                />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('conn_usage_pct', '连接使用率', metrics.conn_usage_pct || 0)}>
-                <Statistic 
-                  title="连接使用率" 
-                  value={metrics.conn_usage_pct || 0}
-                  suffix="%"
-                  valueStyle={{ 
-                    color: (metrics.conn_usage_pct || 0) > 80 ? '#ff4d4f' : (metrics.conn_usage_pct || 0) > 60 ? '#faad14' : '#52c41a',
-                    cursor: 'pointer'
-                  }}
-                />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('max_connections', '最大连接数', metrics.max_connections || metrics.max_conn || 0)}>
-                <Statistic title="最大连接数" value={metrics.max_connections || metrics.max_conn || 0} />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('qps', 'QPS', metrics.qps || 0)}>
-                <Statistic title="QPS" value={metrics.qps || 0} suffix="/s" />
-              </Card>
-            </Col>
-            <Col span={4}>
-              <Card size="small" hoverable onClick={() => handleMetricClick('tps', 'TPS', metrics.tps || 0)}>
-                <Statistic title="TPS" value={metrics.tps || 0} suffix="/s" />
-              </Card>
-            </Col>
-          </Row>
-
-          {/* Oracle 性能指标 */}
-          <Card title="Oracle 性能指标" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('logical_reads', '逻辑读', metrics.logical_reads)}><Statistic title="逻辑读" value={formatNumber(metrics.logical_reads)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('physical_reads', '物理读', metrics.physical_reads)}><Statistic title="物理读" value={formatNumber(metrics.physical_reads)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('physical_writes', '物理写', metrics.physical_writes)}><Statistic title="物理写" value={formatNumber(metrics.physical_writes)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('buffer_hit_ratio', '缓冲命中率', metrics.buffer_hit_ratio)}><Statistic title="缓冲命中率" value={metrics.buffer_hit_ratio || 0} suffix="%" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('library_cache_hit_ratio', '库缓存命中率', metrics.library_cache_hit_ratio)}><Statistic title="库缓存命中率" value={metrics.library_cache_hit_ratio || 0} suffix="%" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('redo_generation_bytes', 'Redo生成量', metrics.redo_generation_bytes)}><Statistic title="Redo生成量" value={formatNumber(metrics.redo_generation_bytes)} /></Card></Col>
-            </Row>
-            <Row gutter={16} style={{ marginTop: 16 }}>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('exec_count', '执行次数', metrics.exec_count)}><Statistic title="执行次数" value={formatNumber(metrics.exec_count)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('commits', '事务提交', metrics.commits)}><Statistic title="事务提交" value={formatNumber(metrics.commits)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('rollbacks', '事务回滚', metrics.rollbacks)}><Statistic title="事务回滚" value={formatNumber(metrics.rollbacks)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('parse_count_total', '总解析数', metrics.parse_count_total)}><Statistic title="总解析数" value={formatNumber(metrics.parse_count_total)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('parse_count_hard', '硬解析数', metrics.parse_count_hard)}><Statistic title="硬解析数" value={formatNumber(metrics.parse_count_hard)} /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('db_time_seconds', 'DB Time', metrics.db_time_seconds)}><Statistic title="DB Time" value={metrics.db_time_seconds ? metrics.db_time_seconds.toFixed(2) + 's' : '-'} /></Card></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle 内存池 (SGA/PGA) */}
-          <Card title="Oracle 内存池 (SGA/PGA)" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('buffer_cache_mb', 'Buffer Cache', metrics.buffer_cache_mb)}><Statistic title="Buffer Cache" value={metrics.buffer_cache_mb || 0} suffix="MB" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('shared_pool_mb', 'Shared Pool', metrics.shared_pool_mb)}><Statistic title="Shared Pool" value={metrics.shared_pool_mb || 0} suffix="MB" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('java_pool_mb', 'Java Pool', metrics.java_pool_mb)}><Statistic title="Java Pool" value={metrics.java_pool_mb || 0} suffix="MB" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('large_pool_mb', 'Large Pool', metrics.large_pool_mb)}><Statistic title="Large Pool" value={metrics.large_pool_mb || 0} suffix="MB" /></Card></Col>
-              <Col span={4}><Card size="small" hoverable onClick={() => handleMetricClick('pga_used_mb', 'PGA Used', metrics.pga_used_mb)}><Statistic title="PGA Used" value={metrics.pga_used_mb || 0} suffix="MB" /></Card></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle 表空间 */}
-          <Card title="Oracle 表空间使用" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.tablespaces || []).map((tbs, idx) => ({ ...tbs, key: idx }))}
-              size="small"
-              pagination={false}
-              onRow={(record) => ({
-                onClick: () => handleTablespaceClick(record),
-                style: { cursor: 'pointer' }
-              })}
-              columns={[
-                { title: '表空间名', dataIndex: 'name', key: 'name' },
-                { title: '总大小(MB)', dataIndex: 'total_mb', key: 'total_mb', render: v => v?.toFixed(2) || '-' },
-                { title: '已使用(MB)', dataIndex: 'used_mb', key: 'used_mb', render: v => v?.toFixed(2) || '-' },
-                { 
-                  title: '使用率', 
-                  dataIndex: 'used_pct', 
-                  key: 'used_pct',
-                  render: v => {
-                    const color = v > 90 ? '#ff4d4f' : v > 80 ? '#faad14' : '#52c41a';
-                    return <Tag color={color}>{v?.toFixed(2) || '-'}%</Tag>;
-                  }
-                }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle 临时表空间 */}
-          <Card title="Oracle 临时表空间" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.temp_tablespaces || []).map((tbs, idx) => ({ ...tbs, key: idx }))}
-              size="small"
-              pagination={false}
-              columns={[
-                { title: '表空间名', dataIndex: 'name', key: 'name' },
-                { title: '大小(MB)', dataIndex: 'size_mb', key: 'size_mb', render: v => v?.toFixed(2) || '-' }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle UNDO表空间 */}
-          <Card title="Oracle UNDO表空间" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.undo_tablespaces || []).map((tbs, idx) => ({ ...tbs, key: idx }))}
-              size="small"
-              pagination={false}
-              columns={[
-                { title: '表空间名', dataIndex: 'name', key: 'name' },
-                { title: '状态', dataIndex: 'status', key: 'status' },
-                { title: '大小(MB)', dataIndex: 'size_mb', key: 'size_mb', render: v => v?.toFixed(2) || '-' }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle 锁等待 */}
-          <Card title="Oracle 锁等待" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16} style={{ marginBottom: 16 }}>
-              <Col span={8}>
-                <Statistic title="锁等待数量" value={metrics.lock_wait_count || 0} />
-              </Col>
-            </Row>
-            <Table
-              dataSource={(metrics.locks || []).map((lock, idx) => ({ ...lock, key: idx }))}
-              size="small"
-              pagination={false}
-              columns={[
-                { title: '阻塞者', dataIndex: 'blocker_id', key: 'blocker_id' },
-                { title: '阻塞者用户', dataIndex: 'blocker_user', key: 'blocker_user' },
-                { title: '等待者', dataIndex: 'waiter_id', key: 'waiter_id' },
-                { title: '等待者用户', dataIndex: 'waiter_user', key: 'waiter_user' },
-                { title: '等待时间(秒)', dataIndex: 'seconds', key: 'seconds' },
-                { title: '等待事件', dataIndex: 'wait_event', key: 'wait_event', ellipsis: true }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle Top等待事件 */}
-          <Card title="Oracle Top等待事件" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.top_wait_events || []).map((evt, idx) => ({ ...evt, key: idx }))}
-              size="small"
-              pagination={false}
-              onRow={(record) => ({
-                onClick: () => handleWaitEventClick(record),
-                style: { cursor: 'pointer' }
-              })}
-              columns={[
-                { title: '事件名', dataIndex: 'event', key: 'event', ellipsis: true },
-                { title: '总等待次数', dataIndex: 'total_waits', key: 'total_waits', render: v => formatNumber(v) },
-                { title: '总等待时间(ms)', dataIndex: 'time_waited', key: 'time_waited', render: v => formatNumber(v) },
-                { title: '平均等待时间(ms)', dataIndex: 'average_wait', key: 'average_wait', render: v => v?.toFixed(2) || '-' }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle 会话列表 */}
-          <Card title="Oracle 会话列表" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.session_list || []).map((sess, idx) => ({ ...sess, key: idx }))}
-              size="small"
-              pagination={{ pageSize: 10 }}
-              scroll={{ x: 'max-content' }}
-              columns={[
-                { title: 'SID/Serial', dataIndex: 'sid_serial', key: 'sid_serial', width: 120 },
-                { title: '用户名', dataIndex: 'username', key: 'username', width: 100 },
-                { title: '状态', dataIndex: 'status', key: 'status', width: 80,
-                  render: v => <Tag color={v === 'ACTIVE' ? 'green' : v === 'INACTIVE' ? 'default' : 'orange'}>{v}</Tag>
-                },
-                { title: '程序', dataIndex: 'program', key: 'program', width: 150, ellipsis: true },
-                { title: '机器', dataIndex: 'machine', key: 'machine', width: 120, ellipsis: true },
-                { title: '等待事件', dataIndex: 'wait_event', key: 'wait_event', width: 150, ellipsis: true },
-                { title: '等待秒数', dataIndex: 'seconds_in_wait', key: 'seconds_in_wait', width: 100 },
-                { title: 'SQL ID', dataIndex: 'sql_id', key: 'sql_id', width: 150, ellipsis: true }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle Top SQL */}
-          <Card title="Oracle Top SQL (Buffer Gets)" size="small" style={{ marginBottom: 16 }}>
-            <Table
-              dataSource={(metrics.top_sql_by_buffer_gets || []).map((sql, idx) => ({ ...sql, key: idx }))}
-              size="small"
-              pagination={false}
-              columns={[
-                { title: 'SQL ID', dataIndex: 'sql_id', key: 'sql_id', width: 150, ellipsis: true },
-                { title: 'SQL文本', dataIndex: 'sql_text', key: 'sql_text', ellipsis: true },
-                { title: 'Buffer Gets', dataIndex: 'buffer_gets', key: 'buffer_gets', render: v => formatNumber(v) },
-                { title: 'Disk Reads', dataIndex: 'disk_reads', key: 'disk_reads', render: v => formatNumber(v) },
-                { title: '执行次数', dataIndex: 'executions', key: 'executions', render: v => formatNumber(v) },
-                { title: 'Gets/执行', dataIndex: 'buffer_gets_per_exec', key: 'buffer_gets_per_exec', render: v => formatNumber(v) }
-              ]}
-            />
-          </Card>
-
-          {/* Oracle RAC信息 */}
-          {metrics.rac_instances && metrics.rac_instances.length > 0 && (
-            <Card title="Oracle RAC 集群信息" size="small" style={{ marginBottom: 16 }}>
-              <Row gutter={16} style={{ marginBottom: 16 }}>
-                <Col span={8}><Statistic title="RAC实例数" value={metrics.rac_instance_count || 0} /></Col>
-                <Col span={8}><Statistic title="DataGuard角色" value={metrics.dg_database_role || '-'} /></Col>
-                <Col span={8}><Statistic title="保护模式" value={metrics.dg_protection_mode || '-'} /></Col>
-              </Row>
-              <Table
-                dataSource={(metrics.rac_instances || []).map((inst, idx) => ({ ...inst, key: idx }))}
-                size="small"
-                pagination={false}
-                columns={[
-                  { title: '实例ID', dataIndex: 'inst_id', key: 'inst_id' },
-                  { title: '实例名', dataIndex: 'instance_name', key: 'instance_name' },
-                  { title: '主机名', dataIndex: 'host_name', key: 'host_name' },
-                  { title: '状态', dataIndex: 'status', key: 'status',
-                    render: v => <Tag color={v === 'OPEN' ? 'green' : 'orange'}>{v}</Tag>
-                  }
-                ]}
-              />
-            </Card>
-          )}
-
-          {/* Oracle 数据文件统计 */}
-          <Card title="Oracle 数据文件统计" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={8}><Card size="small" hoverable onClick={() => handleMetricClick('datafile_count', '数据文件数量', metrics.datafile_count)}><Statistic title="数据文件数量" value={metrics.datafile_count || 0} /></Card></Col>
-              <Col span={8}><Card size="small" hoverable onClick={() => handleMetricClick('datafile_size_total_gb', '数据文件总大小', metrics.datafile_size_total_gb)}><Statistic title="数据文件总大小" value={metrics.datafile_size_total_gb || 0} suffix="GB" /></Card></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle 事务统计 */}
-          <Card title="Oracle 事务统计" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('active_transactions', '活跃事务数', metrics.active_transactions)}><Statistic title="活跃事务数" value={metrics.active_transactions || 0} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('row_lock_contention', '行锁争用', metrics.row_lock_contention)}><Statistic title="行锁争用" value={metrics.row_lock_contention || 0} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('committed_transactions', '已提交事务', metrics.committed_transactions)}><Statistic title="已提交事务" value={formatNumber(metrics.committed_transactions)} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('rolled_back_transactions', '已回滚事务', metrics.rolled_back_transactions)}><Statistic title="已回滚事务" value={formatNumber(metrics.rolled_back_transactions)} /></Card></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle 对象统计 */}
-          <Card title="Oracle 对象统计" size="small" style={{ marginBottom: 16 }}>
-            <Row gutter={16}>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('table_count', '表数量', metrics.table_count)}><Statistic title="表数量" value={metrics.table_count || 0} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('index_count', '索引数量', metrics.index_count)}><Statistic title="索引数量" value={metrics.index_count || 0} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable onClick={() => handleMetricClick('partition_count', '分区数量', metrics.partition_count)}><Statistic title="分区数量" value={metrics.partition_count || 0} /></Card></Col>
-              <Col span={6}><Card size="small" hoverable><Statistic title="统计信息过期对象" value={(metrics.stale_statistics || []).length} /></Card></Col>
-            </Row>
-          </Card>
-
-          {/* Oracle Top表大小 */}
-          {metrics.table_size_top20 && metrics.table_size_top20.length > 0 && (
-            <Card title="Oracle Top 20 表大小" size="small" style={{ marginBottom: 16 }}>
-              <Table
-                dataSource={metrics.table_size_top20.map((t, idx) => ({ ...t, key: idx }))}
-                size="small"
-                pagination={false}
-                columns={[
-                  { title: '所有者', dataIndex: 'owner', key: 'owner' },
-                  { title: '表名', dataIndex: 'table_name', key: 'table_name', ellipsis: true },
-                  { title: '大小(MB)', dataIndex: 'size_mb', key: 'size_mb', render: v => v?.toFixed(2) || '-' }
-                ]}
-              />
-            </Card>
-          )}
-
-          {/* Oracle Top索引大小 */}
-          {metrics.index_size_top20 && metrics.index_size_top20.length > 0 && (
-            <Card title="Oracle Top 20 索引大小" size="small" style={{ marginBottom: 16 }}>
-              <Table
-                dataSource={metrics.index_size_top20.map((t, idx) => ({ ...t, key: idx }))}
-                size="small"
-                pagination={false}
-                columns={[
-                  { title: '所有者', dataIndex: 'owner', key: 'owner' },
-                  { title: '索引名', dataIndex: 'index_name', key: 'index_name', ellipsis: true },
-                  { title: '大小(MB)', dataIndex: 'size_mb', key: 'size_mb', render: v => v?.toFixed(2) || '-' }
-                ]}
-              />
-            </Card>
-          )}
-        </>
-      )}
+      {/* ============================================================
+          动态渲染所有数据库类型的指标分类（v3.0 多数据库支持）
+          替代原有的 Oracle 硬编码区块
+          ============================================================ */}
+      {metricCategories.map(renderCategory)}
 
       {/* 通用性能趋势图 */}
       <Card title="性能趋势" size="small" style={{ marginBottom: 16 }}>
