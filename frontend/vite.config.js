@@ -31,7 +31,8 @@ export default defineConfig({
         manualChunks: {
           'vendor-react': ['react', 'react-dom', 'react-router-dom'],
           'vendor-antd': ['antd'],
-          'vendor-charts': ['recharts']
+          'vendor-charts': ['recharts'],
+          'vendor-echarts': ['echarts', 'echarts-for-react']
         }
       }
     }

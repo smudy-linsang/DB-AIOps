@@ -91,7 +91,11 @@ export const databaseAPI = {
   // 获取数据库指标
   getMetrics: (id, params = {}) =>
     api.get(`/databases/${id}/metrics/`, { params }),
-  
+
+  // 获取历史指标（支持自定义时间范围 start_time / end_time）
+  getMetricsHistory: (id, params = {}) =>
+    api.get(`/databases/${id}/metrics/history/`, { params }),
+
   // 获取基线
   getBaseline: (id) => api.get(`/databases/${id}/baseline/`),
   
@@ -103,6 +107,10 @@ export const databaseAPI = {
   
   // 获取统计信息
   getStats: () => api.get('/databases/stats/'),
+
+  // 获取 Performance Hub 聚合数据（EMCC 风格）
+  getPerformanceHub: (id, params = {}) =>
+    api.get(`/databases/${id}/performance-hub/`, { params }),
 }
 
 // ==========================================
@@ -220,6 +228,82 @@ export const alertRuleAPI = {
   // 删除覆盖配置（恢复使用模板默认值）
   deleteOverride: (dbId, metricKey) =>
     api.delete(`/databases/${dbId}/alert-overrides/${metricKey}/`),
+}
+
+// ==========================================
+// 告警模板管理 API（Phase 3: 多模板模式）
+// ==========================================
+
+export const alertTemplateAPI = {
+  // 列出所有模板（可按 db_type 过滤，或全局）
+  list: (params = {}) =>
+    api.get('/alert-templates/', { params }),
+
+  // 获取单个模板详情（含内嵌规则）
+  getDetail: (id) =>
+    api.get(`/alert-templates/${id}/`),
+
+  // 创建模板
+  create: (data) =>
+    api.post('/alert-templates/', data),
+
+  // 更新模板元信息
+  update: (id, data) =>
+    api.put(`/alert-templates/${id}/`, data),
+
+  // 删除模板
+  delete: (id) =>
+    api.delete(`/alert-templates/${id}/`),
+
+  // 克隆模板
+  clone: (id, data) =>
+    api.post(`/alert-templates/${id}/clone/`, data),
+
+  // 获取模板内的规则列表
+  listRules: (templateId) =>
+    api.get(`/alert-templates/${templateId}/rules/`),
+
+  // 添加规则到模板
+  addRule: (templateId, data) =>
+    api.post(`/alert-templates/${templateId}/rules/`, data),
+
+  // 更新规则
+  updateRule: (templateId, ruleId, data) =>
+    api.put(`/alert-templates/${templateId}/rules/${ruleId}/`, data),
+
+  // 删除规则
+  deleteRule: (templateId, ruleId) =>
+    api.delete(`/alert-templates/${templateId}/rules/${ruleId}/`),
+
+  // 批量启用/禁用规则
+  batchToggleRules: (templateId, ruleIds, enabled) =>
+    api.post(`/alert-templates/${templateId}/rules/batch-toggle/`, { rule_ids: ruleIds, enabled }),
+
+  // 为数据库分配模板
+  assignTemplate: (dbId, templateId) =>
+    api.post(`/databases/${dbId}/assign-template/`, { template_id: templateId }),
+
+  // 获取数据库当前使用的模板
+  getAssignedTemplate: (dbId) =>
+    api.get(`/databases/${dbId}/assigned-template/`),
+}
+
+// ==========================================
+// SQL 监控 API（Phase 5: SQL Monitoring）
+// ==========================================
+
+export const sqlMonitoringAPI = {
+  // 获取慢查询列表 (GET /api/v1/databases/<dbId>/slow-queries/)
+  list: (dbId, params = {}) =>
+    api.get(`/databases/${dbId}/slow-queries/`, { params }),
+
+  // 获取慢查询分析 (GET /api/v1/databases/<dbId>/slow-queries/analysis/)
+  getAnalysis: (dbId, params = {}) =>
+    api.get(`/databases/${dbId}/slow-queries/analysis/`, { params }),
+
+  // SQL 文本搜索 (GET /api/v1/databases/<dbId>/slow-queries/search/)
+  search: (dbId, params = {}) =>
+    api.get(`/databases/${dbId}/slow-queries/search/`, { params }),
 }
 
 // ==========================================

@@ -21,6 +21,7 @@ Author: DB-AIOps Team
 import json
 from datetime import datetime, timedelta
 from typing import Optional
+from django.utils import timezone
 
 from django.http import JsonResponse
 from django.views import View
@@ -28,7 +29,8 @@ from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.contrib.auth.models import User
 
-from .models import MonitorLog, AlertLog, AuditLog, UserProfile
+from .models import MonitorLog, AlertLog, AuditLog, UserProfile, DatabaseConfig
+from .slow_query_engine import SlowQueryEngine
 from .auth import require_auth, require_role, get_user_role, get_user_database_ids, get_user_permissions, is_admin
 
 
@@ -616,14 +618,14 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                 '24h': 24, '7d': 168, '30d': 720
             }
             hours = time_map.get(time_param, 24)
-            start_dt = datetime.now() - timedelta(hours=hours)
+            start_dt = timezone.now() - timedelta(hours=hours)
         else:
-            start_dt = datetime.now() - timedelta(hours=24)
+            start_dt = timezone.now() - timedelta(hours=24)
         
         if end_time:
             end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
         else:
-            end_dt = datetime.now()
+            end_dt = timezone.now()
         
         hours = int((end_dt - start_dt).total_seconds() / 3600)
         
@@ -724,7 +726,7 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                     })
                                     break
                 elif metric_name.startswith('wait_event_'):
-                    event_name = metric_name[10:]
+                    event_name = metric_name[11:]
                     found = False
                     for evt in metrics.get('top_wait_events', []):
                         if evt.get('event') == event_name:
@@ -743,6 +745,17 @@ class DatabaseMetricsView(JSONResponseMixin, View):
                                     'timestamp': log.create_time.isoformat(),
                                     'metric': metric_name,
                                     'value': evt.get('total_waits'),
+                                    'status': log.status
+                                })
+                                found = True
+                                break
+                    if not found:
+                        for evt in metrics.get('wait_events_by_type', []):
+                            if evt.get('wait_event') == event_name or evt.get('event') == event_name:
+                                result.append({
+                                    'timestamp': log.create_time.isoformat(),
+                                    'metric': metric_name,
+                                    'value': evt.get('count') or evt.get('total_waits'),
                                     'status': log.status
                                 })
                                 break
@@ -1780,12 +1793,31 @@ api_views = {
 
 
 # =============================================================================
-# 告警阈值模板 API
+# 告警模板组 API（多模板支持）
 # =============================================================================
 
+def _template_group_to_dict(tg):
+    """序列化 AlertTemplate 模板组"""
+    rule_count = tg.rules.count() if hasattr(tg, 'rules') else 0
+    assigned_count = tg.assigned_databases.count() if hasattr(tg, 'assigned_databases') else 0
+    return {
+        'id': tg.id,
+        'name': tg.name,
+        'db_type': tg.db_type,
+        'is_default': tg.is_default,
+        'description': tg.description or '',
+        'rule_count': rule_count,
+        'assigned_db_count': assigned_count,
+        'create_time': tg.create_time.isoformat() if tg.create_time else None,
+        'update_time': tg.update_time.isoformat() if tg.update_time else None,
+    }
+
+
 def _template_to_dict(tpl):
+    """序列化 AlertThresholdTemplate 阈值规则"""
     return {
         'id': tpl.id,
+        'template_id': tpl.template_id,
         'db_type': tpl.db_type,
         'metric_key': tpl.metric_key,
         'display_name': tpl.display_name,
@@ -1892,8 +1924,15 @@ class AlertAvailableMetricsView(JSONResponseMixin, View):
         return self.json_response({'db_type': db_type, 'metrics': metrics})
 
 
-class AlertThresholdTemplateListView(JSONResponseMixin, View):
-    """GET /api/v1/alert-rules/templates/  POST /api/v1/alert-rules/templates/"""
+# =============================================================================
+# 告警模板组 CRUD API（多模板支持 Phase 3）
+# =============================================================================
+
+class AlertTemplateGroupListView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/alert-templates/      列出所有模板组（可按 db_type 过滤）
+    POST /api/v1/alert-templates/      创建新模板组
+    """
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
@@ -1901,33 +1940,194 @@ class AlertThresholdTemplateListView(JSONResponseMixin, View):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request):
-        from .models import AlertThresholdTemplate
-        db_type = request.GET.get('db_type')
-        qs = AlertThresholdTemplate.objects.all()
+        from .models import AlertTemplate
+        db_type = request.GET.get('db_type', '').strip()
+        qs = AlertTemplate.objects.all()
         if db_type:
             qs = qs.filter(db_type=db_type)
-        return self.json_response({'templates': [_template_to_dict(t) for t in qs]})
+        groups = [_template_group_to_dict(tg) for tg in qs.prefetch_related('rules', 'assigned_databases')]
+        return self.json_response({'templates': groups})
 
     def post(self, request):
-        from .models import AlertThresholdTemplate
+        from .models import AlertTemplate
         try:
             data = json.loads(request.body)
         except Exception:
             return self.error_response('Invalid JSON', 400)
 
-        required = ('db_type', 'metric_key', 'display_name', 'rule_type', 'direction')
+        name = (data.get('name') or '').strip()
+        db_type = (data.get('db_type') or '').strip()
+        if not name or not db_type:
+            return self.error_response('name and db_type are required', 400)
+
+        if AlertTemplate.objects.filter(name=name, db_type=db_type).exists():
+            return self.error_response(f'模板组 "{name}" 在该数据库类型下已存在', 409)
+
+        tg = AlertTemplate.objects.create(
+            name=name,
+            db_type=db_type,
+            is_default=data.get('is_default', False),
+            description=data.get('description', ''),
+        )
+        return self.json_response({'template': _template_group_to_dict(tg)}, status=201)
+
+
+class AlertTemplateGroupDetailView(JSONResponseMixin, View):
+    """
+    GET    /api/v1/alert-templates/<id>/       获取模板组详情（含规则列表）
+    PUT    /api/v1/alert-templates/<id>/       更新模板组元信息
+    DELETE /api/v1/alert-templates/<id>/       删除模板组（级联删除规则）
+    POST   /api/v1/alert-templates/<id>/clone/ 克隆模板组
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_obj(self, template_id):
+        from .models import AlertTemplate
+        try:
+            return AlertTemplate.objects.prefetch_related('rules', 'assigned_databases').get(pk=template_id)
+        except AlertTemplate.DoesNotExist:
+            return None
+
+    def get(self, request, template_id):
+        tg = self._get_obj(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+        result = _template_group_to_dict(tg)
+        result['rules'] = [_template_to_dict(r) for r in tg.rules.all()]
+        return self.json_response({'template': result})
+
+    def put(self, request, template_id):
+        tg = self._get_obj(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        updatable = ('name', 'description', 'is_default')
+        for field in updatable:
+            if field in data:
+                setattr(tg, field, data[field])
+        tg.save()
+        return self.json_response({'template': _template_group_to_dict(tg)})
+
+    def delete(self, request, template_id):
+        tg = self._get_obj(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+        tg.delete()
+        return self.json_response({'message': '模板组已删除'})
+
+    def post(self, request, template_id):
+        """处理 clone 操作: POST /api/v1/alert-templates/<id>/clone/"""
+        from .models import AlertTemplate, AlertThresholdTemplate
+        tg = self._get_obj(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        action = data.get('action', '')
+        if action != 'clone':
+            return self.error_response('Unknown action', 400)
+
+        new_name = (data.get('name') or '').strip()
+        if not new_name:
+            return self.error_response('克隆模板名称不能为空', 400)
+
+        if AlertTemplate.objects.filter(name=new_name, db_type=tg.db_type).exists():
+            return self.error_response(f'模板组 "{new_name}" 已存在', 409)
+
+        # 克隆模板组
+        new_tg = AlertTemplate.objects.create(
+            name=new_name,
+            db_type=tg.db_type,
+            is_default=False,
+            description=data.get('description', tg.description or ''),
+        )
+
+        # 克隆所有规则
+        for rule in tg.rules.all():
+            AlertThresholdTemplate.objects.create(
+                template=new_tg,
+                db_type=rule.db_type,
+                metric_key=rule.metric_key,
+                display_name=rule.display_name,
+                rule_type=rule.rule_type,
+                direction=rule.direction,
+                warn_threshold=rule.warn_threshold,
+                error_threshold=rule.error_threshold,
+                critical_threshold=rule.critical_threshold,
+                warn_amplitude_pct=rule.warn_amplitude_pct,
+                error_amplitude_pct=rule.error_amplitude_pct,
+                critical_amplitude_pct=rule.critical_amplitude_pct,
+                unit=rule.unit,
+                is_enabled=rule.is_enabled,
+                description=rule.description,
+            )
+
+        result = _template_group_to_dict(new_tg)
+        result['rules'] = [_template_to_dict(r) for r in new_tg.rules.all()]
+        return self.json_response({'template': result}, status=201)
+
+
+class AlertTemplateRuleListView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/alert-templates/<template_id>/rules/  列出模板组内的所有规则
+    POST /api/v1/alert-templates/<template_id>/rules/  向模板组添加新规则
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_template(self, template_id):
+        from .models import AlertTemplate
+        try:
+            return AlertTemplate.objects.get(pk=template_id)
+        except AlertTemplate.DoesNotExist:
+            return None
+
+    def get(self, request, template_id):
+        tg = self._get_template(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+        rules = [_template_to_dict(r) for r in tg.rules.all()]
+        return self.json_response({'rules': rules, 'template': _template_group_to_dict(tg)})
+
+    def post(self, request, template_id):
+        from .models import AlertThresholdTemplate
+        tg = self._get_template(template_id)
+        if not tg:
+            return self.error_response('模板组不存在', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        required = ('metric_key', 'display_name', 'rule_type', 'direction')
         for f in required:
             if not data.get(f):
                 return self.error_response(f'Missing field: {f}', 400)
 
-        if AlertThresholdTemplate.objects.filter(
-            db_type=data['db_type'], metric_key=data['metric_key']
-        ).exists():
-            return self.error_response('该数据库类型下此指标已有模板，请直接编辑', 409)
+        metric_key = data['metric_key']
+        if AlertThresholdTemplate.objects.filter(template=tg, metric_key=metric_key).exists():
+            return self.error_response('该模板组中此指标已有规则，请直接编辑', 409)
 
-        tpl = AlertThresholdTemplate.objects.create(
-            db_type=data['db_type'],
-            metric_key=data['metric_key'],
+        rule = AlertThresholdTemplate.objects.create(
+            template=tg,
+            db_type=tg.db_type,
+            metric_key=metric_key,
             display_name=data['display_name'],
             rule_type=data['rule_type'],
             direction=data['direction'],
@@ -1941,34 +2141,31 @@ class AlertThresholdTemplateListView(JSONResponseMixin, View):
             is_enabled=data.get('is_enabled', True),
             description=data.get('description', ''),
         )
-        return self.json_response({'template': _template_to_dict(tpl)}, status=201)
+        return self.json_response({'rule': _template_to_dict(rule)}, status=201)
 
 
-class AlertThresholdTemplateDetailView(JSONResponseMixin, View):
-    """GET/PUT/DELETE /api/v1/alert-rules/templates/<id>/"""
+class AlertTemplateRuleDetailView(JSONResponseMixin, View):
+    """
+    PUT    /api/v1/alert-templates/<template_id>/rules/<rule_id>/  更新规则
+    DELETE /api/v1/alert-templates/<template_id>/rules/<rule_id>/  删除规则
+    """
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
-    def _get_obj(self, template_id):
+    def _get_rule(self, template_id, rule_id):
         from .models import AlertThresholdTemplate
         try:
-            return AlertThresholdTemplate.objects.get(pk=template_id)
+            return AlertThresholdTemplate.objects.get(pk=rule_id, template_id=template_id)
         except AlertThresholdTemplate.DoesNotExist:
             return None
 
-    def get(self, request, template_id):
-        obj = self._get_obj(template_id)
-        if not obj:
-            return self.error_response('Not found', 404)
-        return self.json_response({'template': _template_to_dict(obj)})
-
-    def put(self, request, template_id):
-        obj = self._get_obj(template_id)
-        if not obj:
-            return self.error_response('Not found', 404)
+    def put(self, request, template_id, rule_id):
+        rule = self._get_rule(template_id, rule_id)
+        if not rule:
+            return self.error_response('规则不存在', 404)
         try:
             data = json.loads(request.body)
         except Exception:
@@ -1982,26 +2179,59 @@ class AlertThresholdTemplateDetailView(JSONResponseMixin, View):
         )
         for field in updatable:
             if field in data:
-                setattr(obj, field, data[field])
-        obj.save()
-        return self.json_response({'template': _template_to_dict(obj)})
+                setattr(rule, field, data[field])
+        rule.save()
+        return self.json_response({'rule': _template_to_dict(rule)})
 
-    def delete(self, request, template_id):
-        obj = self._get_obj(template_id)
-        if not obj:
-            return self.error_response('Not found', 404)
-        obj.delete()
-        return self.json_response({'message': 'Deleted'})
+    def delete(self, request, template_id, rule_id):
+        rule = self._get_rule(template_id, rule_id)
+        if not rule:
+            return self.error_response('规则不存在', 404)
+        rule.delete()
+        return self.json_response({'message': '规则已删除'})
 
 
-# =============================================================================
-# 数据库告警覆盖配置 API
-# =============================================================================
-
-class DatabaseAlertOverrideListView(JSONResponseMixin, View):
+class AlertTemplateRuleBatchToggleView(JSONResponseMixin, View):
     """
-    GET  /api/v1/databases/<config_id>/alert-overrides/
-    POST /api/v1/databases/<config_id>/alert-overrides/
+    POST /api/v1/alert-templates/<template_id>/rules/batch-toggle/
+    Body: { "rule_ids": [1,2,3], "enabled": true|false }
+    批量启用/禁用模板组中的规则
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, template_id):
+        from .models import AlertThresholdTemplate, AlertTemplate
+        try:
+            tg = AlertTemplate.objects.get(pk=template_id)
+        except AlertTemplate.DoesNotExist:
+            return self.error_response('模板组不存在', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        rule_ids = data.get('rule_ids', [])
+        enabled = data.get('enabled', True)
+
+        if not rule_ids:
+            return self.error_response('rule_ids is required', 400)
+
+        updated = AlertThresholdTemplate.objects.filter(
+            pk__in=rule_ids, template=tg
+        ).update(is_enabled=enabled)
+
+        return self.json_response({'updated_count': updated})
+
+
+class DatabaseTemplateAssignmentView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/databases/<config_id>/assigned-template/  获取数据库当前使用的模板
+    POST /api/v1/databases/<config_id>/assign-template/    为数据库分配模板
     """
 
     @method_decorator(csrf_exempt)
@@ -2017,41 +2247,150 @@ class DatabaseAlertOverrideListView(JSONResponseMixin, View):
             return None
 
     def get(self, request, config_id):
+        from .models import DatabaseTemplateAssignment, AlertTemplate
+        db = self._get_db(config_id)
+        if not db:
+            return self.error_response('Database not found', 404)
+
+        assignment = DatabaseTemplateAssignment.objects.filter(
+            db_config=db
+        ).select_related('template').first()
+
+        if assignment and assignment.template:
+            result = {
+                'assigned': True,
+                'template': _template_group_to_dict(assignment.template),
+                'assigned_at': assignment.assigned_at.isoformat() if assignment.assigned_at else None,
+                'note': assignment.note or '',
+            }
+        else:
+            # 未分配时，尝试找该 db_type 的默认模板
+            default_tg = AlertTemplate.objects.filter(
+                db_type=db.db_type, is_default=True
+            ).first()
+            result = {
+                'assigned': False,
+                'template': _template_group_to_dict(default_tg) if default_tg else None,
+            }
+
+        return self.json_response(result)
+
+    def post(self, request, config_id):
+        from .models import DatabaseTemplateAssignment, AlertTemplate
+        db = self._get_db(config_id)
+        if not db:
+            return self.error_response('Database not found', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        template_id = data.get('template_id')
+
+        # template_id 可以为 null（取消分配）
+        tg = None
+        if template_id is not None:
+            try:
+                tg = AlertTemplate.objects.get(pk=template_id)
+                if tg.db_type != db.db_type:
+                    return self.error_response(
+                        f'模板数据库类型({tg.db_type})与目标数据库类型({db.db_type})不匹配', 400
+                    )
+            except AlertTemplate.DoesNotExist:
+                return self.error_response('模板组不存在', 404)
+
+        assignment, created = DatabaseTemplateAssignment.objects.update_or_create(
+            db_config=db,
+            defaults={'template': tg, 'note': data.get('note', '')}
+        )
+
+        return self.json_response({
+            'assigned': assignment.template is not None,
+            'template': _template_group_to_dict(assignment.template) if assignment.template else None,
+            'assigned_at': assignment.assigned_at.isoformat() if assignment.assigned_at else None,
+        })
+
+
+# =============================================================================
+# 数据库告警覆盖配置 API（更新为使用模板组分配链）
+# =============================================================================
+
+class DatabaseAlertOverrideListView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/databases/<config_id>/alert-overrides/
+        返回数据库已分配模板组中所有规则的覆盖状态
+    POST /api/v1/databases/<config_id>/alert-overrides/
+        创建或更新某指标的覆盖配置
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_db(self, config_id):
+        from .models import DatabaseConfig
+        try:
+            return DatabaseConfig.objects.get(pk=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return None
+
+    def _get_assigned_template(self, db):
+        """获取数据库已分配的模板组，未分配则取同 db_type 的默认模板"""
+        from .models import DatabaseTemplateAssignment, AlertTemplate
+        assignment = DatabaseTemplateAssignment.objects.filter(
+            db_config=db
+        ).select_related('template').first()
+        if assignment and assignment.template:
+            return assignment.template
+        return AlertTemplate.objects.filter(db_type=db.db_type, is_default=True).first()
+
+    def get(self, request, config_id):
         from .models import DatabaseAlertOverride, AlertThresholdTemplate
         db = self._get_db(config_id)
         if not db:
             return self.error_response('Database not found', 404)
 
+        # 获取分配的模板组
+        assigned_tg = self._get_assigned_template(db)
+
         overrides = {ov.metric_key: ov for ov in
                      DatabaseAlertOverride.objects.filter(db_config=db).select_related('db_config')}
 
-        templates = AlertThresholdTemplate.objects.filter(db_type=db.db_type)
         rows = []
-        for tpl in templates:
-            ov = overrides.get(tpl.metric_key)
-            row = {
-                'metric_key': tpl.metric_key,
-                'display_name': tpl.display_name,
-                'unit': tpl.unit or '',
-                'template': _template_to_dict(tpl),
-                'override': _override_to_dict(ov) if ov else None,
-                'effective': _effective_config(tpl, ov),
-            }
-            rows.append(row)
+        if assigned_tg:
+            templates = AlertThresholdTemplate.objects.filter(template=assigned_tg)
+            for tpl in templates:
+                ov = overrides.pop(tpl.metric_key, None)
+                row = {
+                    'metric_key': tpl.metric_key,
+                    'display_name': tpl.display_name,
+                    'unit': tpl.unit or '',
+                    'template': _template_to_dict(tpl),
+                    'override': _override_to_dict(ov) if ov else None,
+                    'effective': _effective_config(tpl, ov),
+                }
+                rows.append(row)
 
-        # 包含没有对应模板的覆盖（自定义指标）
+        # 包含没有对应模板的覆盖（自定义指标或模板组未覆盖的指标）
         for metric_key, ov in overrides.items():
-            if not any(r['metric_key'] == metric_key for r in rows):
-                rows.append({
-                    'metric_key': metric_key,
-                    'display_name': metric_key,
-                    'unit': '',
-                    'template': None,
-                    'override': _override_to_dict(ov),
-                    'effective': _effective_config(None, ov),
-                })
+            rows.append({
+                'metric_key': metric_key,
+                'display_name': metric_key,
+                'unit': '',
+                'template': None,
+                'override': _override_to_dict(ov),
+                'effective': _effective_config(None, ov),
+            })
 
-        return self.json_response({'db_name': db.name, 'db_type': db.db_type, 'rows': rows})
+        result = {
+            'db_name': db.name,
+            'db_type': db.db_type,
+            'assigned_template': _template_group_to_dict(assigned_tg) if assigned_tg else None,
+            'rows': rows,
+        }
+        return self.json_response(result)
 
     def post(self, request, config_id):
         from .models import DatabaseAlertOverride
@@ -2142,7 +2481,7 @@ class DatabaseAlertOverrideDetailView(JSONResponseMixin, View):
 
 
 # =============================================================================
-# 工具函数：获取最终生效的告警配置
+# 工具函数：获取最终生效的告警配置（多模板版本）
 # =============================================================================
 
 def _effective_config(template, override):
@@ -2184,28 +2523,167 @@ def _effective_config(template, override):
 
 def get_effective_alert_config(db_config, metric_key):
     """
-    外部调用入口：获取某数据库某指标的最终生效告警配置。
-    优先取覆盖配置，退而取类型模板，两者均无则返回 None。
+    外部调用入口：获取某数据库某指标的最终生效告警配置（多模板版本）。
+    优先级链：数据库覆盖配置 > 数据库分配的模板组规则 > 默认模板组规则
+    
+    查找顺序：
+    1. 检查该数据库的覆盖配置 (DatabaseAlertOverride)
+    2. 通过 DatabaseTemplateAssignment 查找该数据库使用的模板组
+    3. 未分配则查找同 db_type 的默认模板组 (is_default=True)
+    4. 在模板组中查找该 metric_key 的规则
     """
-    from .models import AlertThresholdTemplate, DatabaseAlertOverride
+    from .models import AlertThresholdTemplate, DatabaseAlertOverride, DatabaseTemplateAssignment, AlertTemplate
 
+    # 1. 检查覆盖配置（最高优先级）
     override = None
     try:
         override = DatabaseAlertOverride.objects.get(db_config=db_config, metric_key=metric_key)
         if not override.is_enabled:
+            # 覆盖配置禁用 = 不监控该指标
             return None
     except DatabaseAlertOverride.DoesNotExist:
         pass
 
+    # 2. 查找模板组：优先取分配模板，否则取默认模板
+    template_group = None
+    assignment = DatabaseTemplateAssignment.objects.filter(
+        db_config=db_config
+    ).select_related('template').first()
+
+    if assignment and assignment.template:
+        template_group = assignment.template
+    else:
+        template_group = AlertTemplate.objects.filter(
+            db_type=db_config.db_type, is_default=True
+        ).first()
+
+    # 3. 在模板组中查找规则
     template = None
-    try:
-        template = AlertThresholdTemplate.objects.get(db_type=db_config.db_type, metric_key=metric_key)
-        if template and not template.is_enabled and override is None:
-            return None
-    except AlertThresholdTemplate.DoesNotExist:
-        pass
+    if template_group:
+        try:
+            template = AlertThresholdTemplate.objects.get(
+                template=template_group, metric_key=metric_key
+            )
+            if template and not template.is_enabled and override is None:
+                return None
+        except AlertThresholdTemplate.DoesNotExist:
+            pass
 
     if template is None and override is None:
         return None
 
     return _effective_config(template, override)
+
+
+# =============================================================================
+# SQL Monitoring API (Phase 5)
+# =============================================================================
+
+class DatabaseSlowQueriesView(JSONResponseMixin, View):
+    """数据库慢查询列表与实时分析 API
+    
+    端点:
+        GET /api/v1/databases/<config_id>/slow-queries/
+          参数: limit (默认50), time (1h/6h/24h), sort_by (elapsed/count/rows)
+        GET /api/v1/databases/<config_id>/slow-queries/analysis/
+          参数: time (1h/6h/24h)
+    """
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        try:
+            config = DatabaseConfig.objects.get(id=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return self.error_response('Database not found', 404)
+
+        time_range = request.GET.get('time', '1h')
+        limit = int(request.GET.get('limit', 50))
+        sort_by = request.GET.get('sort_by', 'elapsed')
+
+        try:
+            engine = SlowQueryEngine(config)
+            slow_queries = engine.collect_slow_queries_from_db(time_range=time_range, limit=limit)
+
+            # 按指定维度排序
+            if sort_by == 'count':
+                slow_queries.sort(key=lambda x: x.get('exec_count', 0), reverse=True)
+            elif sort_by == 'rows':
+                slow_queries.sort(key=lambda x: x.get('rows_examined', 0), reverse=True)
+            else:  # elapsed
+                slow_queries.sort(key=lambda x: x.get('total_time_sec', 0) * x.get('exec_count', 1), reverse=True)
+
+            return self.success_response({
+                'slow_queries': slow_queries[:limit],
+                'total_count': len(slow_queries),
+                'db_type': config.db_type,
+                'time_range': time_range,
+            })
+        except Exception as e:
+            return self.error_response(f'Failed to collect slow queries: {str(e)}', 500)
+
+
+class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
+    """数据库慢查询分析 API — 模式识别 + 优化建议"""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        try:
+            config = DatabaseConfig.objects.get(id=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return self.error_response('Database not found', 404)
+
+        time_range = request.GET.get('time', '1h')
+        limit = int(request.GET.get('limit', 100))
+
+        try:
+            engine = SlowQueryEngine(config)
+            slow_queries = engine.collect_slow_queries_from_db(time_range=time_range, limit=limit)
+            analysis = engine.analyze_query_pattern(slow_queries)
+
+            return self.success_response({
+                'analysis': analysis,
+                'db_type': config.db_type,
+                'time_range': time_range,
+            })
+        except Exception as e:
+            return self.error_response(f'Failed to analyze slow queries: {str(e)}', 500)
+
+
+class DatabaseSQLTextSearchView(JSONResponseMixin, View):
+    """SQL 文本搜索 API — 搜索历史慢查询记录"""
+
+    @method_decorator(csrf_exempt)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        keyword = request.GET.get('q', '')
+        if not keyword or len(keyword) < 2:
+            return self.error_response('Search keyword too short (min 2 chars)', 400)
+
+        try:
+            config = DatabaseConfig.objects.get(id=config_id)
+        except DatabaseConfig.DoesNotExist:
+            return self.error_response('Database not found', 404)
+
+        time_range = request.GET.get('time', '24h')
+        limit = int(request.GET.get('limit', 100))
+
+        try:
+            engine = SlowQueryEngine(config)
+            slow_queries = engine.collect_slow_queries_from_db(time_range=time_range, limit=limit)
+            filtered = [q for q in slow_queries if keyword.lower() in (q.get('query', '') or '').lower()]
+
+            return self.success_response({
+                'slow_queries': filtered[:limit],
+                'total_count': len(filtered),
+                'keyword': keyword,
+            })
+        except Exception as e:
+            return self.error_response(f'Failed to search SQL: {str(e)}', 500)

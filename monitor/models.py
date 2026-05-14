@@ -532,10 +532,31 @@ class ApprovalRecord(models.Model):
 
 
 # ==========================================
-# 告警阈值模板（按数据库类型）
+# 告警模板组（多模板支持）
 # ==========================================
+class AlertTemplate(models.Model):
+    """告警模板组（多模板支持）- 按数据库类型创建多个命名模板，如"生产库-严格"、"测试库-宽松"等"""
+
+    name = models.CharField(max_length=100, verbose_name="模板名称", help_text="例如：生产库-严格、测试库-宽松")
+    db_type = models.CharField(max_length=20, choices=DB_TYPES, verbose_name="数据库类型")
+    is_default = models.BooleanField(default=False, verbose_name="是否为默认模板")
+    description = models.TextField(blank=True, null=True, verbose_name="模板描述")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        default_mark = ' [默认]' if self.is_default else ''
+        return f"[{self.db_type}] {self.name}{default_mark}"
+
+    class Meta:
+        verbose_name = "告警模板组"
+        verbose_name_plural = "告警模板组列表"
+        unique_together = ('name', 'db_type')
+        ordering = ['db_type', 'name']
+
+
 class AlertThresholdTemplate(models.Model):
-    """告警阈值模板，按数据库类型统一定义每个指标的多级告警规则"""
+    """告警阈值规则，属于某个告警模板组，定义单个指标的多级告警规则"""
 
     RULE_TYPE_CHOICES = (
         ('threshold', '固定阈值'),
@@ -547,6 +568,10 @@ class AlertThresholdTemplate(models.Model):
         ('both', '双向触发'),
     )
 
+    template = models.ForeignKey(
+        AlertTemplate, on_delete=models.CASCADE, null=True, blank=True,
+        related_name='rules', verbose_name="所属模板组"
+    )
     db_type = models.CharField(max_length=20, choices=DB_TYPES, verbose_name="数据库类型")
     metric_key = models.CharField(max_length=100, verbose_name="指标键")
     display_name = models.CharField(max_length=100, verbose_name="指标显示名")
@@ -574,17 +599,17 @@ class AlertThresholdTemplate(models.Model):
         return f"[{self.db_type}] {self.display_name} ({self.rule_type})"
 
     class Meta:
-        verbose_name = "告警阈值模板"
-        verbose_name_plural = "告警阈值模板列表"
-        unique_together = ('db_type', 'metric_key')
-        ordering = ['db_type', 'metric_key']
+        verbose_name = "告警阈值规则"
+        verbose_name_plural = "告警阈值规则列表"
+        unique_together = ('template', 'metric_key')
+        ordering = ['template', 'metric_key']
 
 
 # ==========================================
 # 数据库告警覆盖配置（个性化）
 # ==========================================
 class DatabaseAlertOverride(models.Model):
-    """针对特定数据库的告警配置覆盖，优先级高于类型模板"""
+    """针对特定数据库的告警配置覆盖，优先级高于模板规则"""
 
     RULE_TYPE_CHOICES = AlertThresholdTemplate.RULE_TYPE_CHOICES
     DIRECTION_CHOICES = AlertThresholdTemplate.DIRECTION_CHOICES
@@ -620,6 +645,33 @@ class DatabaseAlertOverride(models.Model):
         verbose_name_plural = "数据库告警配置覆盖列表"
         unique_together = ('db_config', 'metric_key')
         ordering = ['db_config', 'metric_key']
+
+
+# ==========================================
+# 数据库模板分配
+# ==========================================
+class DatabaseTemplateAssignment(models.Model):
+    """数据库与告警模板组的关联关系"""
+
+    db_config = models.OneToOneField(
+        DatabaseConfig, on_delete=models.CASCADE,
+        related_name='template_assignment', verbose_name="数据库"
+    )
+    template = models.ForeignKey(
+        AlertTemplate, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='assigned_databases', verbose_name="使用的模板组"
+    )
+    assigned_at = models.DateTimeField(auto_now_add=True, verbose_name="分配时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+    note = models.TextField(blank=True, null=True, verbose_name="备注")
+
+    def __str__(self):
+        tpl_name = self.template.name if self.template else '未分配'
+        return f"{self.db_config.name} → {tpl_name}"
+
+    class Meta:
+        verbose_name = "数据库模板分配"
+        verbose_name_plural = "数据库模板分配列表"
 
 
 # ==========================================

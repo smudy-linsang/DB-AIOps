@@ -1,14 +1,16 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
   Tabs, Table, Select, Tag, Button, Modal, Form, Input,
-  InputNumber, Switch, Space, Typography, Tooltip, Popconfirm,
-  message, Badge, Divider, Row, Col, Card
+  InputNumber, Switch, Space, Typography, Popconfirm,
+  message, Badge, Divider, Row, Col, Card, Tooltip, Checkbox
 } from 'antd'
 import {
   EditOutlined, DeleteOutlined, PlusOutlined, ReloadOutlined,
-  SettingOutlined, InfoCircleOutlined, DatabaseOutlined
+  SettingOutlined, InfoCircleOutlined, DatabaseOutlined,
+  CopyOutlined, ThunderboltOutlined, AppstoreOutlined,
+  UnorderedListOutlined, SwapOutlined
 } from '@ant-design/icons'
-import { alertRuleAPI, databaseAPI } from '../services/api'
+import { alertRuleAPI, alertTemplateAPI, databaseAPI } from '../services/api'
 import { Spin } from 'antd'
 
 const { Title, Text } = Typography
@@ -72,21 +74,119 @@ function ThresholdBadges({ row, isOverride }) {
 }
 
 // ─────────────────────────────────────────────
-// 模板编辑弹窗
+// 模板组 编辑弹窗
 // ─────────────────────────────────────────────
-function TemplateModal({ open, initial, dbType: parentDbType, onOk, onCancel }) {
+function TemplateGroupModal({ open, initial, dbType: parentDbType, onOk, onCancel }) {
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    if (open) {
+      form.setFieldsValue(initial || { db_type: parentDbType || 'oracle', is_default: false, description: '' })
+    }
+  }, [open, initial, form, parentDbType])
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields()
+      onOk(values)
+    } catch (_) {}
+  }
+
+  return (
+    <Modal
+      title={initial?.id ? '编辑模板组' : '新建模板组'}
+      open={open}
+      onOk={handleOk}
+      onCancel={onCancel}
+      width={500}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="模板组名称" rules={[{ required: true, message: '请输入模板组名称' }]}>
+          <Input placeholder="如：生产库-严格、测试库-宽松" />
+        </Form.Item>
+        {!initial?.id && (
+          <Form.Item name="db_type" label="数据库类型" rules={[{ required: true }]}>
+            <Select>
+              {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
+            </Select>
+          </Form.Item>
+        )}
+        <Form.Item name="description" label="描述">
+          <Input.TextArea rows={2} placeholder="模板组用途说明" />
+        </Form.Item>
+        <Form.Item name="is_default" label="设为默认模板" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+        <Text type="secondary">
+          <InfoCircleOutlined /> 默认模板会在数据库未显式分配模板组时自动使用。同类型仅允许一个默认模板。
+        </Text>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─────────────────────────────────────────────
+// 克隆模板组弹窗
+// ─────────────────────────────────────────────
+function CloneModal({ open, source, onOk, onCancel }) {
+  const [form] = Form.useForm()
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (open && source) {
+      form.setFieldsValue({ name: `${source.name}（副本）`, description: source.description || '' })
+    }
+  }, [open, source, form])
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields()
+      setLoading(true)
+      await onOk(values)
+    } catch (_) {
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  return (
+    <Modal
+      title={`克隆模板组：${source?.name || ''}`}
+      open={open}
+      onOk={handleOk}
+      onCancel={onCancel}
+      confirmLoading={loading}
+      width={450}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="新模板组名称" rules={[{ required: true, message: '请输入新名称' }]}>
+          <Input placeholder="克隆后的模板组名称" />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input.TextArea rows={2} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─────────────────────────────────────────────
+// 规则编辑弹窗
+// ─────────────────────────────────────────────
+function RuleModal({ open, initial, dbType, onOk, onCancel }) {
   const [form] = Form.useForm()
   const [ruleType, setRuleType] = useState('threshold')
   const [availableMetrics, setAvailableMetrics] = useState([])
   const [metricsLoading, setMetricsLoading] = useState(false)
-  const [selectedDbType, setSelectedDbType] = useState(parentDbType || 'oracle')
+  const [existingKeys, setExistingKeys] = useState(new Set())
 
-  // 加载该类型可用指标
-  const loadMetrics = useCallback(async (dbType) => {
-    if (!dbType) return
+  const loadMetrics = useCallback(async (dt) => {
+    if (!dt) return
     setMetricsLoading(true)
     try {
-      const res = await alertRuleAPI.listAvailableMetrics(dbType)
+      const res = await alertRuleAPI.listAvailableMetrics(dt)
       setAvailableMetrics(res.metrics || [])
     } catch (_) {
       setAvailableMetrics([])
@@ -97,20 +197,11 @@ function TemplateModal({ open, initial, dbType: parentDbType, onOk, onCancel }) 
 
   useEffect(() => {
     if (open) {
-      const dt = parentDbType || 'oracle'
-      setSelectedDbType(dt)
       form.setFieldsValue(initial || { rule_type: 'threshold', direction: 'up', is_enabled: true })
       setRuleType(initial?.rule_type || 'threshold')
-      if (!initial?.id) loadMetrics(dt)
+      loadMetrics(dbType)
     }
-  }, [open, initial, form, parentDbType, loadMetrics])
-
-  const handleDbTypeChange = (val) => {
-    setSelectedDbType(val)
-    form.setFieldValue('metric_key', undefined)
-    form.setFieldValue('display_name', '')
-    loadMetrics(val)
-  }
+  }, [open, initial, form, dbType, loadMetrics])
 
   const handleMetricSelect = (val) => {
     const m = availableMetrics.find(x => x.metric_key === val)
@@ -128,7 +219,7 @@ function TemplateModal({ open, initial, dbType: parentDbType, onOk, onCancel }) 
 
   return (
     <Modal
-      title={initial?.id ? '编辑告警模板' : '新增告警模板'}
+      title={initial?.id ? '编辑告警规则' : '新增告警规则'}
       open={open}
       onOk={handleOk}
       onCancel={onCancel}
@@ -138,12 +229,6 @@ function TemplateModal({ open, initial, dbType: parentDbType, onOk, onCancel }) 
       <Form form={form} layout="vertical">
         {!initial?.id && (
           <>
-            <Form.Item name="db_type" label="数据库类型" rules={[{ required: true }]}
-              initialValue={parentDbType}>
-              <Select onChange={handleDbTypeChange}>
-                {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
-              </Select>
-            </Form.Item>
             <Form.Item
               name="metric_key"
               label="指标键"
@@ -163,16 +248,15 @@ function TemplateModal({ open, initial, dbType: parentDbType, onOk, onCancel }) 
                 options={availableMetrics.map(m => ({
                   value: m.metric_key,
                   label: m.display_name
-                    ? `${m.metric_key}（${m.display_name}）${m.has_template ? ' ✓已有模板' : ''}`
-                    : `${m.metric_key}${m.has_template ? ' ✓已有模板' : ''}`,
+                    ? `${m.metric_key}（${m.display_name}）${m.has_template ? ' ✓已有规则' : ''}`
+                    : `${m.metric_key}${m.has_template ? ' ✓已有规则' : ''}`,
                   disabled: m.has_template,
                 }))}
               />
             </Form.Item>
             {availableMetrics.length > 0 && (
               <div style={{ marginTop: -12, marginBottom: 12, fontSize: 12, color: '#888' }}>
-                共 {availableMetrics.filter(m => !m.has_template).length} 个未配置指标可选，
-                ✓ 标记的已有模板
+                共 {availableMetrics.filter(m => !m.has_template).length} 个未配置指标可选
               </div>
             )}
           </>
@@ -399,22 +483,24 @@ function OverrideModal({ open, initial, onOk, onCancel }) {
 }
 
 // ─────────────────────────────────────────────
-// Tab 1：类型模板管理
+// Tab 1：模板组管理
 // ─────────────────────────────────────────────
-function TemplateTab() {
+function TemplateGroupTab() {
   const [dbType, setDbType] = useState('oracle')
-  const [templates, setTemplates] = useState([])
+  const [groups, setGroups] = useState([])
   const [loading, setLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
+  const [cloneOpen, setCloneOpen] = useState(false)
   const [editing, setEditing] = useState(null)
+  const [cloning, setCloning] = useState(null)
 
   const load = useCallback(async () => {
     setLoading(true)
     try {
-      const res = await alertRuleAPI.listTemplates(dbType)
-      setTemplates(res.templates || [])
+      const res = await alertTemplateAPI.list({ db_type: dbType })
+      setGroups(res.templates || [])
     } catch (e) {
-      message.error('加载失败')
+      message.error('加载模板组失败')
     } finally {
       setLoading(false)
     }
@@ -425,11 +511,11 @@ function TemplateTab() {
   const handleSave = async (values) => {
     try {
       if (editing?.id) {
-        await alertRuleAPI.updateTemplate(editing.id, values)
-        message.success('已更新')
+        await alertTemplateAPI.update(editing.id, values)
+        message.success('模板组已更新')
       } else {
-        await alertRuleAPI.createTemplate({ db_type: dbType, ...values })
-        message.success('已创建')
+        await alertTemplateAPI.create(values)
+        message.success('模板组已创建')
       }
       setModalOpen(false)
       load()
@@ -440,13 +526,237 @@ function TemplateTab() {
 
   const handleDelete = async (id) => {
     try {
-      await alertRuleAPI.deleteTemplate(id)
-      message.success('已删除')
+      await alertTemplateAPI.delete(id)
+      message.success('模板组已删除（含所有规则）')
       load()
     } catch (e) {
       message.error('删除失败')
     }
   }
+
+  const handleClone = async (values) => {
+    try {
+      await alertTemplateAPI.clone(cloning.id, {
+        action: 'clone',
+        name: values.name,
+        description: values.description,
+      })
+      message.success('模板组已克隆')
+      setCloneOpen(false)
+      load()
+    } catch (e) {
+      message.error(e?.response?.data?.error || '克隆失败')
+    }
+  }
+
+  const columns = [
+    {
+      title: '模板组名称',
+      dataIndex: 'name',
+      width: 200,
+      render: (text, r) => (
+        <Space>
+          <AppstoreOutlined />
+          <Text strong>{text}</Text>
+          {r.is_default && <Tag color="blue">默认</Tag>}
+        </Space>
+      ),
+    },
+    {
+      title: '数据库类型',
+      dataIndex: 'db_type',
+      width: 120,
+      render: v => <Tag>{DB_TYPE_LABELS[v] || v}</Tag>,
+    },
+    {
+      title: '规则数',
+      dataIndex: 'rule_count',
+      width: 80,
+      align: 'center',
+      render: v => <Badge count={v} showZero style={{ backgroundColor: '#1890ff' }} />,
+    },
+    {
+      title: '已分配数据库',
+      dataIndex: 'assigned_db_count',
+      width: 110,
+      align: 'center',
+      render: v => <Badge count={v} showZero style={{ backgroundColor: '#52c41a' }} />,
+    },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      ellipsis: true,
+      render: v => <Text type="secondary">{v || '—'}</Text>,
+    },
+    {
+      title: '更新时间',
+      dataIndex: 'update_time',
+      width: 170,
+      render: v => v ? new Date(v).toLocaleString() : '—',
+    },
+    {
+      title: '操作',
+      width: 220,
+      render: (_, r) => (
+        <Space>
+          <Button
+            size="small" icon={<EditOutlined />}
+            onClick={() => { setEditing(r); setModalOpen(true) }}
+          >编辑</Button>
+          <Tooltip title="克隆模板组及所有规则">
+            <Button
+              size="small" icon={<CopyOutlined />}
+              onClick={() => { setCloning(r); setCloneOpen(true) }}
+            >克隆</Button>
+          </Tooltip>
+          <Popconfirm
+            title="删除模板组将同时删除组内所有规则，确定删除？"
+            onConfirm={() => handleDelete(r.id)}
+          >
+            <Button size="small" danger icon={<DeleteOutlined />} />
+          </Popconfirm>
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <>
+      <Space style={{ marginBottom: 16 }} wrap>
+        <Select value={dbType} onChange={v => setDbType(v)} style={{ width: 160 }}>
+          {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
+        </Select>
+        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+        <Button
+          type="primary" icon={<PlusOutlined />}
+          onClick={() => { setEditing(null); setModalOpen(true) }}
+        >
+          新建模板组
+        </Button>
+        <Text type="secondary">
+          <InfoCircleOutlined /> 模板组是告警规则的容器，在「规则配置」Tab 中添加具体指标规则
+        </Text>
+      </Space>
+
+      <Table
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={groups}
+        columns={columns}
+        pagination={false}
+        bordered
+      />
+
+      <TemplateGroupModal
+        open={modalOpen}
+        initial={editing}
+        dbType={dbType}
+        onOk={handleSave}
+        onCancel={() => setModalOpen(false)}
+      />
+
+      <CloneModal
+        open={cloneOpen}
+        source={cloning}
+        onOk={handleClone}
+        onCancel={() => setCloneOpen(false)}
+      />
+    </>
+  )
+}
+
+// ─────────────────────────────────────────────
+// Tab 2：规则配置
+// ─────────────────────────────────────────────
+function RuleConfigTab() {
+  const [dbType, setDbType] = useState('oracle')
+  const [groups, setGroups] = useState([])
+  const [selectedGroupId, setSelectedGroupId] = useState(null)
+  const [rules, setRules] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [modalOpen, setModalOpen] = useState(false)
+  const [editing, setEditing] = useState(null)
+  const [selectedRowKeys, setSelectedRowKeys] = useState([])
+
+  // 加载模板组列表
+  const loadGroups = useCallback(async () => {
+    try {
+      const res = await alertTemplateAPI.list({ db_type: dbType })
+      setGroups(res.templates || [])
+    } catch (_) {}
+  }, [dbType])
+
+  useEffect(() => { loadGroups() }, [loadGroups])
+
+  // 加载选定模板组的规则
+  const loadRules = useCallback(async () => {
+    if (!selectedGroupId) { setRules([]); return }
+    setLoading(true)
+    try {
+      const res = await alertTemplateAPI.listRules(selectedGroupId)
+      setRules(res.rules || [])
+    } catch (e) {
+      message.error('加载规则失败')
+    } finally {
+      setLoading(false)
+    }
+  }, [selectedGroupId])
+
+  useEffect(() => { loadRules() }, [loadRules])
+
+  // 切换数据库类型时重置选择
+  useEffect(() => {
+    setSelectedGroupId(null)
+    setRules([])
+    setSelectedRowKeys([])
+  }, [dbType])
+
+  const handleSave = async (values) => {
+    try {
+      if (editing?.id) {
+        await alertTemplateAPI.updateRule(selectedGroupId, editing.id, values)
+        message.success('规则已更新')
+      } else {
+        await alertTemplateAPI.addRule(selectedGroupId, values)
+        message.success('规则已添加')
+      }
+      setModalOpen(false)
+      loadRules()
+      // 刷新模板组列表以更新 rule_count
+      loadGroups()
+    } catch (e) {
+      message.error(e?.response?.data?.error || '保存失败')
+    }
+  }
+
+  const handleDelete = async (ruleId) => {
+    try {
+      await alertTemplateAPI.deleteRule(selectedGroupId, ruleId)
+      message.success('规则已删除')
+      loadRules()
+      loadGroups()
+    } catch (e) {
+      message.error('删除失败')
+    }
+  }
+
+  const handleBatchToggle = async (enabled) => {
+    if (selectedRowKeys.length === 0) {
+      message.warning('请先选择规则')
+      return
+    }
+    try {
+      await alertTemplateAPI.batchToggleRules(selectedGroupId, selectedRowKeys, enabled)
+      message.success(`已${enabled ? '启用' : '停用'} ${selectedRowKeys.length} 条规则`)
+      setSelectedRowKeys([])
+      loadRules()
+    } catch (e) {
+      message.error('批量操作失败')
+    }
+  }
+
+  const selectedGroup = groups.find(g => g.id === selectedGroupId)
 
   const columns = [
     {
@@ -489,6 +799,13 @@ function TemplateTab() {
       render: v => <Badge status={v ? 'success' : 'default'} text={v ? '启用' : '停用'} />,
     },
     {
+      title: '描述',
+      dataIndex: 'description',
+      width: 120,
+      ellipsis: true,
+      render: v => v || '—',
+    },
+    {
       title: '操作',
       width: 120,
       render: (_, r) => (
@@ -497,7 +814,7 @@ function TemplateTab() {
             size="small" icon={<EditOutlined />}
             onClick={() => { setEditing(r); setModalOpen(true) }}
           >编辑</Button>
-          <Popconfirm title="确认删除此模板？" onConfirm={() => handleDelete(r.id)}>
+          <Popconfirm title="确认删除此规则？" onConfirm={() => handleDelete(r.id)}>
             <Button size="small" danger icon={<DeleteOutlined />} />
           </Popconfirm>
         </Space>
@@ -505,38 +822,90 @@ function TemplateTab() {
     },
   ]
 
+  const rowSelection = {
+    selectedRowKeys,
+    onChange: setSelectedRowKeys,
+  }
+
   return (
     <>
       <Space style={{ marginBottom: 16 }} wrap>
         <Select value={dbType} onChange={v => setDbType(v)} style={{ width: 160 }}>
           {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
         </Select>
-        <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-        <Button
-          type="primary" icon={<PlusOutlined />}
-          onClick={() => { setEditing(null); setModalOpen(true) }}
-        >
-          新增指标模板
-        </Button>
-        <Text type="secondary">
-          <InfoCircleOutlined /> 模板为同类型所有数据库的默认告警规则，可在「数据库覆盖」中针对单库调整
-        </Text>
+        <Select
+          showSearch
+          placeholder="选择模板组"
+          value={selectedGroupId}
+          onChange={v => { setSelectedGroupId(v); setSelectedRowKeys([]) }}
+          style={{ width: 280 }}
+          optionFilterProp="label"
+          notFoundContent="该类型暂无模板组"
+          options={groups.map(g => ({
+            value: g.id,
+            label: `${g.name}${g.is_default ? ' (默认)' : ''} — ${g.rule_count} 条规则`,
+          }))}
+        />
+        <Button icon={<ReloadOutlined />} onClick={loadRules} disabled={!selectedGroupId}>刷新</Button>
+        {selectedGroupId && (
+          <>
+            <Button
+              type="primary" icon={<PlusOutlined />}
+              onClick={() => { setEditing(null); setModalOpen(true) }}
+            >
+              新增规则
+            </Button>
+            <Divider type="vertical" />
+            <Button
+              size="small"
+              icon={<ThunderboltOutlined />}
+              onClick={() => handleBatchToggle(true)}
+              disabled={selectedRowKeys.length === 0}
+            >
+              批量启用
+            </Button>
+            <Button
+              size="small"
+              onClick={() => handleBatchToggle(false)}
+              disabled={selectedRowKeys.length === 0}
+            >
+              批量停用
+            </Button>
+            {selectedRowKeys.length > 0 && (
+              <Text type="secondary">已选 {selectedRowKeys.length} 条</Text>
+            )}
+          </>
+        )}
       </Space>
+
+      {selectedGroup && (
+        <Card size="small" style={{ marginBottom: 12, background: '#f6f8fa' }}>
+          <Space>
+            <AppstoreOutlined />
+            <Text strong>{selectedGroup.name}</Text>
+            <Tag color="blue">{DB_TYPE_LABELS[selectedGroup.db_type] || selectedGroup.db_type}</Tag>
+            {selectedGroup.is_default && <Tag color="green">默认模板</Tag>}
+            <Text type="secondary">{selectedGroup.description || ''}</Text>
+          </Space>
+        </Card>
+      )}
 
       <Table
         rowKey="id"
         size="small"
         loading={loading}
-        dataSource={templates}
+        dataSource={rules}
         columns={columns}
         pagination={false}
         bordered
+        rowSelection={selectedGroupId ? rowSelection : undefined}
+        locale={{ emptyText: selectedGroupId ? '该模板组暂无规则，请点击「新增规则」添加' : '请先选择一个模板组' }}
       />
 
-      <TemplateModal
+      <RuleModal
         open={modalOpen}
         initial={editing}
-        dbType={dbType}
+        dbType={selectedGroup?.db_type || dbType}
         onOk={handleSave}
         onCancel={() => setModalOpen(false)}
       />
@@ -545,17 +914,21 @@ function TemplateTab() {
 }
 
 // ─────────────────────────────────────────────
-// Tab 2：数据库覆盖配置
+// Tab 3：数据库分配与覆盖配置
 // ─────────────────────────────────────────────
-function OverrideTab() {
+function AssignmentTab() {
   const [databases, setDatabases] = useState([])
   const [selectedDb, setSelectedDb] = useState(null)
+  const [templateGroups, setTemplateGroups] = useState([])
+  const [assignedTemplate, setAssignedTemplate] = useState(null)
   const [rows, setRows] = useState([])
   const [dbName, setDbName] = useState('')
   const [loading, setLoading] = useState(false)
+  const [assignLoading, setAssignLoading] = useState(false)
   const [modalOpen, setModalOpen] = useState(false)
   const [editingRow, setEditingRow] = useState(null)
 
+  // 加载数据库列表
   useEffect(() => {
     databaseAPI.list().then(res => {
       const dbs = res.databases || []
@@ -564,6 +937,16 @@ function OverrideTab() {
     }).catch(() => {})
   }, [])
 
+  // 当选中的数据库变化时，加载对应类型的模板组
+  useEffect(() => {
+    const db = databases.find(d => d.id === selectedDb)
+    if (db) {
+      alertTemplateAPI.list({ db_type: db.db_type }).then(res => {
+        setTemplateGroups(res.templates || [])
+      }).catch(() => setTemplateGroups([]))
+    }
+  }, [selectedDb, databases])
+
   const loadOverrides = useCallback(async () => {
     if (!selectedDb) return
     setLoading(true)
@@ -571,6 +954,7 @@ function OverrideTab() {
       const res = await alertRuleAPI.listOverrides(selectedDb)
       setRows(res.rows || [])
       setDbName(res.db_name || '')
+      setAssignedTemplate(res.assigned_template || null)
     } catch (e) {
       message.error('加载覆盖配置失败')
     } finally {
@@ -579,6 +963,24 @@ function OverrideTab() {
   }, [selectedDb])
 
   useEffect(() => { loadOverrides() }, [loadOverrides])
+
+  const handleAssignTemplate = async (templateId) => {
+    setAssignLoading(true)
+    try {
+      if (templateId === '__none__' || !templateId) {
+        await alertTemplateAPI.assignTemplate(selectedDb, null)
+        message.success('已取消模板分配（将使用默认模板）')
+      } else {
+        await alertTemplateAPI.assignTemplate(selectedDb, templateId)
+        message.success('模板已分配')
+      }
+      loadOverrides()
+    } catch (e) {
+      message.error(e?.response?.data?.error || '分配失败')
+    } finally {
+      setAssignLoading(false)
+    }
+  }
 
   const handleSave = async (values) => {
     try {
@@ -600,6 +1002,9 @@ function OverrideTab() {
       message.error('重置失败')
     }
   }
+
+  const selectedDbInfo = databases.find(d => d.id === selectedDb)
+  const defaultTgForType = templateGroups.find(g => g.is_default)
 
   const columns = [
     {
@@ -675,9 +1080,47 @@ function OverrideTab() {
             label: `${d.name} (${DB_TYPE_LABELS[d.db_type] || d.db_type})`,
           }))}
         />
+        {selectedDbInfo && (
+          <>
+            <Divider type="vertical" />
+            <Text strong>分配模板：</Text>
+            <Select
+              value={assignedTemplate?.id || (defaultTgForType?.id || '__none__')}
+              onChange={handleAssignTemplate}
+              loading={assignLoading}
+              style={{ width: 280 }}
+              placeholder="选择模板组"
+              options={[
+                ...(defaultTgForType
+                  ? [{ value: defaultTgForType.id, label: `${defaultTgForType.name} (默认)` }]
+                  : []),
+                ...templateGroups
+                  .filter(g => !g.is_default)
+                  .map(g => ({ value: g.id, label: g.name })),
+              ]}
+            />
+            <Tooltip title="选择「无」则使用同类型的默认模板">
+              <Button size="small" onClick={() => handleAssignTemplate(null)}>恢复默认</Button>
+            </Tooltip>
+          </>
+        )}
         <Button icon={<ReloadOutlined />} onClick={loadOverrides}>刷新</Button>
         {dbName && <Text type="secondary"><DatabaseOutlined /> {dbName}</Text>}
       </Space>
+
+      {assignedTemplate && (
+        <Card size="small" style={{ marginBottom: 12, background: '#e6f7ff' }}>
+          <Space>
+            <SwapOutlined />
+            <Text>
+              当前使用模板组：<Text strong>{assignedTemplate.name}</Text>
+              <Tag style={{ marginLeft: 8 }}>{DB_TYPE_LABELS[assignedTemplate.db_type] || assignedTemplate.db_type}</Tag>
+              {assignedTemplate.is_default && <Tag color="blue">默认</Tag>}
+            </Text>
+            <Text type="secondary">（{assignedTemplate.rule_count || 0} 条规则）</Text>
+          </Space>
+        </Card>
+      )}
 
       <Table
         rowKey="metric_key"
@@ -711,7 +1154,7 @@ export default function AlertConfig() {
         告警阈值配置
       </Title>
       <Text type="secondary" style={{ display: 'block', marginBottom: 20 }}>
-        在「类型模板」中为每种数据库设置统一的多级告警规则；在「数据库覆盖」中针对单个数据库进行个性化调整，覆盖配置优先级高于模板。
+        多层告警配置体系：创建「模板组」→ 在模板组中配置「规则」→ 为数据库「分配」模板组并可按需「覆盖」个别指标
       </Text>
 
       <style>{`
@@ -719,17 +1162,22 @@ export default function AlertConfig() {
       `}</style>
 
       <Tabs
-        defaultActiveKey="templates"
+        defaultActiveKey="groups"
         items={[
           {
-            key: 'templates',
-            label: '类型模板',
-            children: <TemplateTab />,
+            key: 'groups',
+            label: <span><AppstoreOutlined /> 模板组管理</span>,
+            children: <TemplateGroupTab />,
           },
           {
-            key: 'overrides',
-            label: '数据库覆盖',
-            children: <OverrideTab />,
+            key: 'rules',
+            label: <span><UnorderedListOutlined /> 规则配置</span>,
+            children: <RuleConfigTab />,
+          },
+          {
+            key: 'assignment',
+            label: <span><SwapOutlined /> 数据库分配与覆盖</span>,
+            children: <AssignmentTab />,
           },
         ]}
       />

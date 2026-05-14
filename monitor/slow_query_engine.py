@@ -334,7 +334,7 @@ class SlowQueryEngine:
             慢查询记录列表
         """
         db_type = db_type or self.config.db_type
-        
+
         if db_type == 'mysql':
             return self._collect_mysql_slow_queries(conn)
         elif db_type == 'pgsql':
@@ -345,6 +345,64 @@ class SlowQueryEngine:
             # TDSQL 和 Gbase 使用 MySQL 协议
             return self._collect_mysql_slow_queries(conn)
         else:
+            return []
+
+    def collect_slow_queries_from_db(self, time_range: str = '1h', limit: int = 100) -> List[Dict]:
+        """
+        通过现有数据库连接采集慢查询（API 友好入口）
+        
+        自动获取连接 → 采集 → 关闭连接。连接失败时回退到 MonitorLog 缓存数据。
+        
+        参数:
+            time_range: 时间范围 (1h/6h/24h)
+            limit: 返回条数上限
+        
+        返回:
+            慢查询记录列表
+        """
+        from .db_connector import DbConnector
+
+        conn = None
+        try:
+            conn = DbConnector.get_connection(self.config)
+            return self.collect_slow_queries(conn)[:limit]
+        except Exception as e:
+            # 连接失败时尝试从 MonitorLog 读取历史慢查询缓存
+            return self._fallback_collect_from_logs(time_range, limit)
+        finally:
+            if conn:
+                DbConnector.close_connection(conn)
+
+    def _fallback_collect_from_logs(self, time_range: str, limit: int) -> List[Dict]:
+        """从 MonitorLog 缓存获取慢查询数据（兜底策略）"""
+        try:
+            hours_map = {'1h': 1, '6h': 6, '24h': 24}
+            hours = hours_map.get(time_range, 24)
+            since = datetime.now() - timedelta(hours=hours)
+
+            logs = MonitorLog.objects.filter(
+                db_config=self.config,
+                status='UP',
+                create_time__gte=since,
+            ).order_by('-create_time')[:limit]
+
+            results = []
+            for log in logs:
+                data = log.detail or {}
+                if isinstance(data, str):
+                    try:
+                        data = json.loads(data)
+                    except Exception:
+                        data = {}
+
+                slow_queries = data.get('slow_queries', [])
+                if isinstance(slow_queries, list):
+                    for sq in slow_queries:
+                        sq['collected_at'] = str(log.create_time)
+                    results.extend(slow_queries)
+
+            return results[:limit]
+        except Exception:
             return []
     
     def _collect_mysql_slow_queries(self, conn) -> List[Dict]:

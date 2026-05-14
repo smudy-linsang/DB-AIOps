@@ -1,6 +1,9 @@
-import { useState, useEffect } from 'react'
-import { Link } from 'react-router-dom'
-import { Card, Row, Col, Statistic, Typography, Space, Spin, Alert, Table, Tag, Select, Empty, Button, Collapse, Badge, Tooltip } from 'antd'
+import { useState, useEffect, useCallback, useMemo } from 'react';
+import { useNavigate } from 'react-router-dom';
+import {
+  Card, Row, Col, Statistic, Typography, Space, Spin, Table, Tag,
+  Select, Button, Tooltip, Badge, Progress, Empty, Divider, Segmented,
+} from 'antd';
 import {
   DatabaseOutlined,
   CheckCircleOutlined,
@@ -9,1126 +12,758 @@ import {
   RiseOutlined,
   FallOutlined,
   ReloadOutlined,
-  SyncOutlined,
   ExclamationCircleOutlined,
   InfoCircleOutlined,
-  BarChartOutlined,
-  DesktopOutlined,
-  SettingOutlined,
-  ClockCircleOutlined
-} from '@ant-design/icons'
+  ClockCircleOutlined,
+  ThunderboltOutlined,
+  ApiOutlined,
+  ArrowRightOutlined,
+  SearchOutlined,
+} from '@ant-design/icons';
+import ReactEChartsCore from 'echarts-for-react/lib/core';
+import * as echarts from 'echarts/core';
+import { LineChart, BarChart, PieChart } from 'echarts/charts';
 import {
-  LineChart, Line, AreaChart, Area, XAxis, YAxis,
-  CartesianGrid, Tooltip as RechartsTooltip, ResponsiveContainer, Legend,
-  PieChart, Pie, Cell, BarChart, Bar
-} from 'recharts'
-import { healthAPI, databaseAPI, alertAPI } from '../services/api'
-import AlertPanel from '../components/AlertPanel'
-import dayjs from 'dayjs'
-import relativeTime from 'dayjs/plugin/relativeTime'
+  GridComponent, TooltipComponent, LegendComponent,
+  DataZoomComponent, TitleComponent, MarkLineComponent,
+} from 'echarts/components';
+import { CanvasRenderer } from 'echarts/renderers';
+import { healthAPI, databaseAPI, alertAPI, dashboardAPI } from '../services/api';
+import useAppStore from '../stores/useAppStore';
+import dayjs from 'dayjs';
+import relativeTime from 'dayjs/plugin/relativeTime';
 
-dayjs.extend(relativeTime)
+dayjs.extend(relativeTime);
 
-const { Title, Text, Paragraph } = Typography
-const { Panel } = Collapse
+// 注册 ECharts 组件
+echarts.use([
+  LineChart, BarChart, PieChart,
+  GridComponent, TooltipComponent, LegendComponent,
+  DataZoomComponent, TitleComponent, MarkLineComponent,
+  CanvasRenderer,
+]);
 
-// 数据库类型映射 (必须与后端 monitor/models.py 中的 DB_TYPES 一致)
-const DB_TYPE_MAP = {
-  'oracle': 'Oracle',
-  'mysql': 'MySQL',
-  'pgsql': 'PostgreSQL',
-  'dm': '达梦数据库',
-  'gbase': 'Gbase 8a',
-  'tdsql': 'TDSQL',
-  'mongo': 'MongoDB',
-  'redis': 'Redis'
-}
+const { Title, Text } = Typography;
 
-// 数据库类型颜色
-const DB_TYPE_COLORS = {
-  'oracle': '#F44336',
-  'mysql': '#007EE5',
-  'pgsql': '#336791',
-  'dm': '#D34A37',
-  'gbase': '#00A859',
-  'tdsql': '#FF9800',
-  'mongo': '#4DB6AC',
-  'redis': '#FF6370'
-}
+// ==========================================
+// 常量配置
+// ==========================================
 
-// 状态颜色映射
-const STATUS_COLORS = {
-  'UP': 'green',
-  'DOWN': 'red',
-  'UNKNOWN': 'default'
-}
+const DB_TYPE_CONFIG = {
+  oracle: { label: 'Oracle', color: '#f5222d', icon: '🔴', bgColor: '#fff1f0' },
+  mysql: { label: 'MySQL', color: '#1890ff', icon: '🔵', bgColor: '#e6f7ff' },
+  pgsql: { label: 'PostgreSQL', color: '#336791', icon: '🐘', bgColor: '#f0f5ff' },
+  dm: { label: '达梦 DM8', color: '#ee2222', icon: '🟤', bgColor: '#fff2f0' },
+  gbase: { label: 'GBase 8a', color: '#00a854', icon: '🟢', bgColor: '#f6ffed' },
+  tdsql: { label: 'TDSQL', color: '#108ee9', icon: '🟦', bgColor: '#e6f7ff' },
+};
 
-// 告警级别颜色
-const ALERT_SEVERITY_COLORS = {
-  'critical': '#ff4d4f',
-  'warning': '#faad14',
-  'info': '#1890ff'
-}
+const SEVERITY_CONFIG = {
+  critical: { color: '#ff4d4f', bgColor: '#fff2f0', label: '严重', icon: <CloseCircleOutlined /> },
+  error: { color: '#fa541c', bgColor: '#fff7e6', label: '错误', icon: <ExclamationCircleOutlined /> },
+  warning: { color: '#faad14', bgColor: '#fffbe6', label: '警告', icon: <WarningOutlined /> },
+  info: { color: '#1890ff', bgColor: '#e6f7ff', label: '信息', icon: <InfoCircleOutlined /> },
+};
 
-// 告警级别图标
-const ALERT_SEVERITY_ICONS = {
-  'critical': <CloseCircleOutlined />,
-  'warning': <WarningOutlined />,
-  'info': <InfoCircleOutlined />
-}
+const HEALTH_GRADE_CONFIG = {
+  A: { color: '#52c41a', range: [85, 100] },
+  B: { color: '#73d13d', range: [70, 85] },
+  C: { color: '#faad14', range: [55, 70] },
+  D: { color: '#ff7a45', range: [40, 55] },
+  E: { color: '#ff4d4f', range: [0, 40] },
+  F: { color: '#d9d9d9', range: [-1, 0] },
+};
 
-// MySQL 关键指标分类
-const MYSQL_METRIC_CATEGORIES = {
-  '连接类': ['threads_connected', 'max_used_connections', 'aborted_connects', 'connection_errors'],
-  'QPS/TPS': ['questions', 'queries', 'transactions', 'qps', 'tps'],
-  '缓冲池': ['innodb_buffer_pool_size', 'innodb_buffer_pool_pages_total', 'innodb_buffer_pool_pages_free', 'innodb_buffer_pool_pages_dirty', 'innodb_buffer_pool_reads', 'innodb_buffer_pool_read_requests'],
-  '表缓存': ['open_files', 'opened_files', 'table_open_cache_hits', 'table_open_cache_misses'],
-  '查询缓存': ['qcache_hits', 'qcache_inserts', 'qcache_not_cached', 'qcache_queries_in_cache'],
-  '临时对象': ['created_tmp_files', 'created_tmp_tables', 'created_tmp_disk_tables'],
-  '锁等待': ['table_locks_waited', 'table_locks_immediate', 'innodb_row_locks_waits', 'innodb_row_lock_time'],
-  'InnoDB': ['innodb_data_reads', 'innodb_data_writes', 'innodb_log_writes', 'innodb_buffer_pool_hit_ratio'],
-  '线程': ['threads_running', 'threads_waits', 'thread_cache_hit_ratio'],
-  '复制': ['slave_io_running', 'slave_sql_running', 'seconds_behind_master', 'relay_log_space']
-}
+// ==========================================
+// 工具函数
+// ==========================================
 
-// PostgreSQL 关键指标分类
-const POSTGRESQL_METRIC_CATEGORIES = {
-  '连接类': ['num_backends', 'max_connections', 'total_connections', 'active_connections', 'idle_connections', 'blocked_connections'],
-  '事务/语句': ['xact_commit', 'xact_rollback', 'blks_read', 'blks_hit', 'tup_returned', 'tup_fetched', 'tup_inserted', 'tup_updated', 'tup_deleted'],
-  '缓冲池': ['shared_buffers', 'effective_cache_size', 'buff_cache_hit_ratio', 'heap_blks_read', 'heap_blks_hit'],
-  'WAL': ['wal_files', 'wal_size', 'wal_write', 'wal_sync'],
-  '复制': ['replication_lag', 'replication_slots', 'wal_receiver_status'],
-  '会话': ['stat_session_time', 'stat_session_cpu', 'stat_session_io'],
-  '表空间': ['tablespace_size', 'tablespace_used', 'tablespace_percent'],
-  '事务ID': ['oldest_xmin', 'xid_age', 'transaction_id_wraparound_warning'],
-  '慢查询': ['slow_queries', 'log_min_duration']
-}
-
-// Oracle 关键指标分类
-const ORACLE_METRIC_CATEGORIES = {
-  '连接类': ['session_count', 'active_sessions', 'inactive_sessions', 'system_sessions', 'background_sessions'],
-  '性能类': ['db_cpu_time', 'db_time', 'buffer_gets', 'disk_reads', 'executions', 'parse_count_total', 'parse_count_hard'],
-  'SGA/PGA': ['sga_size', 'sga_free', 'pga_allocated', 'pga_used', 'pga_max_size'],
-  '缓冲池': ['buffer_cache_size', 'buffer_busy_waits', 'db_block_gets', 'db_block_changes', 'consistent_gets'],
-  '日志/归档': ['redo_writes', 'redo_size', 'archiver_status', 'archive_gap'],
-  '锁等待': ['enqueue_waits', 'latch_misses', 'lock_requests', 'row_lock_waits'],
-  '表空间': ['tablespace_used', 'tablespace_size', 'tablespace_percent', 'datafile_count'],
-  '会话内存': ['session_memory_used', 'session_pga_memory', 'process_memory'],
-  'RAC': ['cluster_interconnect', 'gc_buffer_busy', 'gc_cr_blocks_received', 'gc_current_blocks_received'],
-  'ADG': ['transport_lag', 'apply_lag', 'apply_rate', 'standby_file_resync']
-}
-
-// DM8 关键指标分类
-const DM8_METRIC_CATEGORIES = {
-  '连接类': ['session_count', 'active_sessions', 'max_sessions', 'session_memory'],
-  '事务类': ['trx_commit', 'trx_rollback', 'trx_active', 'trx_cur'],
-  '缓冲池': ['buffer_pool_size', 'buffer_pool_hit_ratio', 'buf_page_read', 'buf_page_written'],
-  'SQL统计': ['select_count', 'insert_count', 'update_count', 'delete_count', 'sql_execute'],
-  '会话内存': ['mem_total', 'mem_used', 'sql_pool_size', 'dict_cache_size'],
-  '线程': ['thread_count', 'worker_thread_count', 'scheduler_count'],
-  '锁等待': ['lock_waits', 'lock_timeout', 'deadlock_count'],
-  '归档/WAL': ['archive_size', 'archivelog_count', 'wal_write_count', 'wal_sync_count']
-}
-
-// 获取数据库类型对应的指标分类
-const getMetricCategories = (dbType) => {
-  const type = dbType?.toLowerCase()
-  switch (type) {
-    case 'mysql': return MYSQL_METRIC_CATEGORIES
-    case 'pgsql': return POSTGRESQL_METRIC_CATEGORIES
-    case 'oracle': return ORACLE_METRIC_CATEGORIES
-    case 'dm': return DM8_METRIC_CATEGORIES
-    default: return {}
+function getHealthGrade(score) {
+  if (score == null || isNaN(score)) return { grade: 'F', color: '#d9d9d9' };
+  for (const [grade, cfg] of Object.entries(HEALTH_GRADE_CONFIG)) {
+    if (score >= cfg.range[0] && score <= cfg.range[1]) return { grade, color: cfg.color };
   }
+  return { grade: 'F', color: '#d9d9d9' };
 }
 
-// 格式化数值
-const formatValue = (value, metric) => {
-  if (value === null || value === undefined) return '-'
-  if (typeof value === 'number') {
-    // 如果是百分比
-    if (metric.includes('ratio') || metric.includes('percent') || metric.includes('pct')) {
-      return `${value.toFixed(2)}%`
-    }
-    // 如果是大数值
-    if (value > 1000000) {
-      return `${(value / 1000000).toFixed(2)}M`
-    }
-    if (value > 1000) {
-      return `${(value / 1000).toFixed(2)}K`
-    }
-    // 如果是字节
-    if (metric.includes('size') || metric.includes('memory') || metric.includes('bytes')) {
-      if (value > 1073741824) return `${(value / 1073741824).toFixed(2)}GB`
-      if (value > 1048576) return `${(value / 1048576).toFixed(2)}MB`
-      if (value > 1024) return `${(value / 1024).toFixed(2)}KB`
-    }
-    return value.toFixed(2)
-  }
-  return String(value)
+function getStatusTag(status) {
+  const map = {
+    UP: { color: 'green', text: 'UP' },
+    DOWN: { color: 'red', text: 'DOWN' },
+    UNKNOWN: { color: 'default', text: 'UNKNOWN' },
+    DEGRADED: { color: 'orange', text: 'DEGRADED' },
+  };
+  const info = map[status] || { color: 'default', text: status || 'UNKNOWN' };
+  return <Tag color={info.color}>{info.text}</Tag>;
 }
 
-// 过滤有用的指标
-const filterUsefulMetrics = (metrics, dbType) => {
-  const categories = getMetricCategories(dbType)
-  const allMetricNames = Object.values(categories).flat()
-  const result = {}
-  
-  // 只保留已知有用的指标
-  for (const key of allMetricNames) {
-    if (metrics[key] !== undefined && metrics[key] !== null) {
-      result[key] = metrics[key]
-    }
-  }
-  
-  // 如果没有匹配到，尝试添加所有数值型指标
-  if (Object.keys(result).length === 0) {
-    for (const [key, value] of Object.entries(metrics)) {
-      if (typeof value === 'number' && !isNaN(value) && isFinite(value)) {
-        result[key] = value
-      }
-    }
-  }
-  
-  return result
+// ==========================================
+// 子组件: Health Score Ring
+// ==========================================
+function HealthScoreRing({ score, size = 100, title = '', subtitle = '' }) {
+  const { grade, color } = getHealthGrade(score);
+  const displayScore = score != null && !isNaN(score) ? score : 0;
+
+  return (
+    <div style={{ textAlign: 'center' }}>
+      <Progress
+        type="circle"
+        percent={displayScore}
+        size={size}
+        strokeColor={color}
+        format={(pct) => (
+          <span>
+            <div style={{ fontSize: 28, fontWeight: 700, color, lineHeight: 1 }}>{pct}</div>
+            <div style={{ fontSize: 14, fontWeight: 600, color, marginTop: -2 }}>{grade}</div>
+          </span>
+        )}
+      />
+      {title && <div style={{ marginTop: 8, fontWeight: 600, fontSize: 14 }}>{title}</div>}
+      {subtitle && <Text type="secondary" style={{ fontSize: 12 }}>{subtitle}</Text>}
+    </div>
+  );
 }
 
-const Dashboard = () => {
-  const [loading, setLoading] = useState(true)
-  const [refreshing, setRefreshing] = useState(false)
-  const [healthData, setHealthData] = useState(null)
-  const [dbList, setDbList] = useState([])
-  const [dbStatuses, setDbStatuses] = useState({}) // 存储每个数据库的详细状态
-  const [alerts, setAlerts] = useState([])
-  const [dbTypeFilter, setDbTypeFilter] = useState(null)
-  const [realtimeMetrics, setRealtimeMetrics] = useState({
-    totalConnections: 0,
-    totalQPS: 0,
-    totalTPS: 0,
-    activeAlerts: 0
-  })
-  const [trendData, setTrendData] = useState([])
-  const [expandedDb, setExpandedDb] = useState([]) // 展开的数据库面板
+// ==========================================
+// 子组件: ECharts 趋势图
+// ==========================================
+function TrendChart({ data = [], metric = 'qps', height = 280, loading = false }) {
+  const option = useMemo(() => {
+    const metrics = { qps: 'QPS', tps: 'TPS', conn: '连接数', cpu: 'CPU %' };
+    const colors = { qps: '#1890ff', tps: '#52c41a', conn: '#faad14', cpu: '#722ed1' };
 
-  const fetchDashboardData = async () => {
-    setRefreshing(true)
-    try {
-      // 并行获取数据
-      const [health, dbListRes, alertsRes] = await Promise.all([
-        healthAPI.check().catch(() => null),
-        databaseAPI.list().catch(() => ({ databases: [] })),
-        alertAPI.list({ limit: 100 }).catch(() => ({ alerts: [] }))
-      ])
+    return {
+      tooltip: {
+        trigger: 'axis',
+        backgroundColor: 'rgba(0,0,0,0.75)',
+        borderColor: 'transparent',
+        textStyle: { color: '#fff', fontSize: 12 },
+      },
+      legend: { show: false },
+      grid: { left: 50, right: 20, top: 20, bottom: 30 },
+      xAxis: {
+        type: 'category',
+        data: data.map((d) => d.time),
+        axisLine: { lineStyle: { color: '#e8e8e8' } },
+        axisLabel: { color: '#999', fontSize: 11 },
+        axisTick: { show: false },
+      },
+      yAxis: {
+        type: 'value',
+        splitLine: { lineStyle: { color: '#f0f0f0', type: 'dashed' } },
+        axisLabel: { color: '#999', fontSize: 11 },
+      },
+      dataZoom: [
+        { type: 'inside', start: 0, end: 100 },
+        { type: 'slider', start: 0, end: 100, height: 20, bottom: 0 },
+      ],
+      series: [
+        {
+          name: metrics[metric] || metric,
+          type: 'line',
+          data: data.map((d) => d[metric]),
+          smooth: true,
+          symbol: 'none',
+          lineStyle: { color: colors[metric] || '#1890ff', width: 2 },
+          areaStyle: {
+            opacity: 0.15,
+          },
+        },
+      ],
+    };
+  }, [data, metric]);
 
-      // 处理健康检查数据
-      if (health) {
-        setHealthData(health)
-      }
+  return (
+    <Spin spinning={loading}>
+      {data.length > 0 ? (
+        <ReactEChartsCore echarts={echarts} option={option} style={{ height }} notMerge lazyUpdate />
+      ) : (
+        <Empty description="暂无数据" style={{ height, display: 'flex', alignItems: 'center', justifyContent: 'center' }} />
+      )}
+    </Spin>
+  );
+}
 
-      // 处理数据库列表
-      const databases = dbListRes?.databases || []
-      setDbList(databases.map(db => ({
-        ...db,
-        key: db.id,
-        // 使用后端返回的原始 status，不要用 is_active 覆盖
-        last_collect: db.last_collect_time || db.last_seen
-      })))
-
-      // 处理告警列表
-      const alertList = alertsRes?.alerts || []
-      setAlerts(alertList.slice(0, 5))
-
-      // 生成趋势数据（基于当前时间模拟）
-      const now = dayjs()
-      const newTrendData = Array.from({ length: 24 }, (_, i) => ({
-        time: now.subtract(23 - i, 'hour').format('HH:mm'),
-        cpu: 30 + Math.random() * 40,
-        memory: 40 + Math.random() * 30,
-        connections: Math.floor(100 + Math.random() * 200),
-        alerts: Math.floor(Math.random() * 5)
-      }))
-      setTrendData(newTrendData)
-
-    } catch (error) {
-      console.error('获取仪表盘数据失败:', error)
-    } finally {
-      setLoading(false)
-      setRefreshing(false)
-    }
+// ==========================================
+// 子组件: Top Alerts 列表
+// ==========================================
+function TopAlertsSection({ alerts = [], loading = false, onViewAll }) {
+  if (loading) return <Spin style={{ display: 'block', textAlign: 'center', padding: 40 }} />;
+  if (!alerts || alerts.length === 0) {
+    return (
+      <Empty
+        description="暂无活跃告警"
+        image={Empty.PRESENTED_IMAGE_SIMPLE}
+        style={{ padding: 24 }}
+      />
+    );
   }
 
-  // 获取所有数据库的详细状态
-  const fetchAllDbStatuses = async () => {
-    try {
-      const statusPromises = dbList.map(async (db) => {
-        try {
-          const data = await databaseAPI.getStatus(db.id)
-          return { id: db.id, data: data }
-        } catch (err) {
-          console.error(`获取数据库 ${db.id} 状态失败:`, err)
-          return { id: db.id, data: null }
-        }
-      })
-      
-      const results = await Promise.all(statusPromises)
-      const statusesMap = {}
-      let totalConnections = 0
-      let totalQPS = 0
-      let totalTPS = 0
-      
-      results.forEach(({ id, data }) => {
-        if (data && data.metrics) {
-          statusesMap[id] = data
-          // 累加连接数
-          const connMetric = data.metrics.threads_connected || 
-                            data.metrics.session_count || 
-                            data.metrics.num_backends ||
-                            data.metrics.active_sessions ||
-                            0
-          totalConnections += Number(connMetric) || 0
-          
-          // 累加 QPS
-          const qpsMetric = data.metrics.qps || 
-                            data.metrics.queries_per_second ||
-                            data.metrics.select_count ||
-                            0
-          totalQPS += Number(qpsMetric) || 0
-          
-          // 累加 TPS
-          const tpsMetric = data.metrics.tps || 
-                            data.metrics.transactions ||
-                            data.metrics.xact_commit ||
-                            data.metrics.trx_commit ||
-                            0
-          totalTPS += Number(tpsMetric) || 0
-        }
-      })
-      
-      setDbStatuses(statusesMap)
-      
-      // 更新汇总指标
-      if (totalConnections > 0 || totalQPS > 0 || totalTPS > 0) {
-        setRealtimeMetrics(prev => ({
-          ...prev,
-          totalConnections,
-          totalQPS,
-          totalTPS
-        }))
-      }
-    } catch (error) {
-      console.error('批量获取数据库状态失败:', error)
-    }
-  }
+  return (
+    <div>
+      {alerts.slice(0, 5).map((alert, idx) => {
+        const sev = SEVERITY_CONFIG[alert.severity] || SEVERITY_CONFIG.warning;
+        return (
+          <div
+            key={alert.id || idx}
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 12,
+              padding: '10px 12px',
+              marginBottom: 6,
+              borderRadius: 6,
+              background: sev.bgColor,
+              borderLeft: `3px solid ${sev.color}`,
+              cursor: 'pointer',
+              transition: 'all 0.2s',
+            }}
+          >
+            <span style={{ fontSize: 18, flexShrink: 0 }}>{sev.icon}</span>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ fontWeight: 500, fontSize: 13, color: '#333', overflow: 'hidden', textOverflow: 'ellipsis', whiteSpace: 'nowrap' }}>
+                {alert.database_name && <Tag color="blue" style={{ marginRight: 4 }}>{alert.database_name}</Tag>}
+                {alert.title || alert.message || '告警'}
+              </div>
+              <div style={{ fontSize: 11, color: '#999', marginTop: 2 }}>
+                <ClockCircleOutlined style={{ marginRight: 4 }} />
+                {alert.created_at ? dayjs(alert.created_at).fromNow() : '-'}
+                {alert.duration && <span> · 持续 {alert.duration}</span>}
+              </div>
+            </div>
+            <Tag color={sev.color} style={{ flexShrink: 0 }}>{sev.label}</Tag>
+          </div>
+        );
+      })}
+      {alerts.length > 5 && (
+        <Button type="link" size="small" onClick={onViewAll} style={{ float: 'right', marginTop: 4 }}>
+          查看全部 {alerts.length} 条告警 <ArrowRightOutlined />
+        </Button>
+      )}
+    </div>
+  );
+}
 
-  useEffect(() => {
-    fetchDashboardData()
-  }, [])
-
-  // 当数据库列表加载完成后，获取每个数据库的详细状态
-  useEffect(() => {
-    if (dbList.length > 0 && Object.keys(dbStatuses).length === 0) {
-      fetchAllDbStatuses()
-    }
-  }, [dbList])
-
-  // 定时刷新 - 每30秒
-  useEffect(() => {
-    const interval = setInterval(() => {
-      fetchDashboardData()
-      if (dbList.length > 0) {
-        fetchAllDbStatuses()
-      }
-    }, 30000)
-    return () => clearInterval(interval)
-  }, [dbList.length])
-
-  // 按数据库类型统计
-  const getDbStatsByType = () => {
-    const stats = {}
-    Object.keys(DB_TYPE_MAP).forEach(type => {
-      stats[type] = { total: 0, online: 0, offline: 0 }
-    })
-    
-    dbList.forEach(db => {
-      const type = db.db_type?.toLowerCase() || 'unknown'
-      if (stats[type]) {
-        stats[type].total++
-        if (db.status === 'UP') {
-          stats[type].online++
-        } else {
-          stats[type].offline++
-        }
-      }
-    })
-    
-    return stats
-  }
-
-  const dbStatsByType = getDbStatsByType()
-
-  // 数据库类型分布数据（用于饼图）
-  const getDbTypeDistribution = () => {
-    return Object.entries(DB_TYPE_MAP)
-      .map(([type, name]) => ({
-        name,
-        value: dbStatsByType[type]?.total || 0,
-        type
-      }))
-      .filter(item => item.value > 0)
-  }
-
-  // 获取数据库类型统计信息
-  const getDbTypeSummary = () => {
-    const summary = {}
-    dbList.forEach(db => {
-      const type = db.db_type?.toLowerCase()
-      if (!summary[type]) {
-        summary[type] = { count: 0, metricsCount: 0 }
-      }
-      summary[type].count++
-      if (dbStatuses[db.id]?.metrics) {
-        const metrics = dbStatuses[db.id].metrics
-        summary[type].metricsCount += Object.keys(metrics).length
-      }
-    })
-    return summary
-  }
-
-  const dbTypeSummary = getDbTypeSummary()
-
-  // 表格列定义
+// ==========================================
+// 子组件: Database Fleet 摘要表
+// ==========================================
+function DatabaseFleetTable({ databases = [], statuses = {}, loading = false, onRowClick }) {
   const columns = [
     {
-      title: '名称',
+      title: '数据库名称',
       dataIndex: 'name',
       key: 'name',
+      width: 160,
       ellipsis: true,
-      width: 150
+      render: (text, record) => (
+        <Space>
+          <span style={{ fontSize: 14 }}>{DB_TYPE_CONFIG[record.db_type?.toLowerCase()]?.icon || '🗄️'}</span>
+          <a style={{ fontWeight: 500 }}>{text}</a>
+        </Space>
+      ),
     },
     {
       title: '类型',
       dataIndex: 'db_type',
       key: 'db_type',
       width: 100,
-      render: (type) => DB_TYPE_MAP[type?.toLowerCase()] || type
-    },
-    {
-      title: '主机:端口',
-      key: 'host_port',
-      width: 180,
-      render: (_, record) => `${record.host || record.ip_address || '-'}:${record.port || '-'}`
+      render: (type) => {
+        const cfg = DB_TYPE_CONFIG[type?.toLowerCase()];
+        return cfg ? <Tag color={cfg.color}>{cfg.label}</Tag> : <Tag>{type}</Tag>;
+      },
     },
     {
       title: '状态',
       dataIndex: 'status',
       key: 'status',
-      width: 100,
-      render: (status) => (
-        <Tag color={STATUS_COLORS[status] || 'default'}>
-          {status || 'UNKNOWN'}
-        </Tag>
-      )
+      width: 90,
+      render: (status) => getStatusTag(status),
     },
     {
-      title: '最后采集',
-      dataIndex: 'last_collect',
-      key: 'last_collect',
-      width: 150,
-      render: (time) => time ? dayjs(time).fromNow() : '-'
+      title: '健康评分',
+      key: 'health',
+      width: 110,
+      render: (_, record) => {
+        const status = statuses[record.id];
+        const score = status?.health_score;
+        const { grade, color } = getHealthGrade(score);
+        return (
+          <Space>
+            <Progress
+              type="circle"
+              size={24}
+              percent={score ?? 0}
+              strokeColor={color}
+              format={() => ''}
+              strokeWidth={8}
+            />
+            <span style={{ fontWeight: 600, color, fontSize: 16 }}>{grade}</span>
+            <Text type="secondary" style={{ fontSize: 12 }}>{score ?? '-'}</Text>
+          </Space>
+        );
+      },
     },
     {
-      title: '连接数',
-      dataIndex: 'connections',
-      key: 'connections',
-      width: 100,
-      render: (val) => val ?? '-'
+      title: '活跃告警',
+      key: 'alerts',
+      width: 80,
+      render: (_, record) => {
+        const status = statuses[record.id];
+        const count = status?.alert_count ?? 0;
+        return count > 0 ? <Badge count={count} overflowCount={99} /> : <Text type="secondary">-</Text>;
+      },
     },
     {
       title: 'QPS',
-      dataIndex: 'qps',
       key: 'qps',
-      width: 100,
-      render: (val) => val?.toFixed(2) ?? '-'
+      width: 70,
+      render: (_, record) => {
+        const status = statuses[record.id];
+        const qps = status?.metrics?.qps || status?.metrics?.queries_per_second;
+        return qps != null ? (Number(qps)).toFixed(0) : <Text type="secondary">-</Text>;
+      },
     },
     {
-      title: '指标数',
-      key: 'metrics_count',
+      title: '最后采集',
+      dataIndex: 'last_collect_time',
+      key: 'last_collect',
+      width: 130,
+      render: (time) => (time ? dayjs(time).fromNow() : '-'),
+    },
+    {
+      title: '操作',
+      key: 'action',
       width: 80,
-      render: (_, record) => {
-        const metrics = dbStatuses[record.id]?.metrics || {}
-        const count = Object.keys(metrics).length
-        return <Badge count={count} showZero color="#1890ff" />
+      render: (_, record) => (
+        <Button type="link" size="small" onClick={(e) => { e.stopPropagation(); onRowClick?.(record); }}>
+          详情
+        </Button>
+      ),
+    },
+  ];
+
+  return (
+    <Table
+      dataSource={databases}
+      columns={columns}
+      rowKey="id"
+      loading={loading}
+      size="small"
+      pagination={false}
+      scroll={{ x: 820 }}
+      onRow={(record) => ({
+        onClick: () => onRowClick?.(record),
+        style: { cursor: 'pointer' },
+      })}
+      locale={{ emptyText: <Empty description="暂无纳管数据库" image={Empty.PRESENTED_IMAGE_SIMPLE} /> }}
+    />
+  );
+}
+
+// ==========================================
+// 主页组件: Dashboard
+// ==========================================
+export default function Dashboard() {
+  const navigate = useNavigate();
+  const setSelectedDb = useAppStore((s) => s.setSelectedDb);
+
+  const [loading, setLoading] = useState(true);
+  const [refreshing, setRefreshing] = useState(false);
+  const [healthData, setHealthData] = useState(null);
+  const [dbList, setDbList] = useState([]);
+  const [dbStatuses, setDbStatuses] = useState({});
+  const [alerts, setAlerts] = useState([]);
+  const [trendData, setTrendData] = useState([]);
+  const [performanceMetric, setPerformanceMetric] = useState('qps');
+  const [timeRange, setTimeRange] = useState('24h');
+  const [autoRefresh, setAutoRefresh] = useState(0);
+
+  // 数据获取
+  const fetchData = useCallback(async () => {
+    try {
+      const [health, dbListRes, alertsRes, trendRes] = await Promise.all([
+        healthAPI.check().catch(() => null),
+        databaseAPI.list().catch(() => ({ databases: [] })),
+        alertAPI.list({ limit: 50, status: 'active' }).catch(() => ({ alerts: [] })),
+        dashboardAPI.getCharts().catch(() => null),
+      ]);
+
+      if (health) setHealthData(health);
+
+      const databases = (dbListRes?.databases || []).map((db) => ({
+        ...db,
+        key: db.id,
+      }));
+      setDbList(databases);
+
+      const alertList = alertsRes?.alerts || [];
+      setAlerts(alertList);
+
+      // 生成趋势数据（从 API 获取或生成 placeholder）
+      if (trendRes?.trend) {
+        setTrendData(trendRes.trend);
+      } else {
+        const now = dayjs();
+        setTrendData(
+          Array.from({ length: 48 }, (_, i) => ({
+            time: now.subtract(47 - i, 'hour').format('MM-DD HH:mm'),
+            qps: Math.max(0, 200 + Math.sin(i * 0.5) * 80 + (Math.random() - 0.5) * 60),
+            tps: Math.max(0, 50 + Math.sin(i * 0.5) * 25 + (Math.random() - 0.5) * 20),
+            conn: Math.max(0, 300 + Math.sin(i * 0.3) * 120 + (Math.random() - 0.5) * 80),
+            cpu: Math.max(0, 45 + Math.sin(i * 0.4) * 20 + (Math.random() - 0.5) * 15),
+          }))
+        );
       }
+    } catch (error) {
+      console.error('获取仪表盘数据失败:', error);
+    } finally {
+      setLoading(false);
+      setRefreshing(false);
     }
-  ]
+  }, []);
 
-  // 渲染数据库详细指标
-  const renderDbMetrics = (db) => {
-    const status = dbStatuses[db.id]
-    if (!status || !status.metrics) {
-      return <Empty description="暂无指标数据" />
+  // 获取所有数据库的详细状态
+  const fetchAllDbStatuses = useCallback(async () => {
+    if (dbList.length === 0) return;
+    try {
+      const results = await Promise.allSettled(
+        dbList.map((db) => databaseAPI.getStatus(db.id))
+      );
+      const map = {};
+      results.forEach((r, idx) => {
+        if (r.status === 'fulfilled' && r.value) {
+          map[dbList[idx].id] = r.value;
+        }
+      });
+      setDbStatuses(map);
+    } catch (error) {
+      console.error('批量获取数据库状态失败:', error);
     }
-    
-    const metrics = status.metrics
-    const categories = getMetricCategories(db.db_type)
-    const filteredMetrics = filterUsefulMetrics(metrics, db.db_type)
-    
-    return (
-      <div className="db-metrics-detail">
-        <Row gutter={[16, 16]}>
-          {/* 显示每个分类的指标 */}
-          {Object.entries(categories).map(([categoryName, metricNames]) => {
-            const categoryMetrics = metricNames
-              .filter(name => filteredMetrics[name] !== undefined)
-              .map(name => ({ name, value: filteredMetrics[name] }))
-            
-            if (categoryMetrics.length === 0) return null
-            
-            return (
-              <Col xs={24} sm={12} md={8} lg={6} key={categoryName}>
-                <Card 
-                  size="small" 
-                  title={
-                    <span>
-                      <BarChartOutlined style={{ marginRight: 8 }} />
-                      {categoryName}
-                    </span>
-                  }
-                  className="metric-category-card"
-                >
-                  {categoryMetrics.map(({ name, value }) => (
-                    <div key={name} className="metric-item">
-                      <span className="metric-name" title={name}>
-                        {name.replace(/_/g, ' ')}
-                      </span>
-                      <span className="metric-value">
-                        {formatValue(value, name)}
-                      </span>
-                    </div>
-                  ))}
-                </Card>
-              </Col>
-            )
-          })}
-          
-          {/* 显示其他未分类但有值的指标 */}
-          {(() => {
-            const categorizedNames = Object.values(categories).flat()
-            const otherMetrics = Object.entries(filteredMetrics)
-              .filter(([name]) => !categorizedNames.includes(name))
-              .slice(0, 20) // 限制显示数量
-            
-            if (otherMetrics.length === 0) return null
-            
-            return (
-              <Col xs={24} sm={12} md={8} lg={6}>
-                <Card 
-                  size="small" 
-                  title={
-                    <span>
-                      <InfoCircleOutlined style={{ marginRight: 8 }} />
-                      其他指标
-                    </span>
-                  }
-                  className="metric-category-card"
-                >
-                  {otherMetrics.map(([name, value]) => (
-                    <div key={name} className="metric-item">
-                      <span className="metric-name" title={name}>
-                        {name.replace(/_/g, ' ')}
-                      </span>
-                      <span className="metric-value">
-                        {formatValue(value, name)}
-                      </span>
-                    </div>
-                  ))}
-                </Card>
-              </Col>
-            )
-          })()}
-        </Row>
-        
-        {/* 原始数据概览 */}
-        <Card 
-          size="small" 
-          title={
-            <span>
-              <DesktopOutlined style={{ marginRight: 8 }} />
-              原始指标数据 (共 {Object.keys(metrics).length} 项)
-            </span>
-          }
-          style={{ marginTop: 16 }}
-        >
-          <div className="raw-metrics-scroll">
-            {Object.entries(metrics).map(([key, value]) => (
-              <Tag key={key} className="metric-tag">
-                <span className="metric-tag-key">{key}:</span>
-                <span className="metric-tag-value">{formatValue(value, key)}</span>
-              </Tag>
-            ))}
-          </div>
-        </Card>
-      </div>
-    )
-  }
+  }, [dbList]);
 
-  // 筛选后的数据库列表
-  const filteredDbList = dbTypeFilter 
-    ? dbList.filter(db => db.db_type?.toLowerCase() === dbTypeFilter)
-    : dbList
+  // 首次加载
+  useEffect(() => { fetchData(); }, [fetchData]);
+  useEffect(() => {
+    if (dbList.length > 0 && Object.keys(dbStatuses).length === 0) {
+      fetchAllDbStatuses();
+    }
+  }, [dbList, dbStatuses, fetchAllDbStatuses]);
 
+  // 自动刷新
+  useEffect(() => {
+    if (autoRefresh <= 0) return;
+    const interval = setInterval(() => {
+      fetchData();
+      if (dbList.length > 0) fetchAllDbStatuses();
+    }, autoRefresh * 1000);
+    return () => clearInterval(interval);
+  }, [autoRefresh, fetchData, fetchAllDbStatuses, dbList.length]);
+
+  // 刷新按钮
+  const handleRefresh = () => {
+    setRefreshing(true);
+    fetchData().then(() => fetchAllDbStatuses());
+  };
+
+  // 点击数据库行
+  const handleDbRowClick = (record) => {
+    setSelectedDb(record.id, record.name, record.db_type);
+    navigate(`/databases/${record.id}`);
+  };
+
+  // 查看全部告警
+  const handleViewAllAlerts = () => navigate('/alerts');
+
+  // 统计计算
+  const stats = useMemo(() => {
+    const total = dbList.length;
+    const online = dbList.filter((db) => db.status === 'UP').length;
+    const offline = dbList.filter((db) => db.status === 'DOWN').length;
+    const degraded = dbList.filter((db) => db.status === 'DEGRADED').length;
+
+    // 平均健康评分
+    const scores = Object.values(dbStatuses)
+      .map((s) => s?.health_score)
+      .filter((s) => s != null && !isNaN(s));
+    const avgHealth = scores.length > 0
+      ? Math.round(scores.reduce((a, b) => a + b, 0) / scores.length)
+      : null;
+
+    // 活跃告警数
+    const activeAlerts = alerts.length;
+
+    return { total, online, offline, degraded, avgHealth, activeAlerts };
+  }, [dbList, dbStatuses, alerts]);
+
+  // 按类型分布
+  const dbTypeDistribution = useMemo(() => {
+    const dist = {};
+    dbList.forEach((db) => {
+      const t = (db.db_type || 'unknown').toLowerCase();
+      dist[t] = (dist[t] || 0) + 1;
+    });
+    return Object.entries(dist).map(([type, count]) => ({
+      name: DB_TYPE_CONFIG[type]?.label || type,
+      value: count,
+      itemStyle: { color: DB_TYPE_CONFIG[type]?.color || '#999' },
+    }));
+  }, [dbList]);
+
+  // ==========================================
+  // 渲染
+  // ==========================================
   if (loading && !healthData) {
     return (
-      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '80vh' }}>
+      <div style={{ display: 'flex', justifyContent: 'center', alignItems: 'center', height: '60vh' }}>
         <Spin size="large" tip="加载监控大屏数据..." />
       </div>
-    )
+    );
   }
 
   return (
-    <div className="dashboard-container">
+    <div style={{ padding: '0 0 16px 0' }}>
       <style>{`
-        .dashboard-container {
-          padding: 24px;
-          background: linear-gradient(135deg, #667eea 0%, #764ba2 100%);
-          min-height: 100vh;
-        }
-        .dashboard-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 24px;
-        }
-        .dashboard-title {
-          color: #fff;
-          font-size: 28px;
-          font-weight: 600;
-          margin: 0;
-          text-shadow: 0 2px 4px rgba(0,0,0,0.1);
-        }
-        .dashboard-subtitle {
-          color: rgba(255,255,255,0.85);
-          font-size: 14px;
-          margin-top: 4px;
-        }
-        .refresh-time {
-          color: rgba(255,255,255,0.7);
-          font-size: 12px;
-          margin-top: 8px;
-        }
-        .stat-card {
-          background: rgba(255,255,255,0.95);
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-          transition: transform 0.3s, box-shadow 0.3s;
-          height: 100%;
-        }
-        .stat-card:hover {
-          transform: translateY(-2px);
-          box-shadow: 0 6px 24px rgba(0,0,0,0.15);
-        }
-        .stat-card-title {
-          font-size: 14px;
-          color: #666;
-          margin-bottom: 8px;
-        }
-        .stat-card-value {
-          font-size: 32px;
-          font-weight: 700;
-        }
-        .stat-trend {
-          font-size: 12px;
-          margin-left: 8px;
-        }
-        .db-type-card {
-          background: rgba(255,255,255,0.95);
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-          padding: 16px;
-          height: 100%;
-        }
-        .db-type-header {
-          display: flex;
-          justify-content: space-between;
-          align-items: center;
-          margin-bottom: 12px;
-        }
-        .db-type-name {
-          font-size: 16px;
-          font-weight: 600;
-          color: #333;
-        }
-        .db-type-count {
-          font-size: 24px;
-          font-weight: 700;
-          color: #1890ff;
-        }
-        .db-type-stats {
-          display: flex;
-          gap: 16px;
-          font-size: 13px;
-        }
-        .db-type-stat-online {
-          color: #52c41a;
-        }
-        .db-type-stat-offline {
-          color: #ff4d4f;
-        }
-        .db-type-metrics-info {
-          font-size: 12px;
-          color: #999;
-          margin-top: 8px;
-        }
-        .alert-item {
-          background: rgba(255,255,255,0.95);
+        .emcc-dashboard .ant-card {
           border-radius: 8px;
-          padding: 12px 16px;
-          margin-bottom: 8px;
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          transition: background 0.2s;
+          box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+          border: 1px solid #e8e8e8;
         }
-        .alert-item:hover {
-          background: #fff;
-        }
-        .alert-icon-wrap {
-          width: 36px;
-          height: 36px;
-          border-radius: 50%;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          flex-shrink: 0;
-        }
-        .alert-content {
-          flex: 1;
-          min-width: 0;
-        }
-        .alert-title {
-          font-weight: 500;
-          color: #333;
-          white-space: nowrap;
-          overflow: hidden;
-          text-overflow: ellipsis;
-        }
-        .alert-meta {
-          font-size: 12px;
-          color: #999;
-          margin-top: 2px;
-        }
-        .chart-card {
-          background: rgba(255,255,255,0.95);
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        }
-        .table-card {
-          background: rgba(255,255,255,0.95);
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-        }
-        .filter-select {
-          width: 160px;
-        }
-        .db-detail-collapse {
-          background: rgba(255,255,255,0.95);
-          border-radius: 12px;
-          box-shadow: 0 4px 20px rgba(0,0,0,0.1);
-          margin-bottom: 16px;
-          overflow: hidden;
-        }
-        .db-detail-header {
-          display: flex;
-          align-items: center;
-          gap: 12px;
-          padding: 8px 0;
-        }
-        .db-detail-title {
-          font-size: 16px;
-          font-weight: 600;
-        }
-        .db-detail-meta {
-          font-size: 12px;
-          color: #999;
-        }
-        .metric-category-card {
-          border-radius: 8px;
-          height: 100%;
-        }
-        .metric-category-card .ant-card-head {
-          min-height: 40px;
-          padding: 0 12px;
-        }
-        .metric-category-card .ant-card-head-title {
-          font-size: 13px;
-          font-weight: 600;
-        }
-        .metric-item {
-          display: flex;
-          justify-content: space-between;
-          padding: 4px 0;
+        .emcc-dashboard .ant-card-head {
           border-bottom: 1px solid #f0f0f0;
+          min-height: 42px;
+          padding: 0 16px;
         }
-        .metric-item:last-child {
-          border-bottom: none;
-        }
-        .metric-name {
-          font-size: 12px;
-          color: #666;
-          flex: 1;
-          overflow: hidden;
-          text-overflow: ellipsis;
-          white-space: nowrap;
-        }
-        .metric-value {
-          font-size: 12px;
-          font-weight: 600;
-          color: #1890ff;
-          margin-left: 8px;
-        }
-        .raw-metrics-scroll {
-          max-height: 200px;
-          overflow-y: auto;
-          display: flex;
-          flex-wrap: wrap;
-          gap: 8px;
-        }
-        .metric-tag {
-          display: inline-flex;
-          align-items: center;
-          gap: 4px;
-          padding: 4px 8px;
-          background: #f5f5f5;
-          border-radius: 4px;
-          font-size: 11px;
-        }
-        .metric-tag-key {
-          color: #666;
-        }
-        .metric-tag-value {
-          color: #1890ff;
-          font-weight: 600;
-        }
-        .metrics-summary-row {
-          display: flex;
-          gap: 24px;
-          flex-wrap: wrap;
-        }
-        .metrics-summary-item {
-          display: flex;
-          align-items: center;
-          gap: 8px;
-        }
-        .metrics-summary-label {
-          color: #999;
-          font-size: 12px;
-        }
-        .metrics-summary-value {
-          color: #1890ff;
+        .emcc-dashboard .ant-card-head-title {
           font-size: 14px;
           font-weight: 600;
+          padding: 10px 0;
+        }
+        .emcc-dashboard .ant-card-body {
+          padding: 16px;
+        }
+        .db-fleet-table .ant-table-thead > tr > th {
+          background: #fafafa;
+          font-weight: 600;
+          font-size: 12px;
+          padding: 8px 12px;
+        }
+        .db-fleet-table .ant-table-tbody > tr > td {
+          padding: 8px 12px;
+          font-size: 13px;
+        }
+        .db-fleet-table .ant-table-tbody > tr:hover > td {
+          background: #e6f7ff;
         }
       `}</style>
 
-      {/* 头部 */}
-      <div className="dashboard-header">
-        <div>
-          <h1 className="dashboard-title">数据库监控大屏</h1>
-          <p className="dashboard-subtitle">实时监控数据库运行状态与性能指标</p>
-          <p className="refresh-time">最后更新: {dayjs().format('YYYY-MM-DD HH:mm:ss')}</p>
+      <div className="emcc-dashboard">
+        {/* ========================================== */}
+        {/* 顶部操作栏 */}
+        {/* ========================================== */}
+        <div style={{
+          display: 'flex', justifyContent: 'space-between', alignItems: 'center',
+          padding: '12px 16px', background: '#fff', borderBottom: '1px solid #e8e8e8',
+          marginBottom: 16,
+        }}>
+          <Space size="middle">
+            <Title level={5} style={{ margin: 0 }}>
+              <DatabaseOutlined style={{ marginRight: 8, color: '#1890ff' }} />
+              监控概览
+            </Title>
+            <Divider type="vertical" />
+            <Segmented
+              size="small"
+              value={timeRange}
+              onChange={setTimeRange}
+              options={[
+                { value: '1h', label: '1小时' },
+                { value: '6h', label: '6小时' },
+                { value: '24h', label: '24小时' },
+                { value: '7d', label: '7天' },
+              ]}
+            />
+            <Divider type="vertical" />
+            <Text type="secondary" style={{ fontSize: 12 }}>
+              最后更新: {dayjs().format('HH:mm:ss')}
+            </Text>
+          </Space>
+          <Space>
+            <Segmented
+              size="small"
+              value={autoRefresh}
+              onChange={setAutoRefresh}
+              options={[
+                { value: 0, label: '关闭' },
+                { value: 30, label: '30秒' },
+                { value: 60, label: '1分钟' },
+                { value: 300, label: '5分钟' },
+              ]}
+            />
+            <Button
+              icon={<ReloadOutlined spin={refreshing} />}
+              size="small"
+              onClick={handleRefresh}
+              loading={refreshing}
+            >
+              刷新
+            </Button>
+          </Space>
         </div>
-        <Button 
-          type="primary" 
-          icon={<SyncOutlined spin={refreshing} />} 
-          onClick={() => {
-            fetchDashboardData()
-            fetchAllDbStatuses()
-          }}
-          loading={refreshing}
-          size="large"
-        >
-          刷新数据
-        </Button>
-      </div>
 
-      {/* 系统状态提示 */}
-      {healthData && (
-        <Alert
-          message={`系统状态: ${healthData.status === 'healthy' ? '正常' : '异常'}`}
-          description={`活跃数据库: ${healthData.metrics?.active_databases || 0}, 活跃告警: ${healthData.metrics?.active_alerts || 0}`}
-          type={healthData.status === 'healthy' ? 'success' : 'error'}
-          showIcon
-          style={{ marginBottom: 24, borderRadius: 8 }}
-        />
-      )}
-
-      {/* 实时指标面板 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card" size="small">
-            <Statistic
-              title={<span className="stat-card-title">总连接数</span>}
-              value={realtimeMetrics.totalConnections}
-              prefix={<DatabaseOutlined style={{ color: '#1890ff' }} />}
-              valueStyle={{ color: '#1890ff' }}
-              suffix={<span className="stat-trend"><RiseOutlined style={{ color: '#52c41a' }} /></span>}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card" size="small">
-            <Statistic
-              title={<span className="stat-card-title">总 QPS</span>}
-              value={realtimeMetrics.totalQPS.toFixed(1)}
-              prefix={<RiseOutlined style={{ color: '#722ed1' }} />}
-              valueStyle={{ color: '#722ed1' }}
-              suffix={<span className="stat-trend"><RiseOutlined style={{ color: '#52c41a' }} /></span>}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card" size="small">
-            <Statistic
-              title={<span className="stat-card-title">总 TPS</span>}
-              value={realtimeMetrics.totalTPS.toFixed(1)}
-              prefix={<CheckCircleOutlined style={{ color: '#52c41a' }} />}
-              valueStyle={{ color: '#52c41a' }}
-              suffix={<span className="stat-trend"><FallOutlined style={{ color: '#faad14' }} /></span>}
-            />
-          </Card>
-        </Col>
-        <Col xs={24} sm={12} lg={6}>
-          <Card className="stat-card" size="small">
-            <Statistic
-              title={<span className="stat-card-title">活跃告警</span>}
-              value={realtimeMetrics.activeAlerts}
-              prefix={<ExclamationCircleOutlined style={{ color: realtimeMetrics.activeAlerts > 0 ? '#ff4d4f' : '#52c41a' }} />}
-              valueStyle={{ color: realtimeMetrics.activeAlerts > 0 ? '#ff4d4f' : '#52c41a' }}
-            />
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 数据库类型卡片 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {Object.entries(DB_TYPE_MAP).map(([type, name]) => {
-          const stats = dbStatsByType[type] || { total: 0, online: 0, offline: 0 }
-          const summary = dbTypeSummary[type] || { count: 0, metricsCount: 0 }
-          return (
-            <Col xs={12} sm={8} lg={4} key={type}>
-              <div className="db-type-card">
-                <div className="db-type-header">
-                  <span className="db-type-name">{name}</span>
+        {/* ========================================== */}
+        {/* 第一行: 总体健康状况卡片 */}
+        {/* ========================================== */}
+        <Row gutter={[16, 16]} style={{ marginBottom: 16, padding: '0 16px' }}>
+          <Col xs={24} sm={12} md={6}>
+            <Card>
+              <Statistic
+                title={<span><CheckCircleOutlined style={{ color: '#52c41a', marginRight: 6 }} />纳管数据库</span>}
+                value={stats.total}
+                suffix={
+                  <Space size={4} style={{ fontSize: 13 }}>
+                    <Text type="success">{stats.online}在线</Text>
+                    {stats.degraded > 0 && <Text type="warning">{stats.degraded}降级</Text>}
+                    {stats.offline > 0 && <Text type="danger">{stats.offline}离线</Text>}
+                  </Space>
+                }
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card>
+              <HealthScoreRing score={stats.avgHealth} size={64} title="平均健康评分" />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card>
+              <Statistic
+                title={<span><WarningOutlined style={{ color: '#faad14', marginRight: 6 }} />活跃告警</span>}
+                value={stats.activeAlerts}
+                valueStyle={{ color: stats.activeAlerts > 10 ? '#ff4d4f' : stats.activeAlerts > 0 ? '#faad14' : '#52c41a' }}
+                suffix={stats.activeAlerts > 0 && (
+                  <Button type="link" size="small" onClick={handleViewAllAlerts}>查看</Button>
+                )}
+              />
+            </Card>
+          </Col>
+          <Col xs={24} sm={12} md={6}>
+            <Card>
+              <div style={{ textAlign: 'center' }}>
+                <div style={{ fontSize: 12, color: '#999', marginBottom: 8 }}>
+                  <ThunderboltOutlined style={{ marginRight: 4 }} />
+                  数据库类型分布
                 </div>
-                <div className="db-type-count">{stats.total}</div>
-                <div className="db-type-stats">
-                  <span className="db-type-stat-online">
-                    <CheckCircleOutlined /> {stats.online} 在线
-                  </span>
-                  <span className="db-type-stat-offline">
-                    <CloseCircleOutlined /> {stats.offline} 离线
-                  </span>
-                </div>
-                {stats.total > 0 && (
-                  <div className="db-type-metrics-info">
-                    <InfoCircleOutlined /> 已采集 {summary.metricsCount} 个指标
-                  </div>
+                {dbTypeDistribution.length > 0 ? (
+                  <ReactEChartsCore
+                    echarts={echarts}
+                    option={{
+                      tooltip: { trigger: 'item', formatter: '{b}: {c} ({d}%)' },
+                      series: [{
+                        type: 'pie',
+                        radius: ['55%', '80%'],
+                        center: ['50%', '50%'],
+                        itemStyle: { borderRadius: 2, borderColor: '#fff', borderWidth: 2 },
+                        label: { show: false },
+                        emphasis: { label: { show: true, fontSize: 14, fontWeight: 'bold' } },
+                        data: dbTypeDistribution,
+                      }],
+                    }}
+                    style={{ height: 80 }}
+                    notMerge
+                    lazyUpdate
+                  />
+                ) : (
+                  <Text type="secondary">暂无数据</Text>
                 )}
               </div>
-            </Col>
-          )
-        })}
-      </Row>
+            </Card>
+          </Col>
+        </Row>
 
-      {/* 图表区域 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        {/* 告警概览 */}
-        <Col xs={24} lg={8}>
-          <Card 
-            title="告警概览" 
-            className="chart-card"
-            extra={<Link to="/alerts"><Button type="link" size="small">查看全部</Button></Link>}
-          >
-            <AlertPanel 
-              limit={5}
-              showActions={true}
-              onRefresh={fetchDashboardData}
-            />
-          </Card>
-        </Col>
+        {/* ========================================== */}
+        {/* 第二行: Performance Summary + Top Alerts */}
+        {/* ========================================== */}
+        <Row gutter={[16, 16]} style={{ padding: '0 16px', marginBottom: 16 }}>
+          <Col xs={24} lg={16}>
+            <Card
+              title={
+                <Space>
+                  <RiseOutlined style={{ color: '#1890ff' }} />
+                  <span>Performance Summary</span>
+                  <Segmented
+                    size="small"
+                    value={performanceMetric}
+                    onChange={setPerformanceMetric}
+                    options={[
+                      { value: 'qps', label: 'QPS' },
+                      { value: 'tps', label: 'TPS' },
+                      { value: 'conn', label: '连接数' },
+                      { value: 'cpu', label: 'CPU' },
+                    ]}
+                  />
+                </Space>
+              }
+              extra={
+                <Text type="secondary" style={{ fontSize: 12 }}>
+                  过去 {timeRange === '1h' ? '1小时' : timeRange === '6h' ? '6小时' : timeRange === '7d' ? '7天' : '24小时'}
+                </Text>
+              }
+            >
+              <TrendChart data={trendData} metric={performanceMetric} height={300} loading={loading} />
+            </Card>
+          </Col>
+          <Col xs={24} lg={8}>
+            <Card
+              title={
+                <Space>
+                  <WarningOutlined style={{ color: '#faad14' }} />
+                  <span>Top Alerts</span>
+                  {alerts.length > 0 && <Badge count={alerts.length} overflowCount={99} />}
+                </Space>
+              }
+              extra={
+                <Button type="link" size="small" onClick={handleViewAllAlerts}>
+                  查看全部 <ArrowRightOutlined />
+                </Button>
+              }
+            >
+              <TopAlertsSection alerts={alerts} loading={loading} onViewAll={handleViewAllAlerts} />
+            </Card>
+          </Col>
+        </Row>
 
-        {/* 数据库类型分布 */}
-        <Col xs={24} lg={8}>
-          <Card title="数据库类型分布" className="chart-card">
-            <ResponsiveContainer width="100%" height={280}>
-              <PieChart>
-                <Pie
-                  data={getDbTypeDistribution()}
-                  cx="50%"
-                  cy="50%"
-                  innerRadius={50}
-                  outerRadius={90}
-                  paddingAngle={2}
-                  dataKey="value"
-                  label={({ name, value }) => `${name}: ${value}`}
-                >
-                  {getDbTypeDistribution().map((entry, index) => (
-                    <Cell key={`cell-${index}`} fill={DB_TYPE_COLORS[entry.type] || '#999'} />
-                  ))}
-                </Pie>
-                <RechartsTooltip 
-                  formatter={(value, name) => [`${value} 个`, name]}
-                />
-              </PieChart>
-            </ResponsiveContainer>
-          </Card>
-        </Col>
-
-        {/* 趋势图表 */}
-        <Col xs={24} lg={8}>
-          <Card title="连接数趋势" className="chart-card">
-            <ResponsiveContainer width="100%" height={280}>
-              <LineChart data={trendData}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#eee" />
-                <XAxis dataKey="time" tick={{ fontSize: 11 }} />
-                <YAxis tick={{ fontSize: 11 }} />
-                <RechartsTooltip />
-                <Line
-                  type="monotone"
-                  dataKey="connections"
-                  name="连接数"
-                  stroke="#1890ff"
-                  strokeWidth={2}
-                  dot={false}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 数据库详情展开面板 */}
-      <Row gutter={[16, 16]} style={{ marginBottom: 24 }}>
-        <Col span={24}>
-          <Card 
+        {/* ========================================== */}
+        {/* 第三行: Database Fleet Summary */}
+        {/* ========================================== */}
+        <div style={{ padding: '0 16px' }}>
+          <Card
             title={
               <Space>
-                <BarChartOutlined />
-                <span>数据库详细指标</span>
-                <Badge count={dbList.length} style={{ marginLeft: 8 }} />
+                <ApiOutlined style={{ color: '#1890ff' }} />
+                <span>Database Fleet Summary</span>
+                <Tag>{dbList.length} 个数据库</Tag>
               </Space>
             }
-            className="chart-card"
             extra={
-              <Text type="secondary">
-                <ClockCircleOutlined style={{ marginRight: 4 }} />
-                展开查看每个数据库的详细采集指标
-              </Text>
+              <Button
+                type="primary"
+                size="small"
+                onClick={() => navigate('/databases')}
+              >
+                管理数据库
+              </Button>
             }
+            className="db-fleet-table"
           >
-            <Collapse 
-              accordion={false}
-              activeKey={expandedDb}
-              onChange={setExpandedDb}
-            >
-              {dbList.map((db) => {
-                const status = dbStatuses[db.id]
-                const metricsCount = status?.metrics ? Object.keys(status.metrics).length : 0
-                return (
-                  <Panel
-                    key={db.id}
-                    header={
-                      <div className="db-detail-header">
-                        <Tag color={DB_TYPE_COLORS[db.db_type?.toLowerCase()] || '#999'}>
-                          {DB_TYPE_MAP[db.db_type?.toLowerCase()] || db.db_type}
-                        </Tag>
-                        <span className="db-detail-title">{db.name}</span>
-                        <Tag color={db.is_active ? 'green' : 'red'}>
-                          {db.is_active ? 'UP' : 'DOWN'}
-                        </Tag>
-                        <span className="db-detail-meta">
-                          {db.host || db.ip_address}:{db.port} | 
-                          <ClockCircleOutlined style={{ margin: '0 4px' }} />
-                          {db.last_collect_time ? dayjs(db.last_collect_time).fromNow() : '暂无数据'}
-                        </span>
-                        <Badge count={metricsCount} showZero color="#1890ff" style={{ marginLeft: 8 }} />
-                        <Text type="secondary" style={{ marginLeft: 8, fontSize: 12 }}>
-                          个指标
-                        </Text>
-                      </div>
-                    }
-                  >
-                    <div className="metrics-summary-row" style={{ marginBottom: 16 }}>
-                      <div className="metrics-summary-item">
-                        <SettingOutlined />
-                        <span className="metrics-summary-label">采集状态:</span>
-                        <span className="metrics-summary-value">{status?.status || 'N/A'}</span>
-                      </div>
-                      <div className="metrics-summary-item">
-                        <DesktopOutlined />
-                        <span className="metrics-summary-label">指标总数:</span>
-                        <span className="metrics-summary-value">{metricsCount}</span>
-                      </div>
-                      <div className="metrics-summary-item">
-                        <ClockCircleOutlined />
-                        <span className="metrics-summary-label">采集时间:</span>
-                        <span className="metrics-summary-value">
-                          {status?.collected_at ? dayjs(status.collected_at).format('YYYY-MM-DD HH:mm:ss') : 'N/A'}
-                        </span>
-                      </div>
-                    </div>
-                    {renderDbMetrics(db)}
-                  </Panel>
-                )
-              })}
-            </Collapse>
-          </Card>
-        </Col>
-      </Row>
-
-      {/* 数据库状态表格 */}
-      <Row gutter={[16, 16]}>
-        <Col span={24}>
-          <Card 
-            title="数据库状态列表" 
-            className="table-card"
-            extra={
-              <Space>
-                <Select
-                  className="filter-select"
-                  placeholder="筛选类型"
-                  allowClear
-                  value={dbTypeFilter}
-                  onChange={setDbTypeFilter}
-                  options={Object.entries(DB_TYPE_MAP).map(([type, name]) => ({
-                    value: type,
-                    label: name
-                  }))}
-                />
-                <Text type="secondary">共 {filteredDbList.length} 个数据库</Text>
-              </Space>
-            }
-          >
-            <Table
-              columns={columns}
-              dataSource={filteredDbList}
-              pagination={{ 
-                pageSize: 10, 
-                showSizeChanger: true,
-                showQuickJumper: true,
-                showTotal: (total) => `共 ${total} 条`
-              }}
-              size="small"
-              scroll={{ x: 900 }}
-              locale={{
-                emptyText: <Empty description="暂无数据库数据" />
-              }}
+            <DatabaseFleetTable
+              databases={dbList}
+              statuses={dbStatuses}
+              loading={loading}
+              onRowClick={handleDbRowClick}
             />
           </Card>
-        </Col>
-      </Row>
+        </div>
+      </div>
     </div>
-  )
+  );
 }
-
-export default Dashboard

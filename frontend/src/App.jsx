@@ -1,147 +1,84 @@
-import React, { useState, useEffect } from 'react'
-import { Routes, Route, Link, Navigate, useNavigate } from 'react-router-dom'
-import { Layout, Menu, Dropdown, Avatar, Space, Typography } from 'antd'
-import {
-  DashboardOutlined,
-  DatabaseOutlined,
-  BellOutlined,
-  UserOutlined,
-  LogoutOutlined,
-  SettingOutlined,
-  FundOutlined,
-  FileTextOutlined,
-  AlertOutlined
-} from '@ant-design/icons'
-import Dashboard from './pages/Dashboard'
-import DatabaseList from './pages/DatabaseList'
-import DatabaseDetail from './pages/DatabaseDetail'
-import AlertList from './pages/AlertList'
-import CapacityPlanning from './pages/CapacityPlanning'
-import TicketManagement from './pages/TicketManagement'
-import AlertConfig from './pages/AlertConfig'
-import Login from './pages/Login'
-import { isAuthenticated, getUser, clearAuthToken, authAPI } from './services/api'
+import React, { useEffect } from 'react';
+import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
+import { ConfigProvider, App as AntApp } from 'antd';
+import zhCN from 'antd/locale/zh_CN';
 
-const { Header, Content } = Layout
-const { Text } = Typography
+import EMLayout from './components/EMLayout';
+import ErrorBoundary from './components/ErrorBoundary';
+import Dashboard from './pages/Dashboard';
+import DatabaseList from './pages/DatabaseList';
+import DatabaseDetail from './pages/DatabaseDetail';
+import DatabasePerformanceHub from './pages/DatabasePerformanceHub';
+import AlertList from './pages/AlertList';
+import AlertConfig from './pages/AlertConfig';
+import CapacityPlanning from './pages/CapacityPlanning';
+import TicketManagement from './pages/TicketManagement';
+import SQLMonitoring from './pages/SQLMonitoring';
+import Login from './pages/Login';
 
-// 认证布局
-const AuthenticatedLayout = ({ children }) => {
-  const navigate = useNavigate()
-  const [user, setUserData] = useState(getUser())
+const TOKEN_KEY = 'auth_token';
 
-  const handleLogout = async () => {
-    try {
-      await authAPI.logout()
-    } catch (e) {
-      // 忽略登出错误
-    }
-    clearAuthToken()
-    navigate('/login')
+// 私密路由包装器
+function PrivateRoute({ children }) {
+  const token = localStorage.getItem(TOKEN_KEY);
+  const location = useLocation();
+
+  if (!token) {
+    return <Navigate to="/login" state={{ from: location }} replace />;
   }
+  return children;
+}
 
-  const userMenu = {
-    items: [
-      {
-        key: 'profile',
-        icon: <UserOutlined />,
-        label: '个人中心'
-      },
-      {
-        key: 'settings',
-        icon: <SettingOutlined />,
-        label: '设置'
-      },
-      { type: 'divider' },
-      {
-        key: 'logout',
-        icon: <LogoutOutlined />,
-        label: '退出登录',
-        danger: true
-      }
-    ],
-    onClick: ({ key }) => {
-      if (key === 'logout') {
-        handleLogout()
-      }
-    }
-  }
-
+// 主应用路由（在 EMLayout 内的路由）
+function LayoutRoutes() {
   return (
-    <Layout style={{ minHeight: '100vh' }}>
-      <Header style={{ 
-        display: 'flex', 
-        alignItems: 'center',
-        justifyContent: 'space-between',
-        background: '#001529',
-        padding: '0 24px'
-      }}>
-        <div style={{ display: 'flex', alignItems: 'center' }}>
-          <div style={{ color: 'white', fontSize: 18, fontWeight: 'bold', marginRight: 32 }}>
-            DB Monitor
-          </div>
-          <Menu
-            theme="dark"
-            mode="horizontal"
-            defaultSelectedKeys={['dashboard']}
-            items={[
-              { key: 'dashboard', icon: <DashboardOutlined />, label: <Link to="/">仪表盘</Link> },
-              { key: 'databases', icon: <DatabaseOutlined />, label: <Link to="/databases">数据库</Link> },
-              { key: 'alerts', icon: <BellOutlined />, label: <Link to="/alerts">告警</Link> },
-              { key: 'capacity', icon: <FundOutlined />, label: <Link to="/capacity">容量规划</Link> },
-              { key: 'tickets', icon: <FileTextOutlined />, label: <Link to="/tickets">工单</Link> },
-              { key: 'alert-config', icon: <AlertOutlined />, label: <Link to="/alert-config">告警配置</Link> }
-            ]}
-            style={{ flex: 1, minWidth: 0 }}
-          />
-        </div>
-        
-        <Dropdown menu={userMenu} placement="bottomRight">
-          <Space style={{ cursor: 'pointer' }}>
-            <Avatar icon={<UserOutlined />} size="small" />
-            <Text style={{ color: 'white' }}>{user?.username || 'User'}</Text>
-          </Space>
-        </Dropdown>
-      </Header>
-      
-      <Content style={{ padding: 24, background: '#f0f2f5' }}>
-        {children}
-      </Content>
-    </Layout>
-  )
+    <EMLayout>
+      <ErrorBoundary>
+        <Routes>
+          <Route path="/" element={<Dashboard />} />
+          <Route path="/databases" element={<DatabaseList />} />
+          <Route path="/databases/:id" element={<DatabaseDetail />} />
+          <Route path="/databases/:id/performance" element={<DatabasePerformanceHub />} />
+          <Route path="/alerts" element={<AlertList />} />
+          <Route path="/alert-config" element={<AlertConfig />} />
+          <Route path="/capacity" element={<CapacityPlanning />} />
+          <Route path="/tickets" element={<TicketManagement />} />
+          <Route path="/sql-monitoring" element={<SQLMonitoring />} />
+          <Route path="*" element={<Navigate to="/" replace />} />
+        </Routes>
+      </ErrorBoundary>
+    </EMLayout>
+  );
 }
 
-// 路由守卫
-const PrivateRoute = ({ children }) => {
-  return isAuthenticated() ? children : <Navigate to="/login" replace />
-}
-
-// 主应用
 function App() {
   return (
-    <Routes>
-      <Route path="/login" element={<Login />} />
-      
-      <Route
-        path="/*"
-        element={
-          <PrivateRoute>
-            <AuthenticatedLayout>
-              <Routes>
-                <Route path="/" element={<Dashboard />} />
-                <Route path="/databases" element={<DatabaseList />} />
-                <Route path="/databases/:id" element={<DatabaseDetail />} />
-                <Route path="/alerts" element={<AlertList />} />
-                <Route path="/capacity" element={<CapacityPlanning />} />
-                <Route path="/tickets" element={<TicketManagement />} />
-                <Route path="/alert-config" element={<AlertConfig />} />
-              </Routes>
-            </AuthenticatedLayout>
-          </PrivateRoute>
-        }
-      />
-    </Routes>
-  )
+    <ConfigProvider
+      locale={zhCN}
+      theme={{
+        token: {
+          colorPrimary: '#1890ff',
+          borderRadius: 4,
+          fontFamily:
+            "-apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, 'Helvetica Neue', Arial, 'Noto Sans', sans-serif",
+        },
+      }}
+    >
+      <AntApp>
+        <Routes>
+          <Route path="/login" element={<Login />} />
+          <Route
+            path="/*"
+            element={
+              <PrivateRoute>
+                <LayoutRoutes />
+              </PrivateRoute>
+            }
+          />
+        </Routes>
+      </AntApp>
+    </ConfigProvider>
+  );
 }
 
-export default App
+export default App;

@@ -20,9 +20,14 @@ from monitor.api_views import (
     AuditLogListView, AuditLogApproveView, AuditLogRejectView,
     AuditLogExecuteView, AuditLogExecuteDryRunView, UserListView,
     UserDetailView, UserPasswordView, CurrentUserView,
-    AlertThresholdTemplateListView, AlertThresholdTemplateDetailView,
-    DatabaseAlertOverrideListView, DatabaseAlertOverrideDetailView,
     AlertAvailableMetricsView, AlertDeleteView,
+    AlertTemplateGroupListView, AlertTemplateGroupDetailView,
+    AlertTemplateRuleListView, AlertTemplateRuleDetailView,
+    AlertTemplateRuleBatchToggleView,
+    DatabaseAlertOverrideListView, DatabaseAlertOverrideDetailView,
+    DatabaseTemplateAssignmentView,
+    DatabaseSlowQueriesView, DatabaseSlowQueryAnalysisView,
+    DatabaseSQLTextSearchView,
 )
 from monitor.observability import prometheus_metrics_view
 
@@ -66,6 +71,9 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/prediction/', DatabasePredictionView.as_view()),
     path('api/v1/databases/<int:config_id>/health/', DatabaseHealthView.as_view()),
     path('api/v1/databases/<int:config_id>/alerts/', DatabaseAlertsView.as_view()),
+    path('api/v1/databases/<int:config_id>/slow-queries/', DatabaseSlowQueriesView.as_view()),
+    path('api/v1/databases/<int:config_id>/slow-queries/analysis/', DatabaseSlowQueryAnalysisView.as_view()),
+    path('api/v1/databases/<int:config_id>/slow-queries/search/', DatabaseSQLTextSearchView.as_view()),
     path('api/v1/alerts/', AlertListView.as_view()),
     path('api/v1/alerts/<int:alert_id>/acknowledge/', AlertAcknowledgeView.as_view()),
     path('api/v1/alerts/<int:alert_id>/', AlertDeleteView.as_view()),
@@ -79,10 +87,21 @@ urlpatterns = [
     path('api/v1/users/<int:user_id>/', UserDetailView.as_view()),
     path('api/v1/users/<int:user_id>/password/', UserPasswordView.as_view()),
 
-    # Alert rule templates
+    # Alert rule templates (multi-template Phase 3)
     path('api/v1/alert-rules/available-metrics/', AlertAvailableMetricsView.as_view()),
-    path('api/v1/alert-rules/templates/', AlertThresholdTemplateListView.as_view()),
-    path('api/v1/alert-rules/templates/<int:template_id>/', AlertThresholdTemplateDetailView.as_view()),
+
+    # 告警模板组 CRUD
+    path('api/v1/alert-templates/', AlertTemplateGroupListView.as_view()),
+    path('api/v1/alert-templates/<int:template_id>/', AlertTemplateGroupDetailView.as_view()),
+
+    # 模板组内规则管理
+    path('api/v1/alert-templates/<int:template_id>/rules/', AlertTemplateRuleListView.as_view()),
+    path('api/v1/alert-templates/<int:template_id>/rules/<int:rule_id>/', AlertTemplateRuleDetailView.as_view()),
+    path('api/v1/alert-templates/<int:template_id>/rules/batch-toggle/', AlertTemplateRuleBatchToggleView.as_view()),
+
+    # 数据库模板分配
+    path('api/v1/databases/<int:config_id>/assigned-template/', DatabaseTemplateAssignmentView.as_view()),
+    path('api/v1/databases/<int:config_id>/assign-template/', DatabaseTemplateAssignmentView.as_view()),
 
     # Per-database alert overrides
     path('api/v1/databases/<int:config_id>/alert-overrides/', DatabaseAlertOverrideListView.as_view()),

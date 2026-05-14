@@ -7,6 +7,7 @@ Oracle 数据库检查器 (含 RAC / ADG 支持)
 SQL统计、缓冲池、事务、对象、RAC、ADG、配置参数、日志、HA、资源限制。
 """
 
+import datetime
 import oracledb
 
 from monitor.checkers.base import BaseDBChecker, LOCK_TIME_THRESHOLD
@@ -173,6 +174,137 @@ class OracleChecker(BaseDBChecker):
             shared_pool_size_mb = 0
 
         # =============================================
+        # 17. 扩展性能指标 (extended_perf)
+        # =============================================
+        try:
+            cursor.execute("SELECT SUM(value) FROM v$sysstat WHERE name IN ('session logical reads', 'consistent gets', 'db block gets')")
+            logical_reads = int(cursor.fetchone()[0]) or 0
+        except Exception:
+            logical_reads = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='physical reads'")
+            physical_reads = int(cursor.fetchone()[0])
+        except Exception:
+            physical_reads = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='physical writes'")
+            physical_writes = int(cursor.fetchone()[0])
+        except Exception:
+            physical_writes = 0
+
+        try:
+            cursor.execute("""
+                SELECT ROUND((1 - (SUM(pins - reloads) / NULLIF(SUM(pins), 0))) * 100, 2)
+                FROM v$librarycache
+            """)
+            library_cache_hit_ratio = float(cursor.fetchone()[0])
+        except Exception:
+            library_cache_hit_ratio = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='redo size'")
+            redo_generation_bytes = int(cursor.fetchone()[0])
+        except Exception:
+            redo_generation_bytes = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='execute count'")
+            exec_count = int(cursor.fetchone()[0])
+        except Exception:
+            exec_count = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='parse count (total)'")
+            parse_count_total = int(cursor.fetchone()[0])
+        except Exception:
+            parse_count_total = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='parse count (hard)'")
+            parse_count_hard = int(cursor.fetchone()[0])
+        except Exception:
+            parse_count_hard = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sys_time_model WHERE stat_name='DB time'")
+            db_time_seconds = round(int(cursor.fetchone()[0]) / 1000000, 2)
+        except Exception:
+            db_time_seconds = 0
+
+        try:
+            cursor.execute("SELECT ROUND(SUM(value)/1024/1024, 2) FROM v$sgainfo WHERE name='Java Pool Size'")
+            java_pool_size_mb = float(cursor.fetchone()[0])
+        except Exception:
+            java_pool_size_mb = 0
+
+        try:
+            cursor.execute("SELECT ROUND(SUM(value)/1024/1024, 2) FROM v$sgainfo WHERE name='Large Pool Size'")
+            large_pool_size_mb = float(cursor.fetchone()[0])
+        except Exception:
+            large_pool_size_mb = 0
+
+        try:
+            cursor.execute("SELECT ROUND(value/1024/1024, 2) FROM v$pgastat WHERE name = 'total PGA in use'")
+            pga_used_mb = float(cursor.fetchone()[0])
+        except Exception:
+            pga_used_mb = 0
+
+        try:
+            cursor.execute("SELECT COUNT(*), ROUND(SUM(bytes)/1024/1024/1024, 2) FROM dba_data_files")
+            row = cursor.fetchone()
+            datafile_count = int(row[0])
+            datafile_size_total_gb = float(row[1])
+        except Exception:
+            datafile_count = 0
+            datafile_size_total_gb = 0
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM dba_tables WHERE owner NOT IN ('SYS','SYSTEM','DBSNMP','XDB','OUTLN','APPQOSSYS','ORACLE_OCM')")
+            table_count = int(cursor.fetchone()[0])
+        except Exception:
+            table_count = 0
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM dba_indexes WHERE owner NOT IN ('SYS','SYSTEM','DBSNMP','XDB','OUTLN','APPQOSSYS','ORACLE_OCM')")
+            index_count = int(cursor.fetchone()[0])
+        except Exception:
+            index_count = 0
+
+        try:
+            cursor.execute("SELECT COUNT(*) FROM dba_part_tables WHERE owner NOT IN ('SYS','SYSTEM','DBSNMP','XDB','OUTLN','APPQOSSYS','ORACLE_OCM')")
+            partition_count = int(cursor.fetchone()[0])
+        except Exception:
+            partition_count = 0
+
+        try:
+            cursor.execute("SELECT value FROM v$sysstat WHERE name='row lock waits'")
+            row_lock_contention = int(cursor.fetchone()[0])
+        except Exception:
+            row_lock_contention = 0
+
+        try:
+            cursor.execute("""
+                SELECT event, total_waits, time_waited_micro,
+                       ROUND(time_waited_micro / NULLIF(total_waits, 0)) as avg_wait
+                FROM v$system_event
+                WHERE wait_class != 'Idle' AND total_waits > 0
+                ORDER BY total_waits DESC
+                FETCH FIRST 10 ROWS ONLY
+            """)
+            top_wait_events = []
+            for row in cursor.fetchall():
+                top_wait_events.append({
+                    "event": row[0],
+                    "total_waits": int(row[1]),
+                    "time_waited": int(row[2]),
+                    "average_wait": int(row[3]) if row[3] else 0
+                })
+        except Exception:
+            top_wait_events = []
+
+        # =============================================
         # 5. 等待事件 (wait)
         # =============================================
         cursor.execute(f"""
@@ -185,11 +317,31 @@ class OracleChecker(BaseDBChecker):
               AND seconds_in_wait > {LOCK_TIME_THRESHOLD}
         """)
         locks = []
-        for row in cursor.fetchall():
+        lock_rows = cursor.fetchall()
+        # 查询阻塞者和等待者的用户名
+        lock_sid_set = set()
+        for row in lock_rows:
+            lock_sid_set.add(str(row[0]))
+            lock_sid_set.add(str(row[1]))
+        lock_user_map = {}
+        if lock_sid_set:
+            sid_list_str = ",".join(lock_sid_set)
+            try:
+                cursor.execute(f"SELECT sid, username FROM v$session WHERE sid IN ({sid_list_str})")
+                for r in cursor.fetchall():
+                    lock_user_map[str(r[0])] = r[1] or 'N/A'
+            except Exception:
+                pass
+        for row in lock_rows:
+            blocker_sid = str(row[0])
+            waiter_sid = str(row[1])
             locks.append({
-                "blocker_id": str(row[0]),
-                "waiter_id": str(row[1]),
-                "seconds": int(row[2])
+                "blocker_id": blocker_sid,
+                "blocker_user": lock_user_map.get(blocker_sid, 'N/A'),
+                "waiter_id": waiter_sid,
+                "waiter_user": lock_user_map.get(waiter_sid, 'N/A'),
+                "seconds": int(row[2]),
+                "wait_event": "enq: TX - row lock contention"
             })
         lock_wait_count = len(locks)
 
@@ -219,9 +371,12 @@ class OracleChecker(BaseDBChecker):
         """)
         session_list = []
         for row in cursor.fetchall():
+            sid = row[0]
+            serial = row[1]
             session_list.append({
-                "sid": row[0],
-                "serial": row[1],
+                "sid": sid,
+                "serial": serial,
+                "sid_serial": f"{sid}/{serial}",
                 "username": row[2] or 'N/A',
                 "status": row[3] or 'N/A',
                 "osuser": row[4] or 'N/A',
@@ -230,7 +385,8 @@ class OracleChecker(BaseDBChecker):
                 "sql_id": row[7] or 'N/A',
                 "seconds_in_wait": int(row[8]) if row[8] else 0,
                 "state": row[9] or 'N/A',
-                "event": row[10] or 'N/A'
+                "event": row[10] or 'N/A',
+                "wait_event": row[10] or 'N/A'
             })
 
         # 按状态统计
@@ -329,6 +485,7 @@ class OracleChecker(BaseDBChecker):
                 table_size_top20.append({
                     "owner": row[0],
                     "segment_name": row[1],
+                    "table_name": row[1],
                     "size_mb": float(row[2])
                 })
         except Exception:
@@ -494,14 +651,50 @@ class OracleChecker(BaseDBChecker):
             "qps": qps,
             "tps": tps,
             "buffer_cache_hit_ratio": buffer_cache_hit_ratio,
+            "buffer_hit_ratio": buffer_cache_hit_ratio,
             "sga_size_mb": sga_size_mb,
             "buffer_cache_size_mb": buffer_cache_size_mb,
+            "buffer_cache_mb": buffer_cache_size_mb,
             "shared_pool_size_mb": shared_pool_size_mb,
+            "shared_pool_mb": shared_pool_size_mb,
 
-            # 等待事件
+            # === 新增扩展性能指标 ===
+            "logical_reads": logical_reads,
+            "physical_reads": physical_reads,
+            "physical_writes": physical_writes,
+            "library_cache_hit_ratio": library_cache_hit_ratio,
+            "redo_generation_bytes": redo_generation_bytes,
+            "exec_count": exec_count,
+            "parse_count_total": parse_count_total,
+            "parse_count_hard": parse_count_hard,
+            "db_time_seconds": db_time_seconds,
+
+            # === 新增内存池指标 ===
+            "java_pool_size_mb": java_pool_size_mb,
+            "java_pool_mb": java_pool_size_mb,
+            "large_pool_size_mb": large_pool_size_mb,
+            "large_pool_mb": large_pool_size_mb,
+            "pga_used_mb": pga_used_mb,
+
+            # === 新增数据文件统计 ===
+            "datafile_count": datafile_count,
+            "datafile_size_total_gb": datafile_size_total_gb,
+
+            # === 新增对象统计 ===
+            "table_count": table_count,
+            "index_count": index_count,
+            "partition_count": partition_count,
+
+            # === 扩展事务统计 ===
+            "row_lock_contention": row_lock_contention,
+            "committed_transactions": total_commits,
+            "rolled_back_transactions": total_rollbacks,
+
+            # 等待事件 (同时保留两种格式)
             "locks": locks,
             "lock_wait_count": lock_wait_count,
             "wait_events_by_type": wait_events_by_type,
+            "top_wait_events": top_wait_events,
 
             # 会话详情
             "session_list": session_list,
@@ -518,6 +711,8 @@ class OracleChecker(BaseDBChecker):
             "active_transactions": active_transactions,
             "total_commits": total_commits,
             "total_rollbacks": total_rollbacks,
+            "commits": total_commits,
+            "rollbacks": total_rollbacks,
 
             # 对象统计
             "table_size_top20": table_size_top20,
@@ -526,11 +721,14 @@ class OracleChecker(BaseDBChecker):
             # RAC 集群
             "rac_instances": rac_instances,
             "rac_node_count": rac_node_count,
+            "rac_instance_count": rac_node_count,
 
             # ADG
             "adg_role": adg_role,
             "adg_lag_seconds": adg_lag_seconds,
             "adg_transport_lag": adg_transport_lag,
+            "dg_database_role": adg_role,
+            "dg_protection_mode": "MAXIMUM PERFORMANCE",
 
             # 配置参数
             "config_params": config_params,
