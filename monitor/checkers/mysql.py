@@ -3,8 +3,12 @@
 MySQL 数据库检查器 (含主从复制)
 
 从 start_monitor.py 中提取，v3.0 重构 + P0-2 指标补充。
-采集 14 大类指标：基础信息、会话、空间、性能、等待事件、会话详情、
-SQL统计、复制集群、配置参数、缓冲池、事务、日志、安全审计、对象统计。
+采集 23 大类指标：基础信息、会话、空间、性能、等待事件、会话详情、
+SQL统计、复制集群、配置参数、缓冲池、事务、日志、安全审计、对象统计、
+Redo日志、行锁时间、临时表、排序统计、长事务、死锁记录、Top等待事件、
+网络吞吐、Handler统计、表打开统计、Binlog缓存、Select类型、InnoDB页操作、
+连接错误、Change Buffer、Adaptive Hash、Doublewrite、Top SQL扩展、
+临时表空间、对象汇总、高可用状态、Buffer Pool详情、资源限制。
 """
 
 import pymysql
@@ -715,7 +719,563 @@ class MySQLChecker(BaseDBChecker):
             for row in cursor.fetchall():
                 table_count_by_schema.append({
                     "schema": row[0],
-                    "count": int(row[1])
+                    "count": int(row[1] or 0)
+                })
+
+            # =============================================
+            # 15. InnoDB Redo 日志 (redo_log) - P0
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_log_waits'")
+            try:
+                innodb_log_waits = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_log_waits = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_log_writes'")
+            try:
+                innodb_log_writes = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_log_writes = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_os_log_written'")
+            try:
+                innodb_os_log_written = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_os_log_written = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_os_log_fsyncs'")
+            try:
+                innodb_os_log_fsyncs = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_os_log_fsyncs = 0
+            cursor.execute("SHOW VARIABLES LIKE 'innodb_log_file_size'")
+            try:
+                innodb_log_file_size = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_log_file_size = 0
+            cursor.execute("SHOW VARIABLES LIKE 'innodb_log_files_in_group'")
+            try:
+                innodb_log_files_in_group = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_log_files_in_group = 0
+
+            # =============================================
+            # 16. InnoDB 行锁时间 (row_lock_time) - P0
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_time'")
+            try:
+                innodb_row_lock_time = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_row_lock_time = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_time_avg'")
+            try:
+                innodb_row_lock_time_avg = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_row_lock_time_avg = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_row_lock_time_max'")
+            try:
+                innodb_row_lock_time_max = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_row_lock_time_max = 0
+
+            # =============================================
+            # 17. 临时表统计 (temp_table) - P0
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Created_tmp_tables'")
+            try:
+                created_tmp_tables = int(cursor.fetchone()['Value'])
+            except Exception:
+                created_tmp_tables = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Created_tmp_disk_tables'")
+            try:
+                created_tmp_disk_tables = int(cursor.fetchone()['Value'])
+            except Exception:
+                created_tmp_disk_tables = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Created_tmp_files'")
+            try:
+                created_tmp_files = int(cursor.fetchone()['Value'])
+            except Exception:
+                created_tmp_files = 0
+            tmp_disk_ratio = round(created_tmp_disk_tables / created_tmp_tables * 100, 2) if created_tmp_tables > 0 else 0
+
+            # =============================================
+            # 18. 排序统计 (sort) - P0
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Sort_merge_passes'")
+            try:
+                sort_merge_passes = int(cursor.fetchone()['Value'])
+            except Exception:
+                sort_merge_passes = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Sort_range'")
+            try:
+                sort_range = int(cursor.fetchone()['Value'])
+            except Exception:
+                sort_range = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Sort_rows'")
+            try:
+                sort_rows = int(cursor.fetchone()['Value'])
+            except Exception:
+                sort_rows = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Sort_scan'")
+            try:
+                sort_scan = int(cursor.fetchone()['Value'])
+            except Exception:
+                sort_scan = 0
+
+            # =============================================
+            # 19. 长时间事务 (long_trx) - P0
+            # =============================================
+            long_transactions = []
+            try:
+                cursor.execute("""
+                    SELECT
+                        trx_id, trx_state, trx_mysql_thread_id,
+                        trx_started, TIMESTAMPDIFF(SECOND, trx_started, NOW()) as duration_sec,
+                        trx_query, trx_tables_locked, trx_rows_locked,
+                        trx_lock_structs
+                    FROM information_schema.innodb_trx
+                    WHERE TIMESTAMPDIFF(SECOND, trx_started, NOW()) > 60
+                    ORDER BY duration_sec DESC
+                    LIMIT 20
+                """)
+                for row in cursor.fetchall():
+                    long_transactions.append({
+                        "trx_id": str(row['trx_id'] or ''),
+                        "state": row['trx_state'] or 'N/A',
+                        "thread_id": str(row['trx_mysql_thread_id'] or ''),
+                        "started": str(row['trx_started'] or ''),
+                        "duration_sec": int(row['duration_sec'] or 0),
+                        "query": str(row['trx_query'] or 'N/A')[:200],
+                        "tables_locked": int(row['trx_tables_locked'] or 0),
+                        "rows_locked": int(row['trx_rows_locked'] or 0),
+                        "lock_structs": int(row['trx_lock_structs'] or 0)
+                    })
+            except Exception:
+                pass
+
+            # =============================================
+            # 20. 死锁记录 (deadlock) - P0
+            # =============================================
+            last_deadlock = {}
+            try:
+                cursor.execute("SHOW ENGINE INNODB STATUS")
+                innodb_status_row = cursor.fetchone()
+                if innodb_status_row and innodb_status_row.get('Status'):
+                    status_text = innodb_status_row['Status']
+                    deadlock_start = status_text.find('LATEST DETECTED DEADLOCK')
+                    if deadlock_start >= 0:
+                        deadlock_end = status_text.find('\n--------', deadlock_start + 30)
+                        if deadlock_end < 0:
+                            deadlock_end = min(deadlock_start + 2000, len(status_text))
+                        deadlock_text = status_text[deadlock_start:deadlock_end]
+                        last_deadlock = {"found": True, "detail": deadlock_text[:1500]}
+                    else:
+                        last_deadlock = {"found": False, "detail": "No deadlock detected"}
+                else:
+                    last_deadlock = {"found": False, "detail": "N/A"}
+            except Exception:
+                last_deadlock = {"found": False, "detail": "N/A"}
+
+            # =============================================
+            # 21. Top 等待事件 (top_waits) - P0
+            # =============================================
+            top_wait_events = []
+            try:
+                cursor.execute("""
+                    SELECT
+                        EVENT_NAME as event_name,
+                        COUNT_STAR as total_waits,
+                        SUM_TIMER_WAIT / 1000000000000 as total_latency_sec,
+                        AVG_TIMER_WAIT / 1000000000 as avg_latency_us
+                    FROM performance_schema.events_waits_summary_global_by_event_name
+                    WHERE COUNT_STAR > 0
+                      AND EVENT_NAME NOT LIKE 'wait/synch/mutex/%%'
+                      AND EVENT_NAME NOT LIKE 'wait/synch/rwlock/%%'
+                    ORDER BY SUM_TIMER_WAIT DESC
+                    LIMIT 10
+                """)
+                for row in cursor.fetchall():
+                    top_wait_events.append({
+                        "event": row['event_name'] or 'N/A',
+                        "total_waits": int(row['total_waits'] or 0),
+                        "total_latency_sec": round(float(row['total_latency_sec'] or 0), 4),
+                        "avg_latency_us": round(float(row['avg_latency_us'] or 0), 2)
+                    })
+            except Exception:
+                pass
+
+            # =============================================
+            # 22. 网络吞吐 (network) - P1
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Bytes_received'")
+            try:
+                bytes_received = int(cursor.fetchone()['Value'])
+            except Exception:
+                bytes_received = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Bytes_sent'")
+            try:
+                bytes_sent = int(cursor.fetchone()['Value'])
+            except Exception:
+                bytes_sent = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Connections'")
+            try:
+                connections_total = int(cursor.fetchone()['Value'])
+            except Exception:
+                connections_total = 0
+
+            # =============================================
+            # 23. Handler 统计 (handler) - P1
+            # =============================================
+            handler_stats = {}
+            handler_keys = [
+                'Handler_read_first', 'Handler_read_key', 'Handler_read_last',
+                'Handler_read_next', 'Handler_read_prev', 'Handler_read_rnd',
+                'Handler_read_rnd_next', 'Handler_write', 'Handler_update',
+                'Handler_delete', 'Handler_commit', 'Handler_rollback',
+                'Handler_savepoint', 'Handler_savepoint_rollback'
+            ]
+            for key in handler_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        handler_stats[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 24. 表/文件打开统计 (open_tables) - P1
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Open_tables'")
+            try:
+                open_tables = int(cursor.fetchone()['Value'])
+            except Exception:
+                open_tables = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Opened_tables'")
+            try:
+                opened_tables = int(cursor.fetchone()['Value'])
+            except Exception:
+                opened_tables = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Open_files'")
+            try:
+                open_files = int(cursor.fetchone()['Value'])
+            except Exception:
+                open_files = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Opened_files'")
+            try:
+                opened_files = int(cursor.fetchone()['Value'])
+            except Exception:
+                opened_files = 0
+            cursor.execute("SHOW VARIABLES LIKE 'table_open_cache'")
+            try:
+                table_open_cache = int(cursor.fetchone()['Value'])
+            except Exception:
+                table_open_cache = 0
+            table_cache_hit_ratio = round(open_tables / (open_tables + opened_tables) * 100, 2) if (open_tables + opened_tables) > 0 else 0
+
+            # =============================================
+            # 25. Binlog 缓存 (binlog_cache) - P1
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Binlog_cache_use'")
+            try:
+                binlog_cache_use = int(cursor.fetchone()['Value'])
+            except Exception:
+                binlog_cache_use = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Binlog_cache_disk_use'")
+            try:
+                binlog_cache_disk_use = int(cursor.fetchone()['Value'])
+            except Exception:
+                binlog_cache_disk_use = 0
+            binlog_cache_disk_ratio = round(binlog_cache_disk_use / binlog_cache_use * 100, 2) if binlog_cache_use > 0 else 0
+
+            # =============================================
+            # 26. Select 类型统计 (select_type) - P1
+            # =============================================
+            select_stats = {}
+            select_keys = [
+                'Select_full_join', 'Select_full_range_join', 'Select_range',
+                'Select_range_check', 'Select_scan'
+            ]
+            for key in select_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        select_stats[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 27. InnoDB 页操作 (innodb_page_ops) - P1
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_pages_read'")
+            try:
+                innodb_pages_read = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_pages_read = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_pages_written'")
+            try:
+                innodb_pages_written = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_pages_written = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_pages_created'")
+            try:
+                innodb_pages_created = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_pages_created = 0
+
+            # =============================================
+            # 28. 连接错误细分 (conn_errors) - P2
+            # =============================================
+            connection_errors = {}
+            conn_error_keys = [
+                'Connection_errors_accept', 'Connection_errors_internal',
+                'Connection_errors_max_connections', 'Connection_errors_peer_address',
+                'Connection_errors_select', 'Connection_errors_tcpwrap'
+            ]
+            for key in conn_error_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        connection_errors[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 29. InnoDB Change Buffer (change_buffer) - P2
+            # =============================================
+            change_buffer_stats = {}
+            cb_keys = [
+                'Innodb_ibuf_size', 'Innodb_ibuf_merges',
+                'Innodb_ibuf_merges_insert', 'Innodb_ibuf_merges_delete',
+                'Innodb_ibuf_merges_delete_mark'
+            ]
+            for key in cb_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        change_buffer_stats[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 30. InnoDB Adaptive Hash Index (adaptive_hash) - P2
+            # =============================================
+            adaptive_hash_stats = {}
+            ah_keys = [
+                'Innodb_adaptive_hash_hash_searches',
+                'Innodb_adaptive_hash_non_hash_searches'
+            ]
+            for key in ah_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        adaptive_hash_stats[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 31. InnoDB Doublewrite (doublewrite) - P2
+            # =============================================
+            doublewrite_stats = {}
+            dw_keys = [
+                'Innodb_dblwr_writes', 'Innodb_dblwr_pages_written'
+            ]
+            for key in dw_keys:
+                try:
+                    cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
+                    row = cursor.fetchone()
+                    if row:
+                        doublewrite_stats[key] = int(row['Value'])
+                except Exception:
+                    pass
+
+            # =============================================
+            # 32. Top SQL 扩展 (sql_extended) - P1
+            # =============================================
+            top_sql_by_rows_examined = []
+            try:
+                cursor.execute("""
+                    SELECT
+                        DIGEST as digest,
+                        DIGEST_TEXT as sql_text,
+                        COUNT_STAR as exec_count,
+                        SUM_ROWS_EXAMINED as rows_examined,
+                        SUM_ROWS_SENT as rows_sent
+                    FROM performance_schema.events_statements_summary_by_digest
+                    WHERE SUM_ROWS_EXAMINED > 0
+                    ORDER BY SUM_ROWS_EXAMINED DESC
+                    LIMIT 10
+                """)
+                for row in cursor.fetchall():
+                    top_sql_by_rows_examined.append({
+                        "digest": row['digest'] or 'N/A',
+                        "sql_text": (row['sql_text'] or 'N/A')[:200],
+                        "exec_count": int(row['exec_count'] or 0),
+                        "rows_examined": int(row['rows_examined'] or 0),
+                        "rows_sent": int(row['rows_sent'] or 0)
+                    })
+            except Exception:
+                pass
+
+            top_sql_by_exec_count = []
+            try:
+                cursor.execute("""
+                    SELECT
+                        DIGEST as digest,
+                        DIGEST_TEXT as sql_text,
+                        COUNT_STAR as exec_count,
+                        SUM_TIMER_WAIT/1000000000000 as total_latency_sec,
+                        SUM_ROWS_EXAMINED as rows_examined
+                    FROM performance_schema.events_statements_summary_by_digest
+                    WHERE COUNT_STAR > 0
+                    ORDER BY COUNT_STAR DESC
+                    LIMIT 10
+                """)
+                for row in cursor.fetchall():
+                    top_sql_by_exec_count.append({
+                        "digest": row['digest'] or 'N/A',
+                        "sql_text": (row['sql_text'] or 'N/A')[:200],
+                        "exec_count": int(row['exec_count'] or 0),
+                        "total_latency_sec": round(float(row['total_latency_sec'] or 0), 4),
+                        "rows_examined": int(row['rows_examined'] or 0)
+                    })
+            except Exception:
+                pass
+
+            # =============================================
+            # 33. 临时表空间 (temp_tablespace) - P1
+            # =============================================
+            temp_tablespace = {}
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'innodb_temp_data_file_path'")
+                row = cursor.fetchone()
+                temp_tablespace['data_file_path'] = row['Value'] if row else 'N/A'
+            except Exception:
+                temp_tablespace['data_file_path'] = 'N/A'
+            try:
+                cursor.execute("SELECT COUNT(*) as cnt FROM information_schema.innodb_temp_table_info")
+                row = cursor.fetchone()
+                temp_tablespace['active_temp_tables'] = int(row['cnt'] or 0) if row else 0
+            except Exception:
+                temp_tablespace['active_temp_tables'] = 0
+
+            # =============================================
+            # 34. 对象汇总统计 (object_summary) - P1
+            # =============================================
+            object_summary = {}
+            try:
+                cursor.execute("""
+                    SELECT
+                        COUNT(*) as table_count,
+                        SUM(CASE WHEN TABLE_TYPE = 'VIEW' THEN 1 ELSE 0 END) as view_count
+                    FROM information_schema.tables
+                    WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys')
+                """)
+                row = cursor.fetchone()
+                object_summary['table_count'] = int(row['table_count'] or 0) if row else 0
+                object_summary['view_count'] = int(row['view_count'] or 0) if row else 0
+            except Exception:
+                object_summary['table_count'] = 0
+                object_summary['view_count'] = 0
+            try:
+                cursor.execute("""
+                    SELECT COUNT(DISTINCT CONCAT(table_schema,'.',table_name,index_name)) as cnt
+                    FROM information_schema.statistics
+                    WHERE table_schema NOT IN ('information_schema','mysql','performance_schema','sys')
+                """)
+                row = cursor.fetchone()
+                object_summary['index_count'] = int(row['cnt'] or 0) if row else 0
+            except Exception:
+                object_summary['index_count'] = 0
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) as cnt FROM information_schema.triggers
+                    WHERE trigger_schema NOT IN ('information_schema','mysql','performance_schema','sys')
+                """)
+                row = cursor.fetchone()
+                object_summary['trigger_count'] = int(row['cnt'] or 0) if row else 0
+            except Exception:
+                object_summary['trigger_count'] = 0
+            try:
+                cursor.execute("""
+                    SELECT COUNT(*) as cnt FROM information_schema.routines
+                    WHERE routine_schema NOT IN ('information_schema','mysql','performance_schema','sys')
+                """)
+                row = cursor.fetchone()
+                object_summary['routine_count'] = int(row['cnt'] or 0) if row else 0
+            except Exception:
+                object_summary['routine_count'] = 0
+
+            # =============================================
+            # 35. 高可用状态汇总 (ha_status) - P2
+            # =============================================
+            ha_status = {
+                "role": "STANDALONE",
+                "replication_health": replication_health,
+                "replication_issues": replication_issues,
+                "slave_io_running": slave_io_running,
+                "slave_sql_running": slave_sql_running,
+                "seconds_behind_master": seconds_behind_master,
+                "have_ssl": have_ssl,
+            }
+            if slave_io_running != 'NO' or slave_sql_running != 'NO':
+                ha_status["role"] = "SLAVE"
+                ha_status["master_host"] = master_host
+            elif replication_channels:
+                ha_status["role"] = "MASTER"
+
+            # =============================================
+            # 36. Buffer Pool 详情 (buffer_pool_detail) - P2
+            # =============================================
+            buffer_pool_stats = []
+            try:
+                cursor.execute("""
+                    SELECT
+                        POOL_ID, POOL_SIZE, FREE_BUFFERS, DATABASE_PAGES,
+                        OLD_DATABASE_PAGES, MODIFIED_DATABASE_PAGES,
+                        PAGES_READ, PAGES_CREATED, PAGES_WRITTEN
+                    FROM information_schema.INNODB_BUFFER_POOL_STATS
+                """)
+                for row in cursor.fetchall():
+                    buffer_pool_stats.append({
+                        "pool_id": int(row['POOL_ID'] or 0),
+                        "pool_size": int(row['POOL_SIZE'] or 0),
+                        "free_buffers": int(row['FREE_BUFFERS'] or 0),
+                        "database_pages": int(row['DATABASE_PAGES'] or 0),
+                        "old_pages": int(row['OLD_DATABASE_PAGES'] or 0),
+                        "modified_pages": int(row['MODIFIED_DATABASE_PAGES'] or 0),
+                        "pages_read": int(row['PAGES_READ'] or 0),
+                        "pages_created": int(row['PAGES_CREATED'] or 0),
+                        "pages_written": int(row['PAGES_WRITTEN'] or 0),
+                    })
+            except Exception:
+                pass
+
+            # =============================================
+            # 37. 资源限制 (resource_limits) - P1
+            # =============================================
+            resource_limits = [
+                {
+                    "resource_name": "max_connections",
+                    "current_utilization": threads_connected,
+                    "limit_value": max_connections,
+                    "usage_pct": conn_usage_pct
+                },
+                {
+                    "resource_name": "table_open_cache",
+                    "current_utilization": open_tables,
+                    "limit_value": table_open_cache,
+                    "usage_pct": round(open_tables / table_open_cache * 100, 2) if table_open_cache > 0 else 0
+                }
+            ]
+            if innodb_buffer_pool_pages_total > 0:
+                buffer_pool_used = innodb_buffer_pool_pages_total - innodb_buffer_pool_pages_free
+                resource_limits.append({
+                    "resource_name": "innodb_buffer_pool_pages",
+                    "current_utilization": buffer_pool_used,
+                    "limit_value": innodb_buffer_pool_pages_total,
+                    "usage_pct": round(buffer_pool_used / innodb_buffer_pool_pages_total * 100, 2)
                 })
 
         return {
@@ -854,5 +1414,101 @@ class MySQLChecker(BaseDBChecker):
             "table_size_top20": table_size_top20,
             "unused_indexes": unused_indexes,
             "redundant_indexes": redundant_indexes,
-            "table_count_by_schema": table_count_by_schema
+            "table_count_by_schema": table_count_by_schema,
+
+            # InnoDB Redo 日志
+            "innodb_log_waits": innodb_log_waits,
+            "innodb_log_writes": innodb_log_writes,
+            "innodb_os_log_written": innodb_os_log_written,
+            "innodb_os_log_fsyncs": innodb_os_log_fsyncs,
+            "innodb_log_file_size": innodb_log_file_size,
+            "innodb_log_files_in_group": innodb_log_files_in_group,
+
+            # InnoDB 行锁时间
+            "innodb_row_lock_time_ms": round(innodb_row_lock_time / 1000, 2),
+            "innodb_row_lock_time_avg_ms": round(innodb_row_lock_time_avg / 1000, 2),
+            "innodb_row_lock_time_max_ms": round(innodb_row_lock_time_max / 1000, 2),
+
+            # 临时表统计
+            "created_tmp_tables": created_tmp_tables,
+            "created_tmp_disk_tables": created_tmp_disk_tables,
+            "created_tmp_files": created_tmp_files,
+            "tmp_disk_ratio": tmp_disk_ratio,
+
+            # 排序统计
+            "sort_merge_passes": sort_merge_passes,
+            "sort_range": sort_range,
+            "sort_rows": sort_rows,
+            "sort_scan": sort_scan,
+
+            # 长时间事务
+            "long_transactions": long_transactions,
+
+            # 死锁记录
+            "last_deadlock": last_deadlock,
+
+            # Top 等待事件
+            "top_wait_events": top_wait_events,
+
+            # 网络吞吐
+            "bytes_received": bytes_received,
+            "bytes_sent": bytes_sent,
+            "bytes_received_mb": round(bytes_received / 1024 / 1024, 2),
+            "bytes_sent_mb": round(bytes_sent / 1024 / 1024, 2),
+            "connections_total": connections_total,
+
+            # Handler 统计
+            "handler_stats": handler_stats,
+
+            # 表打开统计
+            "open_tables": open_tables,
+            "opened_tables": opened_tables,
+            "open_files": open_files,
+            "opened_files": opened_files,
+            "table_open_cache": table_open_cache,
+            "table_cache_hit_ratio": table_cache_hit_ratio,
+
+            # Binlog 缓存
+            "binlog_cache_use": binlog_cache_use,
+            "binlog_cache_disk_use": binlog_cache_disk_use,
+            "binlog_cache_disk_ratio": binlog_cache_disk_ratio,
+
+            # Select 类型统计
+            "select_stats": select_stats,
+
+            # InnoDB 页操作
+            "innodb_pages_read": innodb_pages_read,
+            "innodb_pages_written": innodb_pages_written,
+            "innodb_pages_created": innodb_pages_created,
+
+            # 连接错误细分
+            "connection_errors": connection_errors,
+
+            # Change Buffer
+            "change_buffer_stats": change_buffer_stats,
+
+            # Adaptive Hash
+            "adaptive_hash_stats": adaptive_hash_stats,
+
+            # Doublewrite
+            "doublewrite_stats": doublewrite_stats,
+
+            # Top SQL 扩展
+            "top_sql_by_rows_examined": top_sql_by_rows_examined,
+            "top_sql_by_exec_count": top_sql_by_exec_count,
+
+            # 临时表空间
+            "temp_tablespace": temp_tablespace,
+
+            # 对象汇总统计
+            "object_summary": object_summary,
+
+            # 高可用状态
+            "ha_status": ha_status,
+
+            # Buffer Pool 详情
+            "buffer_pool_stats": buffer_pool_stats,
+
+            # 资源限制
+            "resource_limits": resource_limits,
         }

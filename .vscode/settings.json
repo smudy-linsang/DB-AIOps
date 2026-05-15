@@ -2,5 +2,10 @@
     "continue.enableConsole": true,
     "continue.enableQuickActions": true,
     "continue.pauseCodebaseIndexOnStart": true,
-    "continue.pauseTabAutocompleteOnBattery": true
+    "continue.pauseTabAutocompleteOnBattery": true,
+    "python.testing.pytestArgs": [
+        "monitor"
+    ],
+    "python.testing.unittestEnabled": false,
+    "python.testing.pytestEnabled": true
 }

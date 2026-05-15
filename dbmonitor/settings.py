@@ -25,10 +25,14 @@ ENVIRONMENT = os.environ.get('DJANGO_ENV', 'dev')
 # ============================================================================
 # 安全配置
 # ============================================================================
-SECRET_KEY = os.environ.get(
-    'DJANGO_SECRET_KEY',
-    'django-insecure-change-me-in-production'
-)
+# 生产环境必须通过环境变量设置 DJANGO_SECRET_KEY，不提供不安全的回退值
+_SECRET_KEY_FALLBACK = 'django-insecure-change-me-in-production'
+SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
+if not SECRET_KEY:
+    if ENVIRONMENT == 'prod':
+        raise ValueError("生产环境必须配置 DJANGO_SECRET_KEY 环境变量")
+    else:
+        SECRET_KEY = _SECRET_KEY_FALLBACK
 
 # DEBUG 模式控制
 if ENVIRONMENT == 'prod':
@@ -103,15 +107,20 @@ MIDDLEWARE = [
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # 统一异常处理：将未捕获异常转为 JSON 响应
+    'monitor.middleware.ExceptionMiddleware',
+    # 操作审计：拦截写操作并记录到 AuditLog
+    'monitor.middleware.AuditLogMiddleware',
 ]
 
 ROOT_URLCONF = 'dbmonitor.urls'
 
+# 前端已迁移至 React SPA，Django 模板引擎仅保留以兼容 Django Admin
 TEMPLATES = [
     {
         'BACKEND': 'django.template.backends.django.DjangoTemplates',
         'DIRS': [],
-        'APP_DIRS': True,
+        'APP_DIRS': True,  # Django Admin 仍需要模板引擎
         'OPTIONS': {
             'context_processors': [
                 'django.template.context_processors.request',
@@ -132,29 +141,27 @@ WSGI_APPLICATION = 'dbmonitor.wsgi.application'
 # 采集指标数据存储：Elasticsearch
 USE_POSTGRESQL = os.environ.get('USE_POSTGRESQL', 'True').lower() in ('true', '1', 'yes')
 
-if USE_POSTGRESQL:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.postgresql',
-            'NAME': os.environ.get('POSTGRES_DB', 'db_monitor'),
-            'USER': os.environ.get('POSTGRES_USER', 'postgres'),
-            'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres123'),
-            'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
-            'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-            'CONN_MAX_AGE': 600,  # 持久连接 10 分钟
-            'OPTIONS': {
-                'connect_timeout': 10,
-                'application_name': 'db_monitor',
-            },
-        }
+if not USE_POSTGRESQL:
+    raise RuntimeError(
+        "SQLite 已弃用，DB-AIOps 平台必须使用 PostgreSQL。"
+        "请设置 USE_POSTGRESQL=True 并确保 PostgreSQL/TimescaleDB 可用。"
+    )
+
+DATABASES = {
+    'default': {
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('POSTGRES_DB', 'db_monitor'),
+        'USER': os.environ.get('POSTGRES_USER', 'postgres'),
+        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres123'),
+        'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
+        'PORT': os.environ.get('POSTGRES_PORT', '5432'),
+        'CONN_MAX_AGE': 60,  # 持久连接 1 分钟（开发环境，避免连接池耗尽）
+        'OPTIONS': {
+            'connect_timeout': 10,
+            'application_name': 'db_monitor',
+        },
     }
-else:
-    DATABASES = {
-        'default': {
-            'ENGINE': 'django.db.backends.sqlite3',
-            'NAME': BASE_DIR / 'db.sqlite3',
-        }
-    }
+}
 
 # Elasticsearch 配置（采集指标存储）
 ES_ENABLED = os.environ.get('ES_ENABLED', 'True').lower() in ('true', '1', 'yes')
@@ -181,7 +188,11 @@ TIMESCALEDB_COMPRESSION_INTERVAL = os.environ.get('TIMESCALEDB_COMPRESSION_INTER
 # 缓存配置
 # ============================================================================
 REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
-USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'False').lower() in ('true', '1', 'yes')
+# 生产环境（gunicorn 多 worker）必须使用 Redis 缓存，否则 Token 认证无法跨 worker 共享
+if ENVIRONMENT in ('prod', 'test'):
+    USE_REDIS_CACHE = True
+else:
+    USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'False').lower() in ('true', '1', 'yes')
 
 if USE_REDIS_CACHE:
     CACHES = {
@@ -306,17 +317,14 @@ DINGTALK_SECRET = os.environ.get('DINGTALK_SECRET', '')
 WECOM_WEBHOOK = os.environ.get('WECOM_WEBHOOK', '')
 WECOM_AGENT_ID = os.environ.get('WECOM_AGENT_ID', '')
 
-# ==========================================
-# 密码加密密钥
-# ==========================================
-# 用于 AES-256-GCM 加密数据库连接密码
-DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
+# 已在文件开头定义，此处避免重复赋值
+# DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
 
 # ==========================================
 # 采集调度参数
 # ==========================================
 # 单个数据库采集超时（秒）
-COLLECT_TIMEOUT_SEC = int(os.environ.get('COLLECT_TIMEOUT_SEC', 15))
+COLLECT_TIMEOUT_SEC = int(os.environ.get('COLLECT_TIMEOUT_SEC', 60))
 # 并发采集线程数
 COLLECT_WORKERS = int(os.environ.get('COLLECT_WORKERS', 20))
 # 采集间隔（秒）
@@ -336,3 +344,66 @@ HEALTH_CHECK_INTERVAL_HOURS = int(os.environ.get('HEALTH_CHECK_INTERVAL_HOURS', 
 # ==========================================
 API_RATE_LIMIT = int(os.environ.get('API_RATE_LIMIT', 100))  # 每分钟请求数限制
 API_TOKEN_EXPIRY_HOURS = int(os.environ.get('API_TOKEN_EXPIRY_HOURS', 24))  # Token 过期时间
+
+# ============================================================================
+# 日志配置
+# ============================================================================
+LOG_DIR = os.path.join(BASE_DIR, 'logs')
+os.makedirs(LOG_DIR, exist_ok=True)
+
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '[{asctime}] {levelname} {name} {process:d} {thread:d} {message}',
+            'style': '{',
+        },
+        'simple': {
+            'format': '[{asctime}] {levelname} {name}: {message}',
+            'style': '{',
+        },
+    },
+    'filters': {
+        'require_debug_true': {
+            '()': 'django.utils.log.RequireDebugTrue',
+        },
+        'require_debug_false': {
+            '()': 'django.utils.log.RequireDebugFalse',
+        },
+    },
+    'handlers': {
+        'console': {
+            'level': 'INFO',
+            'class': 'logging.StreamHandler',
+            'formatter': 'simple',
+        },
+        'file': {
+            'level': 'INFO',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'db_monitor.log'),
+            'maxBytes': 50 * 1024 * 1024,  # 50MB
+            'backupCount': 10,
+            'formatter': 'verbose',
+        },
+        'error_file': {
+            'level': 'ERROR',
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': os.path.join(LOG_DIR, 'error.log'),
+            'maxBytes': 50 * 1024 * 1024,
+            'backupCount': 5,
+            'formatter': 'verbose',
+        },
+    },
+    'loggers': {
+        'django': {
+            'handlers': ['console'],
+            'level': 'INFO',
+        },
+        'monitor': {
+            'handlers': ['console', 'file', 'error_file'],
+            'level': 'INFO',
+            'propagate': False,
+        },
+    },
+}

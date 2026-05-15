@@ -143,7 +143,7 @@ class TimeSeriesForecaster:
         try:
             forecast = self.arima_fitted.forecast(steps=steps)
             return forecast.tolist()
-        except:
+        except Exception:
             return self._predict_ema(steps)
     
     def predict_next(self) -> float:

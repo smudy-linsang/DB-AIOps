@@ -11,7 +11,10 @@
 """
 
 import json
+import logging
 import statistics
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import Optional, Dict, List, Tuple, Any
 from django.utils import timezone
@@ -165,7 +168,7 @@ class BaselineEngine:
         """解析日志中的 JSON 数据"""
         try:
             return json.loads(log.message)
-        except:
+        except Exception:
             return {}
     
     def _extract_metric_values(self, logs, metric_key: str) -> Dict[int, List[float]]:
@@ -321,6 +324,8 @@ class BaselineEngine:
         """
         检查当前监控数据是否偏离基线
         
+        优化: 一次查询历史日志，内存中按指标分组，避免 N 次重复 DB 查询。
+        
         参数:
             current_data: 当前采集的指标字典
         
@@ -332,16 +337,41 @@ class BaselineEngine:
         anomalies = []
         current_slot = self._get_current_time_slot()
         
+        # 一次查询所有历史日志
+        logs = self.get_history_logs(days)
+        
+        # 预处理: 按指标键提取所有时间槽的值 (只处理当前数据中的数值型指标)
+        metric_keys = {k for k, v in current_data.items()
+                       if isinstance(v, (int, float)) and not isinstance(v, bool)}
+        
+        all_slot_values: Dict[str, Dict[int, List[float]]] = {k: {} for k in metric_keys}
+        for log in logs:
+            data = self.parse_log_data(log)
+            slot = self._get_time_slot(log.create_time)
+            for mk in metric_keys:
+                if mk in data:
+                    val = data[mk]
+                    if isinstance(val, (int, float)) and val is not None:
+                        all_slot_values[mk].setdefault(slot, []).append(float(val))
+        
         for metric_key, current_value in current_data.items():
             # 跳过非数值型指标
-            if not isinstance(current_value, (int, float)):
+            if not isinstance(current_value, (int, float)) or isinstance(current_value, bool):
                 continue
             
-            # 获取该指标在该时间槽的基线
-            baselines = self.calculate_baseline_for_metric(metric_key, days)
-            baseline = baselines.get(current_slot)
+            # 从预处理的字典中获取该指标在该时间槽的基线
+            slot_values = all_slot_values.get(metric_key, {})
+            slot_data = slot_values.get(current_slot, [])
             
-            if baseline is None or not baseline.data_sufficient:
+            if len(slot_data) < 3:
+                # 数据不足，无法计算基线
+                continue
+            
+            baseline = BaselineModel(metric_key, current_slot)
+            baseline.values = slot_data
+            baseline.calculate()
+            
+            if not baseline.data_sufficient:
                 continue
             
             is_anomaly, anomaly_type, severity, reason = self.detect_anomaly_three_condition(
@@ -414,6 +444,112 @@ class BaselineEngine:
             'time_slots_total': 168,
             'metrics': metrics_report,
         }
+
+    def update_baseline(self, current_data: Dict) -> int:
+        """
+        增量更新基线模型（Welford 在线算法）
+
+        在每次采集后调用，用当前指标值增量更新对应时间槽的基线统计量。
+        无需重新计算全部历史，O(1) 复杂度。
+
+        参数:
+            current_data: 当前采集的指标字典
+
+        返回:
+            更新的基线记录数
+        """
+        from monitor.models import BaselineModel as BaselineModelDB
+
+        current_slot = self._get_current_time_slot()
+        updated_count = 0
+        MAX_SAMPLES = 720  # 30天 × 24槽 上限，防止数值漂移
+
+        for metric_key, value in current_data.items():
+            if not isinstance(value, (int, float)) or isinstance(value, bool):
+                continue
+
+            try:
+                val = float(value)
+            except (ValueError, TypeError):
+                continue
+
+            obj, created = BaselineModelDB.objects.get_or_create(
+                config=self.config,
+                metric_key=metric_key,
+                time_slot=current_slot,
+                defaults={
+                    'sample_count': 1,
+                    'mean': val,
+                    'std': 0.0,
+                    'p90': val,
+                    'p95': val,
+                    'p99': val,
+                    'normal_min': val,
+                    'normal_max': val,
+                    'data_sufficient': False,
+                }
+            )
+
+            if created:
+                updated_count += 1
+                continue
+
+            # Welford 在线算法增量更新 mean/std
+            n = obj.sample_count
+            old_mean = obj.mean
+
+            if n >= MAX_SAMPLES:
+                # 超过上限时重置，避免长期漂移
+                n = 1
+                new_mean = val
+                new_std = 0.0
+            else:
+                new_n = n + 1
+                delta = val - old_mean
+                new_mean = old_mean + delta / new_n
+                delta2 = val - new_mean
+
+                # Welford: M2 累加器
+                if n < 2:
+                    new_std = 0.0
+                else:
+                    # 从旧 std 反推 M2: M2 = std^2 * (n-1)
+                    old_m2 = (obj.std ** 2) * (n - 1) if n > 1 else 0.0
+                    new_m2 = old_m2 + delta * delta2
+                    new_std = (new_m2 / (new_n - 1)) ** 0.5 if new_n > 1 else 0.0
+                n = new_n
+
+            # 更新百分位数（简化：用当前值替换）
+            # 注意：精确百分位需要保留全部样本，这里用近似
+            p90 = obj.p90 * 0.95 + val * 0.05
+            p95 = obj.p95 * 0.95 + val * 0.05
+            p99 = obj.p99 * 0.98 + val * 0.02
+
+            # 正常范围
+            sigma_k = DEFAULT_SIGMA_K
+            normal_min = new_mean - sigma_k * new_std
+            normal_max = new_mean + sigma_k * new_std
+
+            obj.sample_count = n
+            obj.mean = round(new_mean, 6)
+            obj.std = round(new_std, 6)
+            obj.p90 = round(p90, 4)
+            obj.p95 = round(p95, 4)
+            obj.p99 = round(p99, 4)
+            obj.normal_min = round(normal_min, 6)
+            obj.normal_max = round(normal_max, 6)
+            obj.data_sufficient = (n >= 7)
+            obj.save(update_fields=[
+                'sample_count', 'mean', 'std',
+                'p90', 'p95', 'p99',
+                'normal_min', 'normal_max', 'data_sufficient', 'updated_at',
+            ])
+            updated_count += 1
+
+        if updated_count:
+            logger.info(f"[BaselineEngine] 更新 {updated_count} 个基线槽: "
+                         f"{self.config.name} slot={current_slot}")
+        return updated_count
 
 
 # ==========================================

@@ -350,7 +350,69 @@ class ApprovalEngine:
 
     def _execute_sql(self, ticket):
         """执行SQL命令（实际连接数据库执行）"""
-        # 这里是一个占位实现，实际应该连接目标数据库执行
-        # 安全起见，记录但不实际执行
-        logger.warning(f"[ApprovalEngine] SQL执行请求: {ticket.sql_command[:200]}")
-        return f"SQL已记录，等待手动执行: {ticket.sql_command[:200]}"
+        from monitor.db_connector import DbConnector
+
+        config = ticket.config
+        logger.warning(f"[ApprovalEngine] SQL执行请求 (config_id={config.id}): {ticket.sql_command[:200]}")
+
+        # 安全校验：拒绝危险 SQL
+        dangerous_keywords = ('DROP', 'TRUNCATE', 'SHUTDOWN', 'GRANT', 'REVOKE')
+        sql_upper = ticket.sql_command.upper().strip()
+        for kw in dangerous_keywords:
+            if sql_upper.startswith(kw) or f' {kw} ' in sql_upper:
+                error_msg = f"SQL 包含危险关键词 '{kw}'，拒绝执行"
+                logger.error(f"[ApprovalEngine] {error_msg}")
+                return error_msg
+
+        # 连接目标数据库执行
+        try:
+            connector = DbConnector()
+            conn = connector.get_connection(config)
+            if conn is None:
+                return "无法连接到目标数据库"
+
+            try:
+                cursor = conn.cursor()
+                sql_commands = [s.strip() for s in ticket.sql_command.split(';')
+                                if s.strip() and not s.strip().startswith('--')]
+                results = []
+
+                for sql in sql_commands:
+                    # 逐条安全校验
+                    sql_u = sql.upper().strip()
+                    for kw in dangerous_keywords:
+                        if sql_u.startswith(kw) or f' {kw} ' in sql_u:
+                            return f"子命令包含危险关键词 '{kw}'，执行中止"
+
+                    cursor.execute(sql)
+                    if cursor.description:
+                        result = cursor.fetchall()
+                        results.append(str(result))
+
+                conn.commit()
+                affected = cursor.rowcount
+                cursor.close()
+
+                result_msg = f"执行成功，受影响行数：{affected}"
+                if ticket.rollback_command:
+                    result_msg += f"\n\n回滚命令（如需回滚）：\n{ticket.rollback_command}"
+
+                logger.info(f"[ApprovalEngine] 工单 #{ticket.id} SQL执行成功")
+                return result_msg
+
+            except Exception as e:
+                try:
+                    conn.rollback()
+                except Exception:
+                    pass
+                logger.error(f"[ApprovalEngine] SQL执行失败: {e}")
+                return f"SQL执行失败: {str(e)}"
+            finally:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+        except Exception as e:
+            logger.error(f"[ApprovalEngine] 数据库连接失败: {e}")
+            return f"数据库连接失败: {str(e)}"

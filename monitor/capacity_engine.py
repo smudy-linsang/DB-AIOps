@@ -11,7 +11,10 @@
 """
 
 import json
+import logging
 import math
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
@@ -310,7 +313,7 @@ class CapacityEngine:
                         'timestamp': log.create_time.timestamp(),
                         'value': value
                     })
-            except:
+            except Exception:
                 pass
         
         return history
@@ -652,6 +655,76 @@ class CapacityEngine:
             'warning': round(warning, 1),
             'critical': round(critical, 1)
         }
+
+    def save_predictions(self, report: Dict = None) -> int:
+        """
+        将容量预测结果持久化到 PredictionResult 表
+
+        参数:
+            report: analyze_all_metrics() 返回的预测报告，为 None 时自动计算
+
+        返回:
+            保存/更新的记录数
+        """
+        from monitor.models import PredictionResult
+        from django.utils import timezone as dj_tz
+
+        if report is None:
+            report = self.analyze_all_metrics()
+
+        metrics = report.get('metrics', {})
+        if not metrics:
+            return 0
+
+        saved_count = 0
+        for metric_key, prediction in metrics.items():
+            if 'error' in prediction:
+                continue
+
+            resource_name = ''
+            current_value = prediction.get('current_value')
+            model_used = prediction.get('model_used', '')
+            confidence = prediction.get('confidence')
+            monthly_rate = prediction.get('monthly_growth_pct')
+            days_to_threshold = prediction.get('days_to_threshold')
+
+            # 计算预计触达告警线/危险线日期
+            warn_date = None
+            crit_date = None
+            if days_to_threshold is not None:
+                today = dj_tz.now().date()
+                # 告警线阈值天数
+                warn_days = ALERT_THRESHOLDS.get('storage', {}).get('warning_days', 30)
+                crit_days = ALERT_THRESHOLDS.get('storage', {}).get('critical_days', 14)
+                if days_to_threshold <= warn_days:
+                    warn_date = today + timedelta(days=max(0, days_to_threshold))
+                if days_to_threshold <= crit_days:
+                    crit_date = today + timedelta(days=max(0, days_to_threshold))
+
+            # 生成建议
+            recommendation = ''
+            if days_to_threshold is not None and days_to_threshold <= 30:
+                recommendation = f"预计 {days_to_threshold} 天后达到告警阈值，建议尽快扩容或清理数据"
+
+            obj, created = PredictionResult.objects.update_or_create(
+                config=self.config,
+                metric_key=metric_key,
+                resource_name=resource_name,
+                defaults={
+                    'current_value': current_value,
+                    'monthly_growth_rate': monthly_rate,
+                    'predicted_warn_date': warn_date,
+                    'predicted_crit_date': crit_date,
+                    'model_used': model_used,
+                    'confidence': confidence,
+                    'recommendation': recommendation,
+                }
+            )
+            saved_count += 1
+
+        if saved_count:
+            logger.info(f"[CapacityEngine] 保存 {saved_count} 条预测结果: {self.config.name}")
+        return saved_count
 
 
 # ==========================================

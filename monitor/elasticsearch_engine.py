@@ -35,17 +35,32 @@ BULK_BATCH_SIZE = 500
 BULK_FLUSH_INTERVAL = 30  # 秒
 
 
+# ES 全局单例客户端（连接池复用）
+_es_client = None
+
+
 def get_es_client():
-    """获取 Elasticsearch 客户端"""
+    """获取 Elasticsearch 客户端（全局单例，复用连接池）"""
+    global _es_client
+    if _es_client is not None:
+        try:
+            # 验证现有连接是否仍然可用
+            if _es_client.ping():
+                return _es_client
+        except Exception:
+            _es_client = None  # 连接失效，重建
+
     try:
         from elasticsearch import Elasticsearch
-        client = Elasticsearch(
-            [ES_URL],
+        es_url = _get_es_url()
+        _es_client = Elasticsearch(
+            [es_url],
             request_timeout=30,
             retry_on_timeout=True,
-            max_retries=3
+            max_retries=3,
+            http_compress=True,  # 启用压缩
         )
-        return client
+        return _es_client
     except ImportError:
         logger.error("elasticsearch 库未安装，请执行: pip install elasticsearch")
         return None

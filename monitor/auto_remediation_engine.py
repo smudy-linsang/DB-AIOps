@@ -9,10 +9,28 @@
 """
 
 import json
+import logging
+import re
 import datetime
+
+logger = logging.getLogger(__name__)
 from django.utils import timezone
 from django.db import models
 from monitor.models import DatabaseConfig, MonitorLog, AuditLog
+
+# SQL 安全校验：禁止的危险模式
+SQL_DANGEROUS_PATTERNS = [
+    re.compile(r'\b(DROP|TRUNCATE|SHUTDOWN|GRANT|REVOKE)\b', re.IGNORECASE),
+    re.compile(r';\s*\w', re.IGNORECASE),  # 分号后跟新语句（多语句注入）
+    re.compile(r'--\s*;'),  # 注释掩盖分号
+]
+
+# 允许执行的 SQL 前缀白名单
+SQL_ALLOWED_PREFIXES = (
+    'ALTER SYSTEM KILL', 'SELECT PG_TERMINATE_BACKEND',
+    'KILL ',  # MySQL KILL
+    'ALTER DATABASE DATAFILE', 'ALTER TABLESPACE',
+)
 
 
 # 自动化处理引擎
@@ -301,60 +319,102 @@ WHERE state = 'idle'
         except AuditLog.DoesNotExist:
             return False, "审计记录不存在"
     
+    @staticmethod
+    def _validate_sql_safety(sql: str) -> tuple:
+        """
+        校验 SQL 命令的安全性
+
+        Returns:
+            (is_safe, reason): 安全返回 (True, '')，不安全返回 (False, 原因)
+        """
+        if not sql or not sql.strip():
+            return False, "SQL 命令为空"
+
+        stripped = sql.strip().rstrip(';').strip()
+
+        # 检查是否以允许的前缀开头
+        prefix_ok = any(stripped.upper().startswith(p) for p in SQL_ALLOWED_PREFIXES)
+        if not prefix_ok:
+            return False, f"SQL 命令不在白名单前缀中: {stripped[:50]}..."
+
+        # 检查危险模式
+        for pattern in SQL_DANGEROUS_PATTERNS:
+            if pattern.search(stripped):
+                return False, f"SQL 包含危险模式: {pattern.pattern}"
+
+        return True, ''
+
     def execute_operation(self, audit_id, executor, db_connection):
         """
         执行操作
-        
+
         参数:
             audit_id: 审计记录 ID
             executor: 执行人
             db_connection: 数据库连接对象
-        
+
         返回:
             (success, message)
         """
         try:
             audit = AuditLog.objects.get(id=audit_id)
-            
+
             if audit.status != 'approved':
                 return False, "操作未批准，无法执行"
-            
+
+            # 安全校验 SQL
+            is_safe, safety_reason = self._validate_sql_safety(audit.sql_command)
+            if not is_safe:
+                audit.status = 'failed'
+                audit.execution_result = f"SQL 安全校验失败: {safety_reason}"
+                audit.save(update_fields=['status', 'execution_result'])
+                return False, f"SQL 安全校验失败: {safety_reason}"
+
             # 更新状态
             audit.status = 'executing'
             audit.executor = executor
             audit.execute_time = timezone.now()
-            audit.save()
-            
-            # 执行 SQL (这里只记录，不实际执行，实际执行需要数据库权限)
+            audit.save(update_fields=['status', 'executor', 'execute_time'])
+
+            # 执行 SQL（仅执行白名单内的安全命令）
             cursor = db_connection.cursor()
             try:
-                # 分割并执行多条 SQL
-                sql_commands = audit.sql_command.split(';')
+                # 按分号分割，但逐条做安全校验
+                sql_commands = [s.strip() for s in audit.sql_command.split(';') if s.strip()]
                 results = []
-                
+
                 for sql in sql_commands:
-                    sql = sql.strip()
-                    if sql and not sql.startswith('--'):
-                        cursor.execute(sql)
-                        if cursor.description:  # 有返回值
-                            result = cursor.fetchall()
-                            results.append(result)
-                
+                    if sql.startswith('--'):
+                        continue  # 跳过纯注释行
+
+                    # 再次校验每条 SQL
+                    cmd_is_safe, cmd_reason = self._validate_sql_safety(sql)
+                    if not cmd_is_safe:
+                        audit.status = 'failed'
+                        audit.execution_result = f"子命令安全校验失败: {cmd_reason}\nSQL: {sql[:100]}"
+                        audit.save(update_fields=['status', 'execution_result'])
+                        return False, f"子命令安全校验失败: {cmd_reason}"
+
+                    cursor.execute(sql)
+                    if cursor.description:  # 有返回值
+                        result = cursor.fetchall()
+                        results.append(result)
+
                 audit.status = 'success'
                 audit.execution_result = f"执行成功\n受影响行数：{cursor.rowcount}"
-                audit.save()
-                
+                audit.save(update_fields=['status', 'execution_result'])
+
                 return True, "操作执行成功"
-                
+
             except Exception as e:
                 audit.status = 'failed'
                 audit.execution_result = f"执行失败：{str(e)}"
-                audit.save()
-                
+                audit.save(update_fields=['status', 'execution_result'])
+
                 return False, f"执行失败：{str(e)}"
             finally:
                 cursor.close()
-                
+
         except AuditLog.DoesNotExist:
             return False, "审计记录不存在"
         except Exception as e:

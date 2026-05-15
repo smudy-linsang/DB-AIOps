@@ -40,6 +40,10 @@ class DatabaseConfig(models.Model):
     # 相当于: is_active BOOLEAN DEFAULT TRUE
     is_active = models.BooleanField(default=True, verbose_name="是否开启监控")
 
+    # 密码轮换相关字段（Phase 4 新增）
+    password_changed_at = models.DateTimeField(null=True, blank=True, verbose_name="密码最后修改时间")
+    password_expiry_days = models.IntegerField(default=90, verbose_name="密码过期天数", help_text="默认90天，0表示不过期")
+
     # 创建时间
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
@@ -96,6 +100,9 @@ class AuditLog(models.Model):
         ('PURGE_TABLE', '清理表数据'),
         ('REBALANCE_SHARD', '分片重平衡'),
         ('EXECUTE_SQL', '执行自定义 SQL'),
+        ('API_CREATE', 'API 创建'),
+        ('API_UPDATE', 'API 更新'),
+        ('API_DELETE', 'API 删除'),
     )
     
     RISK_LEVEL_CHOICES = (
@@ -700,3 +707,119 @@ class PlatformMetric(models.Model):
     
     def __str__(self):
         return f"{self.name} = {self.value}"
+
+
+# ==========================================
+# 通知规则（Phase 4 新增）
+# ==========================================
+class NotificationRule(models.Model):
+    """通知规则配置，定义告警路由策略"""
+
+    name = models.CharField(max_length=100, verbose_name="规则名称")
+    alert_types = models.JSONField(default=list, verbose_name="告警类型",
+        help_text="匹配的告警类型列表，如 ['down','tablespace']，为空表示全部")
+    severities = models.JSONField(default=list, verbose_name="严重程度",
+        help_text="匹配的严重程度列表，如 ['critical','error']，为空表示全部")
+    channels = models.JSONField(default=list, verbose_name="通知渠道",
+        help_text="发送到哪些渠道，如 ['email','dingtalk','wecom']")
+    db_config = models.ForeignKey(
+        DatabaseConfig, on_delete=models.CASCADE,
+        null=True, blank=True, verbose_name="数据库",
+        help_text="为空表示全局规则"
+    )
+    schedule = models.JSONField(null=True, blank=True, verbose_name="时间策略",
+        help_text="{'work_hours': true, 'start': '09:00', 'end': '18:00', 'weekdays': '1,2,3,4,5'}")
+    escalation_minutes = models.IntegerField(default=0, verbose_name="升级等待时间(分钟)",
+        help_text="0 表示不升级，>0 表示未确认 N 分钟后自动提升等级")
+    is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    priority = models.IntegerField(default=0, verbose_name="优先级",
+        help_text="数字越大优先级越高，同告警匹配多规则时取最高优先级")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        scope = self.db_config.name if self.db_config else '全局'
+        return f"[{scope}] {self.name}"
+
+    class Meta:
+        verbose_name = "通知规则"
+        verbose_name_plural = "通知规则列表"
+        ordering = ['-priority', 'name']
+
+
+# ==========================================
+# 数据库拓扑（Phase 4 新增）
+# ==========================================
+class DatabaseTopology(models.Model):
+    """数据库拓扑关系，描述主从/RAC/ADG等架构关系"""
+
+    ROLE_CHOICES = (
+        ('primary', '主库'), ('standby', '备库'),
+        ('rac_node', 'RAC节点'), ('dsc_node', 'DSC节点'),
+        ('single', '单机'),
+    )
+    TOPOLOGY_TYPE_CHOICES = (
+        ('primary_standby', '主从'), ('rac', 'RAC'),
+        ('adg', 'Active Data Guard'), ('mha', 'MHA'),
+        ('dsc', 'DSC集群'), ('dts', 'DTS复制'),
+        ('single', '单机'),
+    )
+    SYNC_MODE_CHOICES = (
+        ('sync', '同步'), ('async', '异步'),
+        ('semi_sync', '半同步'), ('', '未知'),
+    )
+
+    db_config = models.ForeignKey(
+        DatabaseConfig, on_delete=models.CASCADE,
+        related_name='topology_info', verbose_name="数据库"
+    )
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='single', verbose_name="角色")
+    topology_type = models.CharField(max_length=20, choices=TOPOLOGY_TYPE_CHOICES, default='single', verbose_name="拓扑类型")
+    cluster_name = models.CharField(max_length=100, blank=True, default='', verbose_name="集群名称")
+    peer_databases = models.ManyToManyField(DatabaseConfig, blank=True, related_name='peer_topologies', verbose_name="关联数据库")
+    sync_mode = models.CharField(max_length=20, choices=SYNC_MODE_CHOICES, blank=True, default='', verbose_name="同步模式")
+    lag_seconds = models.FloatField(null=True, blank=True, verbose_name="延迟秒数")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        return f"{self.db_config.name} [{self.get_role_display()}] {self.get_topology_type_display()}"
+
+    class Meta:
+        verbose_name = "数据库拓扑"
+        verbose_name_plural = "数据库拓扑列表"
+
+
+# ==========================================
+# 报表记录（Phase 4 新增）
+# ==========================================
+class ReportRecord(models.Model):
+    """报表生成记录"""
+
+    REPORT_TYPE_CHOICES = (
+        ('daily', '日报'), ('weekly', '周报'), ('monthly', '月报'),
+    )
+    STATUS_CHOICES = (
+        ('generated', '已生成'), ('sent', '已发送'), ('failed', '发送失败'),
+    )
+
+    report_type = models.CharField(max_length=20, choices=REPORT_TYPE_CHOICES, verbose_name="报表类型")
+    title = models.CharField(max_length=200, verbose_name="报表标题")
+    content_html = models.TextField(blank=True, default='', verbose_name="HTML内容")
+    file_path = models.CharField(max_length=500, blank=True, default='', verbose_name="文件路径")
+    period_start = models.DateField(verbose_name="统计周期开始")
+    period_end = models.DateField(verbose_name="统计周期结束")
+    recipients = models.JSONField(default=list, verbose_name="收件人列表")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='generated', verbose_name="状态")
+
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    def __str__(self):
+        return f"{self.title} ({self.get_report_type_display()})"
+
+    class Meta:
+        verbose_name = "报表记录"
+        verbose_name_plural = "报表记录列表"
+        ordering = ['-created_at']

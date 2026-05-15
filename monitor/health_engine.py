@@ -1,4 +1,4 @@
-"""
+﻿"""
 健康评分引擎 v2.0 (Phase 2 - 5维度健康评估)
 
 功能:
@@ -18,7 +18,11 @@
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
+from django.utils import timezone as dj_tz
+
+logger = logging.getLogger(__name__)
 from typing import Dict, List, Tuple, Optional, Any
 
 from monitor.models import MonitorLog, DatabaseConfig, AlertLog
@@ -318,7 +322,7 @@ class ConfigurationScorer:
             security_score -= 10  # 密码过短
         
         # 检查是否启用 SSL (通过 connection_options)
-        options = config.connection_options or {}
+        options = getattr(config, 'connection_options', None) or {}
         if options.get('ssl') != 'true' and options.get('ssl_mode') != 'required':
             security_score -= 30  # 未启用 SSL
         
@@ -343,7 +347,7 @@ class ConfigurationScorer:
                     param_score -= 10
                 elif timeout > 60:
                     param_score -= 5
-            except:
+            except Exception:
                 param_score -= 10
         
         # 字符集配置 (MySQL)
@@ -392,8 +396,9 @@ class OperationsScorer:
         
         # 2. 监控覆盖评分
         # 基于最近 24 小时日志覆盖率
-        cutoff = datetime.now() - timedelta(hours=24)
-        logs_24h = [l for l in recent_logs if l.get('create_time', datetime.min) > cutoff]
+        cutoff = dj_tz.now() - timedelta(hours=24)
+        logs_24h = [l for l in recent_logs
+                     if l.get('create_time') and l['create_time'] > cutoff]
         
         # 理想: 每5分钟一条日志，24小时应有 288 条
         expected_logs = 288
@@ -462,18 +467,18 @@ class HealthEngine:
             data = json.loads(latest_log.message)
             data['current_status'] = latest_log.status
             return data
-        except:
+        except Exception:
             return None
     
     def get_recent_logs(self, hours: int = 24) -> List[Dict]:
         """获取最近 N 小时的日志"""
-        cutoff = datetime.now() - timedelta(hours=hours)
-        
+        cutoff = dj_tz.now() - timedelta(hours=hours)
+
         logs = MonitorLog.objects.filter(
             config=self.config,
             create_time__gte=cutoff
         ).order_by('-create_time')
-        
+
         return list(logs)
     
     def calculate(self, current_data: Dict = None) -> Dict[str, Any]:
@@ -541,7 +546,7 @@ class HealthEngine:
         recommendations = self._generate_recommendations(dimension_scores)
         
         return {
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': dj_tz.now().isoformat(),
             'config_name': self.config.name,
             'db_type': self.config.db_type,
             'overall_score': round(overall_score, 1),
@@ -633,8 +638,8 @@ class HealthEngine:
         返回:
             [{'date': '2024-01-01', 'score': 85.5, 'grade': 'B'}, ...]
         """
-        cutoff = datetime.now() - timedelta(days=days)
-        
+        cutoff = dj_tz.now() - timedelta(days=days)
+
         # 每天取一条评分记录 (简化: 取每天最后一条 UP 状态的日志)
         logs = MonitorLog.objects.filter(
             config=self.config,
@@ -661,7 +666,7 @@ class HealthEngine:
                     'score': result['overall_score'],
                     'grade': result['grade']
                 })
-            except:
+            except Exception:
                 pass
         
         return history
@@ -669,11 +674,11 @@ class HealthEngine:
     def compare_with_baseline(self, current_score: float, baseline_score: float = 80.0) -> Dict[str, Any]:
         """
         与基线对比
-        
+    
         返回变化分析
         """
         delta = current_score - baseline_score
-        
+    
         if delta >= 5:
             trend = 'improving'
             description = '显著改善'
@@ -686,7 +691,7 @@ class HealthEngine:
         else:
             trend = 'declining'
             description = '显著下降'
-        
+    
         return {
             'current_score': current_score,
             'baseline_score': baseline_score,
@@ -694,6 +699,52 @@ class HealthEngine:
             'trend': trend,
             'description': description
         }
+    
+    def save_result(self, report: Dict = None) -> Optional['HealthScore']:
+        """
+        将健康评分结果持久化到 HealthScore 表
+    
+        参数:
+            report: calculate() 返回的评分报告，为 None 时自动计算
+    
+        返回:
+            HealthScore 实例，数据不可用时返回 None
+        """
+        from monitor.models import HealthScore
+        from django.utils import timezone as dj_tz
+    
+        if report is None:
+            report = self.calculate()
+    
+        if report.get('error') or report.get('overall_score', 0) == 0:
+            return None
+    
+        today = dj_tz.now().date()
+        dims = report.get('dimensions', {})
+    
+        health_score, created = HealthScore.objects.update_or_create(
+            config=self.config,
+            score_date=today,
+            defaults={                'total_score': report['overall_score'],
+                'availability_score': dims.get('availability', {}).get('score', 0),
+                'capacity_score': dims.get('capacity', {}).get('score', 0),
+                'performance_score': dims.get('performance', {}).get('score', 0),
+                'config_score': dims.get('configuration', {}).get('score', 0),
+                'ops_score': dims.get('operations', {}).get('score', 0),
+                'grade': report.get('grade', ''),
+                'score_detail': {
+                    'summary': report.get('summary', ''),
+                    'recommendations': report.get('recommendations', []),
+                    'weights': report.get('weights', {}),
+                    'data_points': report.get('data_points', 0),
+                },
+            }
+        )
+    
+        action = '新建' if created else '更新'
+        logger.info(f"[HealthEngine] {action}健康评分: {self.config.name} "
+                     f"score={report['overall_score']} grade={report.get('grade')}")
+        return health_score
 
 
 # ==========================================

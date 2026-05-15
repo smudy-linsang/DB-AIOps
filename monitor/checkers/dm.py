@@ -2,9 +2,13 @@
 """
 达梦数据库 (DM8) 检查器
 支持 DW 集群模式（主备）和 DSC 集群模式（共享存储）
+采集 22 大类指标：基础信息、会话、空间、性能、锁等待、会话详情、
+SQL统计、缓冲池、事务统计、复制集群、DW集群、DSC集群、配置参数、
+日志统计、安全审计、资源限制、长事务、死锁记录、Redo日志、
+对象统计、数据字典、会话按状态统计、高可用状态汇总、配置参数扩展。
 """
 
-import pyodbc
+import dmPython
 from monitor.checkers.base import BaseDBChecker
 
 
@@ -12,14 +16,13 @@ class DamengChecker(BaseDBChecker):
     """达梦数据库 (DM8) 监控检查器"""
 
     def get_connection(self, config):
-        """达梦 ODBC 连接"""
-        conn_str = (
-            f"DRIVER={{DM8 ODBC DRIVER}};"
-            f"SERVER={config.host}:{config.port};"
-            f"UID={config.username};"
-            f"PWD={config.get_password()};"
+        """达梦 dmPython 连接"""
+        return dmPython.connect(
+            user=config.username,
+            password=config.get_password(),
+            server=config.host,
+            port=config.port,
         )
-        return pyodbc.connect(conn_str, timeout=5)
 
     def collect_metrics(self, config, conn):
         cur = conn.cursor()
@@ -38,7 +41,7 @@ class DamengChecker(BaseDBChecker):
             instance_name = inst_row[0]
             host_name = inst_row[1]
             startup_time = inst_row[2]
-        except:
+        except Exception:
             instance_name = 'N/A'
             host_name = 'N/A'
             startup_time = 'N/A'
@@ -46,19 +49,19 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT MODE FROM V$INSTANCE")
             db_mode = cur.fetchone()[0]
-        except:
+        except Exception:
             db_mode = 'N/A'
 
         try:
             cur.execute("SELECT (SYSDATE-START_TIME)*86400 FROM v$instance")
             uptime = int(cur.fetchone()[0])
-        except:
+        except Exception:
             uptime = 0
 
         try:
             cur.execute("SELECT ARCH_MODE FROM V$DATABASE")
             arch_mode = cur.fetchone()[0]
-        except:
+        except Exception:
             arch_mode = 'N/A'
 
         # =============================================
@@ -81,7 +84,7 @@ class DamengChecker(BaseDBChecker):
                 "SELECT count(*) FROM V$SESSION_WAIT WHERE EVENT != 'Idle'"
             )
             session_wait_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             session_wait_count = 0
 
         # =============================================
@@ -114,7 +117,7 @@ class DamengChecker(BaseDBChecker):
                     "used_mb": float(row[2]),
                     "used_pct": float(row[3])
                 })
-        except:
+        except Exception:
             tablespaces = []
 
         # 临时表空间
@@ -129,7 +132,7 @@ class DamengChecker(BaseDBChecker):
                     "name": row[0],
                     "size_mb": float(row[1])
                 })
-        except:
+        except Exception:
             temp_tablespaces = []
 
         # 数据文件统计
@@ -140,7 +143,7 @@ class DamengChecker(BaseDBChecker):
             tbs_row = cur.fetchone()
             datafile_count = tbs_row[0]
             datafile_size_total_gb = float(tbs_row[1])
-        except:
+        except Exception:
             datafile_count = 0
             datafile_size_total_gb = 0
 
@@ -151,7 +154,7 @@ class DamengChecker(BaseDBChecker):
             cur.execute("SELECT VALUE FROM V$PARAMETER WHERE NAME='BUFFER'")
             buffer_size = int(cur.fetchone()[0])
             buffer_size_mb = round(buffer_size / 1024.0, 2)
-        except:
+        except Exception:
             buffer_size_mb = 0
 
         try:
@@ -159,7 +162,7 @@ class DamengChecker(BaseDBChecker):
                 "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='SQL_COUNT'"
             )
             sql_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             sql_count = 0
 
         try:
@@ -167,7 +170,7 @@ class DamengChecker(BaseDBChecker):
                 "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='TRAN_COUNT'"
             )
             tran_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             tran_count = 0
 
         qps = round(sql_count / uptime, 2) if uptime > 0 else 0
@@ -186,7 +189,7 @@ class DamengChecker(BaseDBChecker):
                 ) A
             """)
             cache_hit_ratio = float(cur.fetchone()[0])
-        except:
+        except Exception:
             cache_hit_ratio = 0
 
         # =============================================
@@ -236,7 +239,7 @@ class DamengChecker(BaseDBChecker):
                     "event": row[0],
                     "count": int(row[1])
                 })
-        except:
+        except Exception:
             wait_events = []
 
         # =============================================
@@ -289,7 +292,7 @@ class DamengChecker(BaseDBChecker):
                     "execute_count": int(row[1]),
                     "avg_time": int(row[2]) if row[2] else 0
                 })
-        except:
+        except Exception:
             pass
 
         top_sql = []
@@ -305,7 +308,7 @@ class DamengChecker(BaseDBChecker):
                     "sql_text": (row[0] or 'N/A')[:200],
                     "execute_count": int(row[1])
                 })
-        except:
+        except Exception:
             pass
 
         # =============================================
@@ -329,7 +332,7 @@ class DamengChecker(BaseDBChecker):
                     "active_count": int(row[6]),
                     "dirty_count": int(row[7])
                 })
-        except:
+        except Exception:
             pass
 
         # =============================================
@@ -338,7 +341,7 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT count(*) FROM V$TRX")
             active_transactions = int(cur.fetchone()[0])
-        except:
+        except Exception:
             active_transactions = 0
 
         try:
@@ -347,7 +350,7 @@ class DamengChecker(BaseDBChecker):
                 WHERE STATE='INACTIVE' AND TRX_ID != 0
             """)
             idle_transactions = int(cur.fetchone()[0])
-        except:
+        except Exception:
             idle_transactions = 0
 
         # =============================================
@@ -356,7 +359,7 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT ARCHIVE_MODE FROM V$DATABASE")
             archive_mode = cur.fetchone()[0]
-        except:
+        except Exception:
             archive_mode = 'N/A'
 
         try:
@@ -370,13 +373,13 @@ class DamengChecker(BaseDBChecker):
                     "status": row[1] or 'N/A',
                     "dest_name": row[2] or 'N/A'
                 })
-        except:
+        except Exception:
             archive_dest = []
 
         try:
             cur.execute("SELECT count(*) FROM V$ARCH_FILE")
             archive_file_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             archive_file_count = 0
 
         # =============================================
@@ -386,13 +389,13 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT MODE FROM V$INSTANCE")
             dm_instance_mode = cur.fetchone()[0]
-        except:
+        except Exception:
             dm_instance_mode = 'N/A'
 
         try:
             cur.execute("SELECT MODE$ FROM V$DATABASE")
             dm_database_mode = cur.fetchone()[0]
-        except:
+        except Exception:
             dm_database_mode = 'N/A'
 
         # 实时归档状态
@@ -416,7 +419,7 @@ class DamengChecker(BaseDBChecker):
                     "is_logical": row[8] or 'N/A',
                     "synchronized": row[9] or 'N/A'
                 })
-        except:
+        except Exception:
             realtime_archive_dest = []
 
         # 实时日志同步状态
@@ -438,7 +441,7 @@ class DamengChecker(BaseDBChecker):
                     "apply_seq_all": int(row[6]) if row[6] else 0,
                     "sync_status": row[7] or 'N/A'
                 })
-        except:
+        except Exception:
             rlog_sync_status = []
 
         # 主备延迟
@@ -461,7 +464,7 @@ class DamengChecker(BaseDBChecker):
                     "apply_rst_time": str(row[4]) if row[4] else 'N/A',
                     "last_arch_seq": int(row[5]) if row[5] else 0
                 })
-        except:
+        except Exception:
             dest_pending = []
             apply_delay_total = 0
 
@@ -508,7 +511,7 @@ class DamengChecker(BaseDBChecker):
                     "is_primary": int(row[5]) if row[5] else 0,
                     "uptime": int(row[6]) if row[6] else 0
                 })
-        except:
+        except Exception:
             dsc_cluster_info = []
             dsc_node_count = 0
             dsc_primary_node = 'N/A'
@@ -530,7 +533,7 @@ class DamengChecker(BaseDBChecker):
                     "rlog_send_offset": str(row[4]) if row[4] else 'N/A',
                     "rlog_pkg_snd_count": int(row[5]) if row[5] else 0
                 })
-        except:
+        except Exception:
             dsc_instances = []
 
         # DSC 全局锁
@@ -550,7 +553,7 @@ class DamengChecker(BaseDBChecker):
                     "blocking_lru": int(row[4]) if row[4] else 0,
                     "blocking_inst": int(row[5]) if row[5] else 0
                 })
-        except:
+        except Exception:
             dsc_global_latches = []
 
         # DSC 锁状态统计
@@ -559,7 +562,7 @@ class DamengChecker(BaseDBChecker):
                 "SELECT COUNT(*) FROM V$GLOBAL_LATCH WHERE BLOCKING_LRU > 0"
             )
             dsc_lock_contention_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             dsc_lock_contention_count = 0
 
         # DSC 健康状态判断
@@ -593,7 +596,7 @@ class DamengChecker(BaseDBChecker):
             try:
                 cur.execute(f"SELECT VALUE FROM V$PARAMETER WHERE NAME='{key}'")
                 config_params[key] = cur.fetchone()[0]
-            except:
+            except Exception:
                 pass
 
         # =============================================
@@ -602,13 +605,13 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT count(*) FROM V$LOG")
             log_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             log_count = 0
 
         try:
             cur.execute("SELECT LOG_SIZE FROM V$INSTANCE")
             log_size = int(cur.fetchone()[0])
-        except:
+        except Exception:
             log_size = 0
 
         # =============================================
@@ -617,7 +620,7 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("SELECT count(*) FROM V$LOGIN")
             login_count = int(cur.fetchone()[0])
-        except:
+        except Exception:
             login_count = 0
 
         try:
@@ -633,7 +636,7 @@ class DamengChecker(BaseDBChecker):
                     "user_name": row[0] or 'N/A',
                     "count": int(row[1])
                 })
-        except:
+        except Exception:
             failed_logins = []
 
         # =============================================
@@ -650,8 +653,193 @@ class DamengChecker(BaseDBChecker):
                     "resource_name": resource,
                     "value": value
                 })
-            except:
+            except Exception:
                 pass
+
+        # =============================================
+        # 15. 长时间事务 (long_trx) - P0
+        # =============================================
+        long_transactions = []
+        try:
+            cur.execute("""
+                SELECT TRX_ID, SESS_ID, STATE,
+                       (SYSDATE - TRX_START_TIME) * 86400 as DURATION_SEC,
+                       SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT
+                FROM V$TRX t LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID
+                WHERE (SYSDATE - TRX_START_TIME) * 86400 > 60
+                ORDER BY DURATION_SEC DESC
+            """)
+            for row in cur.fetchall():
+                long_transactions.append({
+                    "trx_id": str(row[0] or ''),
+                    "sess_id": str(row[1] or ''),
+                    "state": row[2] or 'N/A',
+                    "duration_sec": int(row[3] or 0),
+                    "sql_text": (row[4] or 'N/A')[:200]
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 16. 死锁记录 (deadlock) - P0
+        # =============================================
+        last_deadlock = {}
+        try:
+            cur.execute("""
+                SELECT * FROM (
+                    SELECT SESS_ID, TRX_ID, SQL_TEXT, DEADLOCK_TIME
+                    FROM V$DEADLOCK_HISTORY
+                    ORDER BY DEADLOCK_TIME DESC
+                ) WHERE ROWNUM <= 5
+            """)
+            deadlock_rows = []
+            for row in cur.fetchall():
+                deadlock_rows.append({
+                    "sess_id": str(row[0] or ''),
+                    "trx_id": str(row[1] or ''),
+                    "sql_text": (row[2] or 'N/A')[:200],
+                    "deadlock_time": str(row[3] or 'N/A')
+                })
+            last_deadlock = {"found": len(deadlock_rows) > 0, "records": deadlock_rows}
+        except Exception:
+            last_deadlock = {"found": False, "records": []}
+
+        # =============================================
+        # 17. Redo 日志统计 (redo_log) - P0
+        # =============================================
+        redo_log_stats = {}
+        try:
+            cur.execute("SELECT COUNT(*) FROM V$RLOG")
+            redo_log_stats['rlog_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            redo_log_stats['rlog_count'] = 0
+        try:
+            cur.execute("SELECT COUNT(*) FROM V$RLOG WHERE STATUS='ACTIVE'")
+            redo_log_stats['active_rlog_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            redo_log_stats['active_rlog_count'] = 0
+        try:
+            cur.execute("SELECT VALUE FROM V$PARAMETER WHERE NAME='RLOG_BUF_SIZE'")
+            redo_log_stats['rlog_buf_size'] = cur.fetchone()[0]
+        except Exception:
+            redo_log_stats['rlog_buf_size'] = 'N/A'
+        try:
+            cur.execute("SELECT VALUE FROM V$PARAMETER WHERE NAME='RLOG_POOL_SIZE'")
+            redo_log_stats['rlog_pool_size'] = cur.fetchone()[0]
+        except Exception:
+            redo_log_stats['rlog_pool_size'] = 'N/A'
+
+        # =============================================
+        # 18. 对象统计 Top20 (object_top) - P1
+        # =============================================
+        table_size_top20 = []
+        try:
+            cur.execute("""
+                SELECT OWNER, TABLE_NAME, NUM_ROWS,
+                       (SELECT ROUND(SUM(USED_SIZE * PAGE) / 1024 / 1024, 2)
+                        FROM V$TABLESPACE WHERE NAME = t.TABLESPACE_NAME) as SIZE_MB
+                FROM DBA_TABLES t
+                WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO')
+                ORDER BY NUM_ROWS DESC
+                WHERE ROWNUM <= 20
+            """)
+            for row in cur.fetchall():
+                table_size_top20.append({
+                    "owner": row[0],
+                    "table_name": row[1],
+                    "num_rows": int(row[2] or 0),
+                    "size_mb": float(row[3] or 0)
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 19. 数据字典统计 (data_dict) - P1
+        # =============================================
+        object_summary = {}
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM DBA_TABLES
+                WHERE OWNER NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR','SYSSSO')
+            """)
+            object_summary['table_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            object_summary['table_count'] = 0
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM DBA_INDEXES
+                WHERE OWNER NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR','SYSSSO')
+            """)
+            object_summary['index_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            object_summary['index_count'] = 0
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM DBA_VIEWS
+                WHERE OWNER NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR','SYSSSO')
+            """)
+            object_summary['view_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            object_summary['view_count'] = 0
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM DBA_PROCEDURES
+                WHERE OWNER NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR','SYSSSO')
+            """)
+            object_summary['procedure_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            object_summary['procedure_count'] = 0
+        try:
+            cur.execute("""
+                SELECT COUNT(*) FROM DBA_TRIGGERS
+                WHERE OWNER NOT IN ('SYS','SYSTEM','SYSDBA','SYSAUDITOR','SYSSSO')
+            """)
+            object_summary['trigger_count'] = int(cur.fetchone()[0] or 0)
+        except Exception:
+            object_summary['trigger_count'] = 0
+
+        # =============================================
+        # 20. 会话按状态统计 (session_by_state) - P1
+        # =============================================
+        session_by_state = []
+        try:
+            cur.execute("SELECT STATE, COUNT(*) FROM V$SESSIONS GROUP BY STATE")
+            for row in cur.fetchall():
+                session_by_state.append({
+                    "state": row[0] or 'N/A',
+                    "count": int(row[1] or 0)
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 21. 高可用状态汇总 (ha_status) - P2
+        # =============================================
+        ha_status = {
+            "instance_mode": dm_instance_mode,
+            "database_mode": dm_database_mode,
+            "dw_replication_health": dw_replication_health,
+            "dsc_cluster_health": dsc_cluster_health,
+            "arch_mode": arch_mode,
+            "apply_delay_total": apply_delay_total,
+        }
+
+        # =============================================
+        # 22. 配置参数扩展 (config_extended) - P1
+        # =============================================
+        extended_config_keys = [
+            'BUFFER', 'SORT_BUF_SIZE', 'MLOG_BUF_SIZE', 'MAX_SESSIONS',
+            'MAX_TRX', 'MAX_OS_FILE_SIZE', 'ENABLE_MONITOR',
+            'SVR_LOAD_BALANCE', 'DICT_BUF_SIZE', 'HJ_BUF_SIZE',
+            'HAGR_BUF_SIZE', 'MAX_EPOLL_NUM'
+        ]
+        for key in extended_config_keys:
+            if key not in config_params:
+                try:
+                    cur.execute(f"SELECT VALUE FROM V$PARAMETER WHERE NAME='{key}'")
+                    config_params[key] = cur.fetchone()[0]
+                except Exception:
+                    pass
 
         cur.close()
 
@@ -743,4 +931,25 @@ class DamengChecker(BaseDBChecker):
 
             # 资源限制
             "resource_limits": resource_limits,
+
+            # 长时间事务
+            "long_transactions": long_transactions,
+
+            # 死锁记录
+            "last_deadlock": last_deadlock,
+
+            # Redo 日志统计
+            "redo_log_stats": redo_log_stats,
+
+            # 对象统计 Top20
+            "table_size_top20": table_size_top20,
+
+            # 数据字典统计
+            "object_summary": object_summary,
+
+            # 会话按状态统计
+            "session_by_state": session_by_state,
+
+            # 高可用状态汇总
+            "ha_status": ha_status,
         }

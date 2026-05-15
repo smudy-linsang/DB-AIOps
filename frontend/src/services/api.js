@@ -1,6 +1,8 @@
 import axios from 'axios'
 
 const API_BASE = '/api/v1'
+const MAX_RETRIES = 2
+const RETRY_DELAY_MS = 1000
 
 // 创建 axios 实例
 const api = axios.create({
@@ -18,6 +20,8 @@ api.interceptors.request.use(
     if (token) {
       config.headers.Authorization = `Bearer ${token}`
     }
+    // 标记是否可重试（默认允许 GET 请求重试）
+    config.__retryCount = config.__retryCount || 0
     return config
   },
   (error) => {
@@ -25,19 +29,41 @@ api.interceptors.request.use(
   }
 )
 
-// 响应拦截器 - 处理错误
+// 响应拦截器 - 统一错误处理 + 自动重试
 api.interceptors.response.use(
   (response) => {
     return response.data
   },
-  (error) => {
+  async (error) => {
+    const config = error.config
+
+    // 401 未授权：清除 Token 并跳转登录
     if (error.response?.status === 401) {
-      // Token 过期或无效
       localStorage.removeItem('auth_token')
       localStorage.removeItem('user')
-      window.location.href = '/login'
+      // 避免在登录页重复跳转
+      if (!window.location.pathname.includes('/login')) {
+        window.location.href = '/login'
+      }
+      return Promise.reject(error)
     }
-    return Promise.reject(error)
+
+    // 5xx 服务端错误：对幂等请求自动重试
+    const isRetryable = !config || config.__retryCount >= MAX_RETRIES
+    const isIdempotent = !config.method || config.method?.toLowerCase() === 'get'
+    const isServerError = error.response?.status >= 500
+
+    if (!isRetryable && isIdempotent && (isServerError || !error.response)) {
+      config.__retryCount += 1
+      // 指数退避延迟
+      const delay = RETRY_DELAY_MS * Math.pow(2, config.__retryCount - 1)
+      await new Promise(resolve => setTimeout(resolve, delay))
+      return api(config)
+    }
+
+    // 4xx 客户端错误或其他：直接拒绝
+    const message = error.response?.data?.error || error.message || '请求失败'
+    return Promise.reject(new Error(message))
   }
 )
 
@@ -208,16 +234,16 @@ export const alertRuleAPI = {
 
   // 获取模板列表（可按 db_type 过滤）
   listTemplates: (db_type) =>
-    api.get('/alert-rules/templates/', { params: db_type ? { db_type } : {} }),
+    api.get('/alert-templates/', { params: db_type ? { db_type } : {} }),
 
   // 创建模板
-  createTemplate: (data) => api.post('/alert-rules/templates/', data),
+  createTemplate: (data) => api.post('/alert-templates/', data),
 
   // 更新模板
-  updateTemplate: (id, data) => api.put(`/alert-rules/templates/${id}/`, data),
+  updateTemplate: (id, data) => api.put(`/alert-templates/${id}/`, data),
 
   // 删除模板
-  deleteTemplate: (id) => api.delete(`/alert-rules/templates/${id}/`),
+  deleteTemplate: (id) => api.delete(`/alert-templates/${id}/`),
 
   // 获取某数据库的覆盖配置（含模板基准值）
   listOverrides: (dbId) => api.get(`/databases/${dbId}/alert-overrides/`),
@@ -334,6 +360,72 @@ export const getUser = () => {
 
 export const isAuthenticated = () => {
   return !!localStorage.getItem('auth_token')
+}
+
+// ==========================================
+// 告警静默窗口 API (Phase 4)
+// ==========================================
+
+export const silenceWindowAPI = {
+  list: (params = {}) => api.get('/silence-windows/', { params }),
+  create: (data) => api.post('/silence-windows/', data),
+  getDetail: (id) => api.get(`/silence-windows/${id}/`),
+  update: (id, data) => api.put(`/silence-windows/${id}/`, data),
+  delete: (id) => api.delete(`/silence-windows/${id}/`),
+}
+
+// ==========================================
+// 通知规则 API (Phase 4)
+// ==========================================
+
+export const notificationRuleAPI = {
+  list: (params = {}) => api.get('/notification-rules/', { params }),
+  create: (data) => api.post('/notification-rules/', data),
+  getDetail: (id) => api.get(`/notification-rules/${id}/`),
+  update: (id, data) => api.put(`/notification-rules/${id}/`, data),
+  delete: (id) => api.delete(`/notification-rules/${id}/`),
+}
+
+// ==========================================
+// 告警通知日志 API (Phase 4)
+// ==========================================
+
+export const alertNotificationAPI = {
+  list: (params = {}) => api.get('/alert-notifications/', { params }),
+}
+
+// ==========================================
+// 业务系统 API (Phase 4)
+// ==========================================
+
+export const businessSystemAPI = {
+  list: (params = {}) => api.get('/business-systems/', { params }),
+  create: (data) => api.post('/business-systems/', data),
+  getDetail: (id) => api.get(`/business-systems/${id}/`),
+  update: (id, data) => api.put(`/business-systems/${id}/`, data),
+  delete: (id) => api.delete(`/business-systems/${id}/`),
+}
+
+// ==========================================
+// 数据库拓扑 API (Phase 4)
+// ==========================================
+
+export const topologyAPI = {
+  // 获取数据库拓扑信息
+  getTopology: (dbId) => api.get(`/databases/${dbId}/topology/`),
+  // 创建/更新拓扑关系
+  saveTopology: (dbId, data) => api.post(`/databases/${dbId}/topology/`, data),
+  // 影响分析
+  getImpact: (dbId) => api.get(`/databases/${dbId}/impact/`),
+}
+
+// ==========================================
+// 报表 API (Phase 4)
+// ==========================================
+
+export const reportAPI = {
+  list: (params = {}) => api.get('/reports/', { params }),
+  download: (id) => api.get(`/reports/${id}/download/`, { responseType: 'blob' }),
 }
 
 export default api

@@ -28,8 +28,12 @@ from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 from django.utils.decorators import method_decorator
 from django.contrib.auth.models import User
+from django.db.models import Q
+from django.shortcuts import get_object_or_404
 
 from .models import MonitorLog, AlertLog, AuditLog, UserProfile, DatabaseConfig
+from .models import AlertSilenceWindow, AlertNotificationLog, NotificationRule
+from .models import BusinessSystem, DatabaseTopology, ReportRecord
 from .slow_query_engine import SlowQueryEngine
 from .auth import require_auth, require_role, get_user_role, get_user_database_ids, get_user_permissions, is_admin
 
@@ -112,7 +116,7 @@ class LoginView(JSONResponseMixin, View):
         
         try:
             data = json.loads(request.body)
-        except:
+        except Exception:
             return self.error_response('Invalid JSON body', 400)
         
         username = data.get('username', '').strip()
@@ -175,20 +179,27 @@ class DatabaseListView(JSONResponseMixin, View):
         """
         # 获取用户可见的数据库ID列表（RBAC 数据范围过滤）
         allowed_db_ids = get_user_database_ids(request.user)
-        
-        # 查询数据库配置
+
+        # 预取每个数据库的最新采集日志，避免 N+1 查询
         from .models import DatabaseConfig
-        
+        from django.db.models import Subquery, OuterRef, CharField, DateTimeField
+
+        latest_log_subq = MonitorLog.objects.filter(
+            config=OuterRef('pk')
+        ).order_by('-create_time')
+
         if allowed_db_ids is not None:
             configs = DatabaseConfig.objects.filter(id__in=allowed_db_ids, is_active=True)
         else:
             configs = DatabaseConfig.objects.filter(is_active=True)
-        
+
+        configs = configs.annotate(
+            latest_status=Subquery(latest_log_subq.values('status')[:1], output_field=CharField()),
+            latest_collect_time=Subquery(latest_log_subq.values('create_time')[:1], output_field=DateTimeField()),
+        )
+
         result = []
         for config in configs:
-            # 获取最新采集状态
-            latest_log = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
-            
             result.append({
                 'id': config.id,
                 'name': config.name,
@@ -197,8 +208,8 @@ class DatabaseListView(JSONResponseMixin, View):
                 'port': config.port,
                 'service_name': config.service_name or '',
                 'is_active': config.is_active,
-                'status': latest_log.status if latest_log else 'UNKNOWN',
-                'last_collect_time': latest_log.create_time.isoformat() if latest_log else None,
+                'status': config.latest_status or 'UNKNOWN',
+                'last_collect_time': config.latest_collect_time.isoformat() if config.latest_collect_time else None,
                 'create_time': config.create_time.isoformat() if config.create_time else None
             })
         
@@ -207,10 +218,11 @@ class DatabaseListView(JSONResponseMixin, View):
             'databases': result
         })
     
+    @method_decorator(require_role(['dba_supervisor', 'admin']))
     def post(self, request):
         """
         POST /api/v1/databases/
-        创建新的数据库配置
+        创建新的数据库配置（仅 dba_supervisor 和 admin 可操作）
         """
         try:
             import json
@@ -476,6 +488,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         删除数据库配置及所有关联的监控数据（级联删除）
         """
         from .models import DatabaseConfig, MonitorLog, AlertLog, HealthScore, BaselineModel, PredictionResult
+        from django.db import transaction
         try:
             config = DatabaseConfig.objects.get(id=config_id)
             config_name = config.name
@@ -489,15 +502,14 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
                 'predictions': PredictionResult.objects.filter(config=config).count(),
             }
 
-            # 级联删除所有关联数据（先删除子表数据，再删除主表）
-            MonitorLog.objects.filter(config=config).delete()
-            AlertLog.objects.filter(config=config).delete()
-            HealthScore.objects.filter(config=config).delete()
-            BaselineModel.objects.filter(config=config).delete()
-            PredictionResult.objects.filter(config=config).delete()
-
-            # 最后删除数据库配置本身
-            config.delete()
+            # 级联删除：在事务中执行，保证原子性
+            with transaction.atomic():
+                MonitorLog.objects.filter(config=config).delete()
+                AlertLog.objects.filter(config=config).delete()
+                HealthScore.objects.filter(config=config).delete()
+                BaselineModel.objects.filter(config=config).delete()
+                PredictionResult.objects.filter(config=config).delete()
+                config.delete()
 
             return self.json_response({
                 'message': f'数据库配置「{config_name}」及所有关联监控数据已删除',
@@ -521,7 +533,7 @@ class DatabaseStatusView(JSONResponseMixin, View):
         """
         GET /api/v1/databases/{id}/status/
         获取指定数据库当前状态（最新采集结果）
-        双引擎：TimescaleDB（指标）→ SQLite（回退）
+        双引擎：TimescaleDB（指标）→ ORM（回退）
         """
         # RBAC 检查
         allowed_db_ids = get_user_database_ids(request.user)
@@ -557,7 +569,7 @@ class DatabaseStatusView(JSONResponseMixin, View):
         except Exception as ts_err:
             pass
         
-        # 回退：从 SQLite 获取最新采集日志
+        # 回退：从 ORM 获取最新采集日志
         latest = MonitorLog.objects.filter(
             config_id=config_id
         ).order_by('-create_time').first()
@@ -576,7 +588,7 @@ class DatabaseStatusView(JSONResponseMixin, View):
             'collected_at': latest.create_time.isoformat(),
             'message': latest.message,
             'metrics': metrics,
-            'source': 'sqlite'
+            'source': 'orm'
         }
         
         return self.json_response(data)
@@ -594,7 +606,7 @@ class DatabaseMetricsView(JSONResponseMixin, View):
         """
         GET /api/v1/databases/{id}/metrics/
         查询历史指标，支持时间范围和指标名过滤
-        双引擎：TimescaleDB（数值指标）→ SQLite（回退）
+        双引擎：TimescaleDB（数值指标）→ ORM（回退）
         """
         # RBAC 检查
         allowed_db_ids = get_user_database_ids(request.user)
@@ -673,7 +685,7 @@ class DatabaseMetricsView(JSONResponseMixin, View):
             except Exception as ts_err:
                 pass
         
-        # 回退：从 SQLite 查询（支持复杂指标如表空间、等待事件）
+        # 回退：从 ORM 查询（支持复杂指标如表空间、等待事件）
         logs = MonitorLog.objects.filter(
             config_id=config_id,
             create_time__gte=start_dt,
@@ -782,7 +794,7 @@ class DatabaseMetricsView(JSONResponseMixin, View):
             'end': end_dt.isoformat(),
             'count': len(result),
             'metrics': result,
-            'source': 'sqlite'
+            'source': 'orm'
         })
 
 
@@ -807,7 +819,7 @@ class DatabaseBaselineView(JSONResponseMixin, View):
         # 查询基线模型
         from .models import BaselineModel
         
-        baselines = BaselineModel.objects.filter(db_config_id=config_id)
+        baselines = BaselineModel.objects.filter(config_id=config_id)
         
         result = []
         for bl in baselines:
@@ -855,7 +867,7 @@ class DatabasePredictionView(JSONResponseMixin, View):
         from .models import PredictionResult
         
         predictions = PredictionResult.objects.filter(
-            db_config_id=config_id
+            config_id=config_id
         ).order_by('-generated_at')[:10]  # 最近10条
         
         result = []
@@ -905,7 +917,7 @@ class DatabaseHealthView(JSONResponseMixin, View):
         from .models import HealthScore
         
         scores = HealthScore.objects.filter(
-            db_config_id=config_id,
+            config_id=config_id,
             score_date__gte=start_date
         ).order_by('-score_date')
         
@@ -1534,10 +1546,10 @@ class UserListView(JSONResponseMixin, View):
         result = []
         for user in users:
             try:
-                profile = user.userprofile
+                profile = user.profile
                 role = profile.role
                 allowed_dbs = profile.allowed_databases
-            except:
+            except Exception:
                 role = 'read_only_observer'
                 allowed_dbs = []
             
@@ -1567,7 +1579,7 @@ class UserListView(JSONResponseMixin, View):
         
         try:
             data = json.loads(request.body)
-        except:
+        except Exception:
             return self.error_response('Invalid JSON body', 400)
         
         username = data.get('username', '').strip()
@@ -1625,10 +1637,10 @@ class UserDetailView(JSONResponseMixin, View):
             return self.error_response('User not found', 404)
         
         try:
-            profile = user.userprofile
+            profile = user.profile
             role = profile.role
             allowed_dbs = profile.allowed_databases
-        except:
+        except Exception:
             role = 'read_only_observer'
             allowed_dbs = []
         
@@ -1658,7 +1670,7 @@ class UserDetailView(JSONResponseMixin, View):
         
         try:
             data = json.loads(request.body)
-        except:
+        except Exception:
             return self.error_response('Invalid JSON body', 400)
         
         # 更新字段
@@ -1709,7 +1721,7 @@ class UserPasswordView(JSONResponseMixin, View):
         
         try:
             data = json.loads(request.body)
-        except:
+        except Exception:
             return self.error_response('Invalid JSON body', 400)
         
         password = data.get('password', '')
@@ -1744,10 +1756,10 @@ class CurrentUserView(JSONResponseMixin, View):
         user = request.user
         
         try:
-            profile = user.userprofile
+            profile = user.profile
             role = profile.role
             allowed_dbs = profile.allowed_databases
-        except:
+        except Exception:
             role = 'read_only_observer'
             allowed_dbs = []
         
@@ -2687,3 +2699,583 @@ class DatabaseSQLTextSearchView(JSONResponseMixin, View):
             })
         except Exception as e:
             return self.error_response(f'Failed to search SQL: {str(e)}', 500)
+
+
+# =============================================================================
+# Dashboard API（仪表盘聚合数据）
+# =============================================================================
+
+class DashboardStatsView(JSONResponseMixin, View):
+    """仪表盘统计摘要 API
+
+    GET /api/v1/dashboard/stats/
+    返回: { total, online, offline, degraded, avg_health, active_alerts, ... }
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import DatabaseConfig, HealthScore
+        dbs = DatabaseConfig.objects.filter(is_active=True)
+        total = dbs.count()
+        # 用子查询获取每个库最新状态
+        from django.db.models import Subquery, OuterRef
+        latest_status = MonitorLog.objects.filter(
+            config=OuterRef('pk')
+        ).order_by('-create_time')
+        dbs_ann = dbs.annotate(
+            _status=Subquery(latest_status.values('status')[:1])
+        )
+        online = sum(1 for d in dbs_ann if d._status == 'UP')
+        offline = sum(1 for d in dbs_ann if d._status and d._status not in ('UP',))
+        degraded = sum(1 for d in dbs_ann if d._status == 'DEGRADED')
+
+        # 平均健康评分
+        scores = list(HealthScore.objects.values_list('total_score', flat=True))
+        avg_health = round(sum(scores) / len(scores), 1) if scores else None
+
+        # 活跃告警
+        active_alerts = AlertLog.objects.filter(status='active').count()
+
+        return self.json_response({
+            'total': total, 'online': online, 'offline': offline,
+            'degraded': degraded, 'avg_health': avg_health,
+            'active_alerts': active_alerts,
+        })
+
+
+class DashboardChartsView(JSONResponseMixin, View):
+    """仪表盘图表数据 API
+
+    GET /api/v1/dashboard/charts/
+    返回趋势数据（QPS/连接数等），聚合最近24小时
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import DatabaseConfig
+        hours = int(request.GET.get('hours', 24))
+        since = timezone.now() - timedelta(hours=hours)
+        # 尝试从 TimescaleDB 读取趋势
+        try:
+            from .timeseries import TimeSeriesManager
+            db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
+            tsm = TimeSeriesManager()
+            trend_data = tsm.get_trend_for_dashboard(db_ids, since)
+            return self.json_response({'trend': trend_data})
+        except Exception:
+            return self.json_response({'trend': []})
+
+
+class DashboardHealthTrendView(JSONResponseMixin, View):
+    """健康评分趋势 API
+
+    GET /api/v1/dashboard/health-trend/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import HealthScore
+        days = int(request.GET.get('days', 7))
+        since = timezone.now() - timedelta(days=days)
+        scores = HealthScore.objects.filter(
+            calculated_at__gte=since
+        ).order_by('calculated_at').values('calculated_at', 'score')
+        data = [
+            {'time': s['calculated_at'].isoformat(), 'score': s['score']}
+            for s in scores
+        ]
+        return self.json_response({'health_trend': data})
+
+
+class DashboardAlertTrendView(JSONResponseMixin, View):
+    """告警趋势 API
+
+    GET /api/v1/dashboard/alert-trend/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        days = int(request.GET.get('days', 7))
+        since = timezone.now() - timedelta(days=days)
+        from django.db.models import Count
+        from .models import AlertLog
+        alerts_per_day = AlertLog.objects.filter(
+            create_time__gte=since
+        ).extra({'day': "date(create_time)"}).values('day').annotate(count=Count('id'))
+        data = [
+            {'date': a['day'], 'count': a['count']}
+            for a in alerts_per_day
+        ]
+        return self.json_response({'alert_trend': data})
+
+
+# =============================================================================
+# 补充缺失 API 端点
+# =============================================================================
+
+class AlertStatisticsView(JSONResponseMixin, View):
+    """告警统计 API
+
+    GET /api/v1/alerts/statistics/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from django.db.models import Count
+        from .models import AlertLog
+        stats = AlertLog.objects.aggregate(
+            total=Count('id'),
+            active=Count('id', filter=Q(status='active')),
+            acknowledged=Count('id', filter=Q(status='acknowledged')),
+            resolved=Count('id', filter=Q(status='resolved')),
+        )
+        by_severity = dict(
+            AlertLog.objects.values_list('severity').annotate(
+                count=Count('id')
+            ).order_by()
+        )
+        return self.json_response({**stats, 'by_severity': by_severity})
+
+
+class DatabasePerformanceHubView(JSONResponseMixin, View):
+    """Performance Hub 聚合 API
+
+    GET /api/v1/databases/<id>/performance-hub/
+    返回状态+指标+告警+慢查询 的聚合数据
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        from .models import DatabaseConfig
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+        # 聚合状态、指标、告警
+        result = {'id': config.id, 'name': config.name, 'db_type': config.db_type}
+        # 最新状态
+        latest = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+        if latest:
+            try:
+                result['metrics'] = json.loads(latest.message)
+                result['status'] = latest.status
+            except Exception:
+                result['metrics'] = {}
+        # 告警
+        result['active_alerts'] = AlertLog.objects.filter(config=config, status='active').count()
+        return self.json_response(result)
+
+
+class DatabaseMetricsHistoryView(JSONResponseMixin, View):
+    """历史指标查询 API
+
+    GET /api/v1/databases/<id>/metrics/history/
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        from .models import DatabaseConfig
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+        start_time = request.GET.get('start_time')
+        end_time = request.GET.get('end_time')
+        metric_key = request.GET.get('metric_key', '')
+        try:
+            from .timeseries import TimeSeriesManager
+            tsm = TimeSeriesManager()
+            data = tsm.query_metrics(
+                config_id=config.id, metric_key=metric_key or None,
+                start_time=start_time, end_time=end_time
+            )
+            return self.json_response({'metrics': data})
+        except Exception:
+            # 回退到 MonitorLog
+            qs = MonitorLog.objects.filter(config=config).order_by('-create_time')[:100]
+            history = []
+            for log in qs:
+                try:
+                    msg = json.loads(log.message)
+                    if metric_key and metric_key in msg:
+                        history.append({'time': log.create_time.isoformat(), 'value': msg[metric_key]})
+                except Exception:
+                    pass
+            return self.json_response({'metrics': history})
+
+
+# =============================================================================
+# Phase 4: 告警静默窗口 API
+# =============================================================================
+
+class SilenceWindowListView(JSONResponseMixin, View):
+    """静默窗口列表/创建 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        windows = AlertSilenceWindow.objects.all().order_by('-is_active', '-create_time')
+        data = []
+        for w in windows:
+            data.append({
+                'id': w.id, 'name': w.name, 'alert_type': w.alert_type,
+                'start_time': str(w.start_time), 'end_time': str(w.end_time),
+                'weekdays': w.weekdays, 'is_active': w.is_active,
+                'start_datetime': w.start_datetime.isoformat() if w.start_datetime else None,
+                'end_datetime': w.end_datetime.isoformat() if w.end_datetime else None,
+                'reason': w.reason, 'config_id': w.config_id,
+                'config_name': w.config.name if w.config else '全局',
+            })
+        return self.json_response({'silence_windows': data})
+
+    def post(self, request):
+        try:
+            body = json.loads(request.body)
+            config_id = body.get('config_id')
+            config = DatabaseConfig.objects.get(id=config_id) if config_id else None
+            w = AlertSilenceWindow.objects.create(
+                config=config, name=body['name'],
+                alert_type=body.get('alert_type', ''),
+                start_time=body.get('start_time', '00:00'),
+                end_time=body.get('end_time', '23:59'),
+                weekdays=body.get('weekdays', '1,2,3,4,5,6,7'),
+                start_datetime=body.get('start_datetime'),
+                end_datetime=body.get('end_datetime'),
+                is_active=body.get('is_active', True),
+                reason=body.get('reason', ''),
+                created_by=request.user.username,
+            )
+            return self.json_response({'id': w.id, 'name': w.name, 'message': '静默窗口已创建'}, status=201)
+        except Exception as e:
+            return self.error_response(f'创建失败: {str(e)}', 400)
+
+
+class SilenceWindowDetailView(JSONResponseMixin, View):
+    """静默窗口详情/更新/删除 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, pk):
+        w = get_object_or_404(AlertSilenceWindow, id=pk)
+        return self.json_response({'id': w.id, 'name': w.name, 'alert_type': w.alert_type,
+            'start_time': str(w.start_time), 'end_time': str(w.end_time),
+            'weekdays': w.weekdays, 'is_active': w.is_active, 'reason': w.reason})
+
+    def put(self, request, pk):
+        w = get_object_or_404(AlertSilenceWindow, id=pk)
+        try:
+            body = json.loads(request.body)
+            for k in ('name', 'alert_type', 'start_time', 'end_time', 'weekdays', 'is_active', 'reason'):
+                if k in body:
+                    setattr(w, k, body[k])
+            w.save()
+            return self.json_response({'message': '更新成功'})
+        except Exception as e:
+            return self.error_response(str(e), 400)
+
+    def delete(self, request, pk):
+        w = get_object_or_404(AlertSilenceWindow, id=pk)
+        w.delete()
+        return self.json_response({'message': '已删除'})
+
+
+# =============================================================================
+# Phase 4: 通知规则 API
+# =============================================================================
+
+class NotificationRuleListView(JSONResponseMixin, View):
+    """通知规则列表/创建 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        rules = NotificationRule.objects.all().order_by('-priority', 'name')
+        data = [{'id': r.id, 'name': r.name, 'alert_types': r.alert_types,
+                 'severities': r.severities, 'channels': r.channels,
+                 'db_config_id': r.db_config_id, 'schedule': r.schedule,
+                 'escalation_minutes': r.escalation_minutes,
+                 'is_enabled': r.is_enabled, 'priority': r.priority}
+                for r in rules]
+        return self.json_response({'rules': data})
+
+    def post(self, request):
+        try:
+            body = json.loads(request.body)
+            config_id = body.get('db_config_id')
+            config = DatabaseConfig.objects.get(id=config_id) if config_id else None
+            r = NotificationRule.objects.create(
+                name=body['name'], alert_types=body.get('alert_types', []),
+                severities=body.get('severities', []), channels=body.get('channels', ['email']),
+                db_config=config, schedule=body.get('schedule'),
+                escalation_minutes=body.get('escalation_minutes', 0),
+                is_enabled=body.get('is_enabled', True),
+                priority=body.get('priority', 0),
+            )
+            return self.json_response({'id': r.id, 'message': '通知规则已创建'}, status=201)
+        except Exception as e:
+            return self.error_response(f'创建失败: {str(e)}', 400)
+
+
+class NotificationRuleDetailView(JSONResponseMixin, View):
+    """通知规则详情/更新/删除 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def put(self, request, pk):
+        r = get_object_or_404(NotificationRule, id=pk)
+        try:
+            body = json.loads(request.body)
+            for k in ('name', 'alert_types', 'severities', 'channels', 'schedule',
+                      'escalation_minutes', 'is_enabled', 'priority'):
+                if k in body:
+                    setattr(r, k, body[k])
+            r.save()
+            return self.json_response({'message': '更新成功'})
+        except Exception as e:
+            return self.error_response(str(e), 400)
+
+    def delete(self, request, pk):
+        r = get_object_or_404(NotificationRule, id=pk)
+        r.delete()
+        return self.json_response({'message': '已删除'})
+
+
+# =============================================================================
+# Phase 4: 通知日志 API
+# =============================================================================
+
+class AlertNotificationLogView(JSONResponseMixin, View):
+    """查看某告警的通知记录 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, alert_id):
+        logs = AlertNotificationLog.objects.filter(alert_id=alert_id).order_by('-send_time')
+        data = [{'id': n.id, 'channel': n.channel, 'status': n.status,
+                 'error_message': n.error_message, 'send_time': n.send_time.isoformat()}
+                for n in logs]
+        return self.json_response({'notifications': data})
+
+
+# =============================================================================
+# Phase 4: 业务系统 API
+# =============================================================================
+
+class BusinessSystemListView(JSONResponseMixin, View):
+    """业务系统列表/创建 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        systems = BusinessSystem.objects.all().prefetch_related('databases')
+        data = []
+        for s in systems:
+            dbs = [{'id': d.id, 'name': d.name, 'db_type': d.db_type} for d in s.databases.all()]
+            data.append({'id': s.id, 'name': s.name, 'importance': s.importance,
+                         'owner': s.owner, 'contact': s.contact, 'description': s.description,
+                         'databases': dbs})
+        return self.json_response({'business_systems': data})
+
+    def post(self, request):
+        try:
+            body = json.loads(request.body)
+            s = BusinessSystem.objects.create(
+                name=body['name'], importance=body.get('importance', 'normal'),
+                owner=body.get('owner', ''), contact=body.get('contact', ''),
+                description=body.get('description', ''),
+            )
+            if body.get('database_ids'):
+                s.databases.set(body['database_ids'])
+            return self.json_response({'id': s.id, 'message': '业务系统已创建'}, status=201)
+        except Exception as e:
+            return self.error_response(str(e), 400)
+
+
+class BusinessSystemDetailView(JSONResponseMixin, View):
+    """业务系统详情/更新/删除 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, pk):
+        s = get_object_or_404(BusinessSystem, id=pk)
+        return self.json_response({'id': s.id, 'name': s.name, 'importance': s.importance,
+            'owner': s.owner, 'contact': s.contact, 'description': s.description,
+            'databases': [{'id': d.id, 'name': d.name} for d in s.databases.all()]})
+
+    def put(self, request, pk):
+        s = get_object_or_404(BusinessSystem, id=pk)
+        try:
+            body = json.loads(request.body)
+            for k in ('name', 'importance', 'owner', 'contact', 'description'):
+                if k in body:
+                    setattr(s, k, body[k])
+            s.save()
+            if 'database_ids' in body:
+                s.databases.set(body['database_ids'])
+            return self.json_response({'message': '更新成功'})
+        except Exception as e:
+            return self.error_response(str(e), 400)
+
+    def delete(self, request, pk):
+        s = get_object_or_404(BusinessSystem, id=pk)
+        s.delete()
+        return self.json_response({'message': '已删除'})
+
+
+# =============================================================================
+# Phase 4: 数据库拓扑 API
+# =============================================================================
+
+class DatabaseTopologyView(JSONResponseMixin, View):
+    """数据库拓扑查询/设置 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+        topo = DatabaseTopology.objects.filter(db_config=config).first()
+        if not topo:
+            return self.json_response({'topology': None, 'message': '未配置拓扑'})
+        return self.json_response({'topology': {
+            'id': topo.id, 'role': topo.role, 'topology_type': topo.topology_type,
+            'cluster_name': topo.cluster_name, 'sync_mode': topo.sync_mode,
+            'lag_seconds': topo.lag_seconds,
+            'peer_databases': [{'id': d.id, 'name': d.name, 'db_type': d.db_type} for d in topo.peer_databases.all()],
+        }})
+
+    def post(self, request, config_id):
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+        try:
+            body = json.loads(request.body)
+            topo, created = DatabaseTopology.objects.update_or_create(
+                db_config=config,
+                defaults={'role': body.get('role', 'single'),
+                          'topology_type': body.get('topology_type', 'single'),
+                          'cluster_name': body.get('cluster_name', ''),
+                          'sync_mode': body.get('sync_mode', ''),
+                          'lag_seconds': body.get('lag_seconds'),}
+            )
+            if 'peer_database_ids' in body:
+                topo.peer_databases.set(body['peer_database_ids'])
+            return self.json_response({'id': topo.id, 'message': '拓扑已保存'}, status=201 if created else 200)
+        except Exception as e:
+            return self.error_response(str(e), 400)
+
+
+# =============================================================================
+# Phase 4: 影响分析 API
+# =============================================================================
+
+class DatabaseImpactView(JSONResponseMixin, View):
+    """数据库影响分析 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, config_id):
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+        # 关联的业务系统
+        affected_systems = BusinessSystem.objects.filter(databases=config)
+        systems_data = [{'name': s.name, 'importance': s.importance, 'owner': s.owner, 'contact': s.contact}
+                        for s in affected_systems]
+        # 拓扑信息
+        topo = DatabaseTopology.objects.filter(db_config=config).first()
+        topology_data = None
+        if topo:
+            topology_data = {
+                'role': topo.role, 'topology_type': topo.topology_type,
+                'cluster_name': topo.cluster_name, 'sync_mode': topo.sync_mode,
+                'lag_seconds': topo.lag_seconds,
+                'peer_databases': [{'id': d.id, 'name': d.name, 'role': getattr(d.topology_info.first(), 'role', 'unknown')}
+                                   for d in topo.peer_databases.all()],
+                'failover_possible': topo.topology_type in ('primary_standby', 'adg', 'mha') and topo.role == 'primary',
+            }
+        return self.json_response({
+            'affected_business_systems': systems_data,
+            'topology': topology_data,
+        })
+
+
+# =============================================================================
+# Phase 4: 报表 API
+# =============================================================================
+
+class ReportListView(JSONResponseMixin, View):
+    """报表列表 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        reports = ReportRecord.objects.all()[:50]
+        data = [{'id': r.id, 'report_type': r.report_type, 'title': r.title,
+                 'period_start': str(r.period_start), 'period_end': str(r.period_end),
+                 'status': r.status, 'created_at': r.created_at.isoformat()}
+                for r in reports]
+        return self.json_response({'reports': data})
+
+
+class ReportDownloadView(JSONResponseMixin, View):
+    """报表下载 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, pk):
+        r = get_object_or_404(ReportRecord, id=pk)
+        if not r.content_html:
+            return self.error_response('报表内容为空', 404)
+        from django.http import HttpResponse
+        return HttpResponse(r.content_html, content_type='text/html; charset=utf-8')

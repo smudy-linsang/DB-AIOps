@@ -16,7 +16,10 @@ Phase 3 核心模块：基于168时间槽动态基线的精准告警
 """
 
 from collections import defaultdict
+import logging
 from dataclasses import dataclass, field
+
+logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
 

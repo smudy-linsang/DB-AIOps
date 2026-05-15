@@ -214,6 +214,16 @@ class TimeseriesStorage:
             logger.error(f"[Timeseries] 快照写入失败: {e}")
             return False
 
+    # SQL 查询模板（使用参数化占位符，表名通过白名单校验）
+    _TABLE_WHITELIST = {
+        'raw': 'metric_point',
+        'hourly': 'metric_hourly',
+        'daily': 'metric_daily',
+    }
+
+    _RAW_QUERY = "SELECT time, value FROM {table} WHERE db_config_id = %s AND metric_key = %s AND time >= %s ORDER BY time"
+    _AGG_QUERY = "SELECT bucket, avg_value, min_value, max_value, p95_value FROM {table} WHERE db_config_id = %s AND metric_key = %s AND bucket >= %s ORDER BY bucket"
+
     def query_metric_history(
         self,
         db_config_id: int,
@@ -237,27 +247,22 @@ class TimeseriesStorage:
         if not conn:
             return []
 
-        table_map = {
-            'raw': 'metric_point',
-            'hourly': 'metric_hourly',
-            'daily': 'metric_daily',
-        }
-        table = table_map.get(granularity, 'metric_point')
+        # 白名单校验表名，防止 SQL 注入
+        table = self._TABLE_WHITELIST.get(granularity)
+        if table is None:
+            logger.warning(f"[Timeseries] 未知粒度类型: {granularity}")
+            table = self._TABLE_WHITELIST['raw']
 
         try:
             cur = conn.cursor()
             cutoff = timezone.now() - timedelta(hours=hours)
 
             if granularity == 'raw':
-                cur.execute(
-                    f"SELECT time, value FROM {table} WHERE db_config_id = %s AND metric_key = %s AND time >= %s ORDER BY time",
-                    (db_config_id, metric_key, cutoff)
-                )
+                query = self._RAW_QUERY.format(table=table)
+                cur.execute(query, (db_config_id, metric_key, cutoff))
             else:
-                cur.execute(
-                    f"SELECT bucket, avg_value, min_value, max_value, p95_value FROM {table} WHERE db_config_id = %s AND metric_key = %s AND bucket >= %s ORDER BY bucket",
-                    (db_config_id, metric_key, cutoff)
-                )
+                query = self._AGG_QUERY.format(table=table)
+                cur.execute(query, (db_config_id, metric_key, cutoff))
 
             results = []
             for row in cur.fetchall():

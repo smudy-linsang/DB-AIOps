@@ -56,16 +56,63 @@ temp/
 # Project specific (Temp scripts)
 =42.0.0
 server.log
+$null
 
 # Analysis/Fix scripts (Temporary)
 analyze_*.py
 fix_*.py
 smart_*.py
-simple_*.py
+simple_fix.py
 full_fix.py
 restore_*.py
 decode_*.py
 check_encoding.py
+check_db_passwords.py
+check_metrics.py
+check_monitor_log.py
+check_mysql_user.py
+check_oracle_metrics.py
+check_users.py
+create_test_user.py
+find_corruptions.py
+find_emojis.py
+disable_dm.py
+init_test_dbs.py
+migrate_alerts_to_es.py
+migrate_to_pg.py
+update_oracle_pass.py
+
+# Test scripts (Temporary)
+test_acme_reader.py
+test_alert_engine.py
+test_all_checkers.py
+test_all_db_metrics.py
+test_all_dbs.py
+test_api_comprehensive.py
+test_api_data.py
+test_api_metric.py
+test_cache.py
+test_config_advisor.py
+test_connect.py
+test_cycle_detector.py
+test_db_connections.py
+test_dm_schema.py
+test_dual_engine.py
+test_health_engine.py
+test_index_advisor.py
+test_login.py
+test_metrics_api.py
+test_new_architecture.py
+test_oracle_conn.py
+test_performance.py
+test_pg_conn.py
+test_pg_queries.py
+test_phase2_features.py
+test_profile_engine.py
+test_proxy_e2e.py
+test_rate_limit.py
+test_report_engine.py
+test_slow_query_engine.py
 
 # Celery/Redis
 celerybeat-schedule
@@ -80,3 +127,19 @@ htmlcov/
 node_modules/
 frontend/node_modules/
 frontend/NUL
+
+# Test results
+test_results_*.json
+
+# Debug scripts
+debug_*.py
+query
+
+# Qoder IDE
+.qoder/
+
+# Plans (local only)
+plans/
+
+# Claude settings
+.claude/

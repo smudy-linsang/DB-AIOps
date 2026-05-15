@@ -11,7 +11,10 @@
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 from typing import Dict, List, Tuple, Optional, Any
 from monitor.models import MonitorLog, DatabaseConfig
 
@@ -249,7 +252,7 @@ class RCAEngine:
             data = json.loads(latest_log.message)
             data['current_status'] = latest_log.status
             return data
-        except:
+        except Exception:
             return None
     
     def get_recent_logs(self, limit: int = 10) -> List[Dict]:
@@ -268,7 +271,7 @@ class RCAEngine:
                     'status': log.status,
                     'data': data
                 })
-            except:
+            except Exception:
                 pass
         
         return result

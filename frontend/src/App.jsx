@@ -14,6 +14,9 @@ import AlertConfig from './pages/AlertConfig';
 import CapacityPlanning from './pages/CapacityPlanning';
 import TicketManagement from './pages/TicketManagement';
 import SQLMonitoring from './pages/SQLMonitoring';
+import NotificationSettings from './pages/NotificationSettings';
+import BusinessSystems from './pages/BusinessSystems';
+import ReportList from './pages/ReportList';
 import Login from './pages/Login';
 
 const TOKEN_KEY = 'auth_token';
@@ -44,6 +47,9 @@ function LayoutRoutes() {
           <Route path="/capacity" element={<CapacityPlanning />} />
           <Route path="/tickets" element={<TicketManagement />} />
           <Route path="/sql-monitoring" element={<SQLMonitoring />} />
+          <Route path="/notification-settings" element={<NotificationSettings />} />
+          <Route path="/business-systems" element={<BusinessSystems />} />
+          <Route path="/reports" element={<ReportList />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </ErrorBoundary>

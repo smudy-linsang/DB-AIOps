@@ -365,15 +365,15 @@ function DatabaseFleetTable({ databases = [], statuses = {}, loading = false, on
 // ==========================================
 export default function Dashboard() {
   const navigate = useNavigate();
-  const setSelectedDb = useAppStore((s) => s.setSelectedDb);
+  const { setSelectedDb, setDatabases, setAlerts, setPlatformHealth, setDbStatuses, setTrendData } = useAppStore();
 
   const [loading, setLoading] = useState(true);
   const [refreshing, setRefreshing] = useState(false);
   const [healthData, setHealthData] = useState(null);
   const [dbList, setDbList] = useState([]);
-  const [dbStatuses, setDbStatuses] = useState({});
-  const [alerts, setAlerts] = useState([]);
-  const [trendData, setTrendData] = useState([]);
+  const [dbStatusesLocal, setDbStatusesLocal] = useState({});
+  const [alertsLocal, setAlertsLocal] = useState([]);
+  const [trendDataLocal, setTrendDataLocal] = useState([]);
   const [performanceMetric, setPerformanceMetric] = useState('qps');
   const [timeRange, setTimeRange] = useState('24h');
   const [autoRefresh, setAutoRefresh] = useState(0);
@@ -388,31 +388,26 @@ export default function Dashboard() {
         dashboardAPI.getCharts().catch(() => null),
       ]);
 
-      if (health) setHealthData(health);
+      if (health) { setHealthData(health); setPlatformHealth(health); }
 
       const databases = (dbListRes?.databases || []).map((db) => ({
         ...db,
         key: db.id,
       }));
       setDbList(databases);
+      setDatabases(databases);
 
       const alertList = alertsRes?.alerts || [];
+      setAlertsLocal(alertList);
       setAlerts(alertList);
 
-      // 生成趋势数据（从 API 获取或生成 placeholder）
+      // 趋势数据：仅使用 API 返回的真实数据，无数据时显示空图表
       if (trendRes?.trend) {
-        setTrendData(trendRes.trend);
+        setTrendDataLocal(trendRes.trend);
+        setTrendData('dashboard', trendRes.trend);
       } else {
-        const now = dayjs();
-        setTrendData(
-          Array.from({ length: 48 }, (_, i) => ({
-            time: now.subtract(47 - i, 'hour').format('MM-DD HH:mm'),
-            qps: Math.max(0, 200 + Math.sin(i * 0.5) * 80 + (Math.random() - 0.5) * 60),
-            tps: Math.max(0, 50 + Math.sin(i * 0.5) * 25 + (Math.random() - 0.5) * 20),
-            conn: Math.max(0, 300 + Math.sin(i * 0.3) * 120 + (Math.random() - 0.5) * 80),
-            cpu: Math.max(0, 45 + Math.sin(i * 0.4) * 20 + (Math.random() - 0.5) * 15),
-          }))
-        );
+        setTrendDataLocal([]);
+        setTrendData('dashboard', []);
       }
     } catch (error) {
       console.error('获取仪表盘数据失败:', error);
@@ -435,6 +430,7 @@ export default function Dashboard() {
           map[dbList[idx].id] = r.value;
         }
       });
+      setDbStatusesLocal(map);
       setDbStatuses(map);
     } catch (error) {
       console.error('批量获取数据库状态失败:', error);
@@ -444,10 +440,10 @@ export default function Dashboard() {
   // 首次加载
   useEffect(() => { fetchData(); }, [fetchData]);
   useEffect(() => {
-    if (dbList.length > 0 && Object.keys(dbStatuses).length === 0) {
+    if (dbList.length > 0 && Object.keys(dbStatusesLocal).length === 0) {
       fetchAllDbStatuses();
     }
-  }, [dbList, dbStatuses, fetchAllDbStatuses]);
+  }, [dbList, dbStatusesLocal, fetchAllDbStatuses]);
 
   // 自动刷新
   useEffect(() => {
@@ -482,7 +478,7 @@ export default function Dashboard() {
     const degraded = dbList.filter((db) => db.status === 'DEGRADED').length;
 
     // 平均健康评分
-    const scores = Object.values(dbStatuses)
+    const scores = Object.values(dbStatusesLocal)
       .map((s) => s?.health_score)
       .filter((s) => s != null && !isNaN(s));
     const avgHealth = scores.length > 0
@@ -490,10 +486,10 @@ export default function Dashboard() {
       : null;
 
     // 活跃告警数
-    const activeAlerts = alerts.length;
+    const activeAlerts = alertsLocal.length;
 
     return { total, online, offline, degraded, avgHealth, activeAlerts };
-  }, [dbList, dbStatuses, alerts]);
+  }, [dbList, dbStatusesLocal, alertsLocal]);
 
   // 按类型分布
   const dbTypeDistribution = useMemo(() => {
@@ -709,7 +705,7 @@ export default function Dashboard() {
                 </Text>
               }
             >
-              <TrendChart data={trendData} metric={performanceMetric} height={300} loading={loading} />
+              <TrendChart data={trendDataLocal} metric={performanceMetric} height={300} loading={loading} />
             </Card>
           </Col>
           <Col xs={24} lg={8}>
@@ -718,7 +714,7 @@ export default function Dashboard() {
                 <Space>
                   <WarningOutlined style={{ color: '#faad14' }} />
                   <span>Top Alerts</span>
-                  {alerts.length > 0 && <Badge count={alerts.length} overflowCount={99} />}
+                  {alertsLocal.length > 0 && <Badge count={alertsLocal.length} overflowCount={99} />}
                 </Space>
               }
               extra={
@@ -727,7 +723,7 @@ export default function Dashboard() {
                 </Button>
               }
             >
-              <TopAlertsSection alerts={alerts} loading={loading} onViewAll={handleViewAllAlerts} />
+              <TopAlertsSection alerts={alertsLocal} loading={loading} onViewAll={handleViewAllAlerts} />
             </Card>
           </Col>
         </Row>
@@ -757,7 +753,7 @@ export default function Dashboard() {
           >
             <DatabaseFleetTable
               databases={dbList}
-              statuses={dbStatuses}
+              statuses={dbStatusesLocal}
               loading={loading}
               onRowClick={handleDbRowClick}
             />

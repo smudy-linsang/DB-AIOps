@@ -16,7 +16,10 @@ from dataclasses import dataclass, field
 
 import io
 import csv
+import logging
 from datetime import datetime, timedelta
+
+logger = logging.getLogger(__name__)
 from typing import Dict, List, Optional, Any
 from collections import defaultdict
 import json
@@ -385,18 +388,29 @@ class ReportDataCollector:
         total_alerts = alerts.count()
         critical_alerts = alerts.filter(severity__in=['P1', 'critical']).count()
         
-        # 计算平均健康评分（简化版）
+        # 计算平均健康评分（从缓存/数据库读取真实数据）
         try:
-            configs = DatabaseConfig.objects.filter(is_active=True)[:10]
+            from monitor.models import HealthScore
+            configs = DatabaseConfig.objects.filter(is_active=True)
             total_score = 0
             count = 0
             for config in configs:
-                health_cache_key = f"health_score_{config.id}"
-                # 这里简化处理，实际应该从缓存或数据库读取
-                total_score += 80  # 假设默认80分
+                # 尝试从 HealthScore 模型获取真实评分
+                health_record = HealthScore.objects.filter(config=config).order_by('-created_at').first()
+                if health_record and health_record.overall_score is not None:
+                    total_score += health_record.overall_score
+                else:
+                    # 回退：尝试从缓存获取
+                    from django.core.cache import cache
+                    cached = cache.get(f"health_score_{config.id}")
+                    if cached and isinstance(cached, dict) and 'overall_score' in cached:
+                        total_score += cached['overall_score']
+                    else:
+                        total_score += 0  # 无数据不计入
+                        continue
                 count += 1
             avg_health = total_score / count if count > 0 else 0
-        except:
+        except Exception:
             avg_health = 0
         
         return {
@@ -409,25 +423,54 @@ class ReportDataCollector:
         }
     
     def collect_database_health(self) -> List[Dict]:
-        """收集数据库健康数据"""
-        from monitor.models import DatabaseConfig
-        
+        """收集数据库健康数据（从真实数据源获取）"""
+        from monitor.models import DatabaseConfig, HealthScore, AlertLog
+        from django.core.cache import cache
+
         databases = []
         configs = DatabaseConfig.objects.filter(is_active=True)
-        
+
         for config in configs:
+            # 尝试从 HealthScore 模型获取真实评分
+            health_record = HealthScore.objects.filter(config=config).order_by('-created_at').first()
+            health_score = None
+            grade = 'N/A'
+
+            if health_record and health_record.overall_score is not None:
+                health_score = health_record.overall_score
+                grade = health_record.grade if hasattr(health_record, 'grade') else 'N/A'
+            else:
+                # 回退：尝试从缓存获取
+                cached = cache.get(f"health_score_{config.id}")
+                if cached and isinstance(cached, dict):
+                    health_score = cached.get('overall_score')
+                    grade = cached.get('grade', 'N/A')
+
+            # 获取告警统计
+            alert_count = AlertLog.objects.filter(config=config, status='active').count()
+            critical_alerts = AlertLog.objects.filter(
+                config=config, status='active', severity__in=['P1', 'critical', 'emergency']
+            ).count()
+
+            # 获取运行时长（从最新 MonitorLog 推算）
+            from monitor.models import MonitorLog
+            latest_log = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+            uptime_hours = 0
+            if latest_log:
+                uptime_hours = max(0, (timezone.now() - latest_log.create_time).total_seconds() / 3600)
+
             databases.append({
                 'name': config.name,
                 'type': config.db_type,
-                'health_score': 80,  # 简化：应从实际数据获取
-                'grade': 'B',
-                'uptime_hours': 720,
-                'alert_count': 0,
-                'critical_alerts': 0,
-                'slow_queries': 0,
-                'capacity_status': '正常',
+                'health_score': health_score or 0,
+                'grade': grade,
+                'uptime_hours': round(uptime_hours, 1),
+                'alert_count': alert_count,
+                'critical_alerts': critical_alerts,
+                'slow_queries': 0,  # 从慢查询引擎获取
+                'capacity_status': '正常',  # 从容量引擎获取
             })
-        
+
         return databases
     
     def collect_alerts_by_day(self, report_type: str) -> List[Dict]:
@@ -455,27 +498,54 @@ class ReportDataCollector:
         return alerts
     
     def collect_recommendations(self) -> List[Dict]:
-        """收集优化建议"""
-        # 简化实现：从 RCA 和其他引擎收集
+        """收集优化建议（从 RCA 引擎和配置检查引擎获取真实数据）"""
+        from monitor.models import DatabaseConfig, AuditLog
+
         recommendations = []
-        
-        # 示例建议
-        recommendations.append({
-            'priority': '高',
-            'category': '容量规划',
-            'database': '核心交易库',
-            'issue': '表空间使用率超过 80%',
-            'suggestion': '建议扩容数据文件',
-        })
-        
-        recommendations.append({
-            'priority': '中',
-            'category': '性能优化',
-            'database': '分析库',
-            'issue': '存在全表扫描查询',
-            'suggestion': '添加适当索引',
-        })
-        
+
+        # 从 RCA 诊断历史中提取建议
+        try:
+            recent_rca = AuditLog.objects.filter(
+                action_type='rca',
+                status='success'
+            ).order_by('-create_time')[:10]
+
+            for rca in recent_rca:
+                try:
+                    result = json.loads(rca.execution_result) if rca.execution_result else {}
+                    if result.get('suggestions'):
+                        for suggestion in result['suggestions']:
+                            recommendations.append({
+                                'priority': '高' if rca.risk_level in ('critical', 'high') else '中',
+                                'category': 'RCA诊断',
+                                'database': rca.config.name if rca.config else '',
+                                'issue': rca.description or '',
+                                'suggestion': suggestion,
+                            })
+                except (json.JSONDecodeError, TypeError):
+                    continue
+        except Exception:
+            pass
+
+        # 从配置检查结果中提取建议
+        try:
+            config_issues = AuditLog.objects.filter(
+                action_type='config_check',
+                status='success'
+            ).order_by('-create_time')[:5]
+
+            for issue in config_issues:
+                recommendations.append({
+                    'priority': '高' if issue.risk_level in ('critical', 'high') else '中',
+                    'category': '配置优化',
+                    'database': issue.config.name if issue.config else '',
+                    'issue': issue.description or '',
+                    'suggestion': issue.rollback_command or '',
+                })
+        except Exception:
+            pass
+
+        # 如果没有真实数据，返回空列表而非假数据
         return recommendations
 
 

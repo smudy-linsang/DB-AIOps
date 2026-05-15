@@ -81,7 +81,7 @@ class TenantManager:
                 profile = user.userprofile
                 if hasattr(profile, 'tenant_id'):
                     return profile.tenant_id
-            except:
+            except Exception:
                 pass
         
         return cls.DEFAULT_TENANT_ID

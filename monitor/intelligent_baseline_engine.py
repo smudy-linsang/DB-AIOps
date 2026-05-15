@@ -26,7 +26,7 @@ class IntelligentBaselineEngine:
 
     def parse_log_data(self, log):
         try: return json.loads(log.message)
-        except: return {}
+        except Exception: return {}
 
     def get_metric_time_series(self, metric_key, days=None):
         logs = self.get_history_logs(days)
@@ -37,7 +37,7 @@ class IntelligentBaselineEngine:
                 try:
                     val = float(data[metric_key])
                     time_series.append((log.create_time, val))
-                except: pass
+                except Exception: pass
         return time_series
 
     def calculate_baseline(self, metric_key, days=None):

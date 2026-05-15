@@ -184,7 +184,7 @@ class PasswordRotationManager:
             result['message'] = f"密码加密或保存失败: {e}"
             return result
         
-        # 记录轮换日志
+        # 记录轮换日志（禁止存储明文密码）
         try:
             AuditLog.objects.create(
                 config=config,
@@ -192,12 +192,14 @@ class PasswordRotationManager:
                 description=f"数据库 {config.name} 密码轮换",
                 sql_command=f"-- 密码已轮换，新密码加密后存储",
                 risk_level='medium',
-                rollback_command=f"-- 回滚：将密码恢复为旧值\nUPDATE monitor_databaseconfig SET password='{old_password}' WHERE id={config_id}",
+                rollback_command=f"-- 回滚：需管理员通过 PasswordRotationManager 恢复 config_id={config_id} 的密码",
                 status='success',
                 execution_result=json.dumps({
-                    'old_password_encrypted': old_password_encrypted,
+                    'config_id': config_id,
+                    'old_password_was_encrypted': old_password_encrypted,
                     'new_password_encrypted': is_encrypted(encrypted_password),
-                    'rotated_at': str(timezone.now())
+                    'rotated_at': str(timezone.now()),
+                    'note': '旧密码已安全覆盖，如需回滚请联系管理员重新设置',
                 })
             )
         except Exception as e:

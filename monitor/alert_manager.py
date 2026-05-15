@@ -99,6 +99,20 @@ class AlertManager:
         # 4. 发送通知（可能进入批量聚合）
         self._send_notification(alert, title, description)
 
+        # 5. SSE 实时推送告警事件
+        try:
+            from monitor.sse_views import publish_alert_event
+            publish_alert_event(alert_type, 'fire', {
+                'alert_id': alert.id,
+                'config_id': self.config.id,
+                'db_name': self.config.name,
+                'db_type': self.config.db_type,
+                'severity': severity,
+                'title': title,
+            })
+        except Exception:
+            pass
+
         return alert
 
     def resolve(self, alert_type, metric_key, recovery_title=None, recovery_body=None):
@@ -123,6 +137,19 @@ class AlertManager:
         if recovery_title and recovery_body:
             if not self._is_silenced(alert_type):
                 self.notifier(recovery_title, recovery_body)
+
+        # SSE 实时推送恢复事件
+        try:
+            from monitor.sse_views import publish_alert_event
+            publish_alert_event(alert_type, 'resolve', {
+                'alert_id': existing.id,
+                'config_id': self.config.id,
+                'db_name': self.config.name,
+                'db_type': self.config.db_type,
+                'title': recovery_title or 'Resolved',
+            })
+        except Exception:
+            pass
 
     def acknowledge(self, alert_id, acknowledged_by, comment=None):
         """

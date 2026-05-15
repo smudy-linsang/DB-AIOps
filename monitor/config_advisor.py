@@ -10,7 +10,10 @@
 设计文档参考: DB_AIOps_DESIGN.md 3.7 节 (Phase 3 增强)
 """
 
+import logging
 import re
+
+logger = logging.getLogger(__name__)
 from datetime import datetime
 from typing import Dict, List, Optional, Any, Tuple
 from dataclasses import dataclass, field
@@ -803,7 +806,7 @@ class ConfigAdvisor:
             
             return 'ok', f"{warning} - {critical}"
         
-        except:
+        except Exception:
             # 无法解析，按字符串处理
             if str(current_value) == str(warning):
                 return 'warning', rule.suggestion

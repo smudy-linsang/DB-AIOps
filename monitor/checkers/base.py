@@ -10,7 +10,7 @@ from django.conf import settings
 
 # ── 采集配置 ──────────────────────────────────────────────
 # 单次采集任务超时（秒）：超过此时间的采集视为失败，记 DOWN，不阻塞其他任务。
-COLLECT_TIMEOUT_SEC = getattr(settings, "COLLECT_TIMEOUT_SEC", 15)
+COLLECT_TIMEOUT_SEC = getattr(settings, "COLLECT_TIMEOUT_SEC", 60)
 # 并发采集线程数。
 COLLECT_WORKERS = getattr(settings, "COLLECT_WORKERS", 20)
 

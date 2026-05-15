@@ -19,6 +19,7 @@ import {
   BellOutlined, UserOutlined, SettingOutlined, LogoutOutlined,
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
+  BellFilled, ApartmentOutlined, FileTextOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI } from '../services/api';
@@ -34,6 +35,7 @@ const EMLayout = ({ children }) => {
   const {
     collapsed, toggleCollapsed, selectedDbName, selectedDbType,
     alertCounts, setAlertCounts, globalSearchKeyword, setGlobalSearchKeyword,
+    connectSSE, disconnectSSE,
   } = useAppStore();
 
   const [userName, setUserName] = useState('');
@@ -64,6 +66,12 @@ const EMLayout = ({ children }) => {
     return () => clearInterval(timer);
   }, [loadAlertCounts]);
 
+  // SSE 实时连接
+  useEffect(() => {
+    connectSSE();
+    return () => disconnectSSE();
+  }, []);
+
   const totalAlerts = alertCounts.warning + alertCounts.error + alertCounts.critical;
 
   // 根据路径获取面包屑
@@ -83,6 +91,12 @@ const EMLayout = ({ children }) => {
       crumbs.push({ title: '工单管理', path: '/tickets' });
     } else if (path.includes('/sql-monitoring')) {
       crumbs.push({ title: 'SQL 监控', path: '/sql-monitoring' });
+    } else if (path.includes('/notification-settings')) {
+      crumbs.push({ title: '通知设置', path: '/notification-settings' });
+    } else if (path.includes('/business-systems')) {
+      crumbs.push({ title: '业务拓扑', path: '/business-systems' });
+    } else if (path.includes('/reports')) {
+      crumbs.push({ title: '报表中心', path: '/reports' });
     }
 
     return crumbs;
@@ -198,6 +212,28 @@ const EMLayout = ({ children }) => {
             </Space>
           </div>
           <TargetNavigationTree />
+          {/* 功能快捷菜单 */}
+          <div style={{ borderTop: '1px solid #e8e8e8', padding: '8px 12px', marginTop: 4 }}>
+            <Text strong style={{ fontSize: 12, color: '#666' }}>功能菜单</Text>
+          </div>
+          <Menu
+            mode="inline"
+            selectedKeys={[location.pathname]}
+            style={{ border: 'none', background: 'transparent', fontSize: 12 }}
+            items={[
+              { key: '/', icon: <DashboardOutlined />, label: '仪表盘', onClick: () => navigate('/') },
+              { key: '/databases', icon: <DatabaseOutlined />, label: '数据库管理', onClick: () => navigate('/databases') },
+              { key: '/alerts', icon: <AlertOutlined />, label: '告警中心', onClick: () => navigate('/alerts') },
+              { key: '/alert-config', icon: <ToolOutlined />, label: '告警配置', onClick: () => navigate('/alert-config') },
+              { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', onClick: () => navigate('/sql-monitoring') },
+              { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', onClick: () => navigate('/capacity') },
+              { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', onClick: () => navigate('/tickets') },
+              { type: 'divider' },
+              { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', onClick: () => navigate('/notification-settings') },
+              { key: '/business-systems', icon: <ApartmentOutlined />, label: '业务拓扑', onClick: () => navigate('/business-systems') },
+              { key: '/reports', icon: <FileTextOutlined />, label: '报表中心', onClick: () => navigate('/reports') },
+            ]}
+          />
         </Sider>
 
         {/* ──────── 主内容区 ──────── */}

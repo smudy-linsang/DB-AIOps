@@ -5,11 +5,11 @@ from django.views.static import serve
 import os
 
 from monitor.views_enhanced import (
-    dashboard, detail, api_latest_metrics, api_baseline,
+    api_latest_metrics, api_baseline,
     api_intelligent_baseline, api_anomaly_detection, api_baseline_trend,
-    api_rca, remediation_list, approve_operation, reject_operation,
-    get_audit_detail, execute_operation, health_check, db_list, db_create,
-    db_edit, db_delete, db_toggle_active,
+    api_rca,
+    approve_operation, reject_operation,
+    get_audit_detail, execute_operation, health_check, db_toggle_active,
 )
 from monitor.api_views import (
     HealthCheckView, LoginView, LogoutView, DatabaseListView,
@@ -28,8 +28,22 @@ from monitor.api_views import (
     DatabaseTemplateAssignmentView,
     DatabaseSlowQueriesView, DatabaseSlowQueryAnalysisView,
     DatabaseSQLTextSearchView,
+    # Dashboard & 补充 API
+    DashboardStatsView, DashboardChartsView,
+    DashboardHealthTrendView, DashboardAlertTrendView,
+    AlertStatisticsView, DatabasePerformanceHubView,
+    DatabaseMetricsHistoryView,
+    # Phase 4 API
+    SilenceWindowListView, SilenceWindowDetailView,
+    NotificationRuleListView, NotificationRuleDetailView,
+    AlertNotificationLogView,
+    BusinessSystemListView, BusinessSystemDetailView,
+    DatabaseTopologyView, DatabaseImpactView,
+    ReportListView, ReportDownloadView,
 )
+from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
+from monitor.healthcheck import PlatformHealthCheckView
 
 FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
@@ -53,10 +67,6 @@ def serve_frontend_assets(request, path):
 urlpatterns = [
     # Admin
     path('admin/', admin.site.urls),
-    
-    # Django template pages (not the root)
-    path('dashboard/', dashboard, name='dashboard'),
-    path('monitor/<int:config_id>/', detail, name='detail'),
 
     # ========== REST API v1 ==========
     path('api/v1/health/', HealthCheckView.as_view()),
@@ -74,7 +84,10 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/slow-queries/', DatabaseSlowQueriesView.as_view()),
     path('api/v1/databases/<int:config_id>/slow-queries/analysis/', DatabaseSlowQueryAnalysisView.as_view()),
     path('api/v1/databases/<int:config_id>/slow-queries/search/', DatabaseSQLTextSearchView.as_view()),
+    path('api/v1/databases/<int:config_id>/performance-hub/', DatabasePerformanceHubView.as_view()),
+    path('api/v1/databases/<int:config_id>/metrics/history/', DatabaseMetricsHistoryView.as_view()),
     path('api/v1/alerts/', AlertListView.as_view()),
+    path('api/v1/alerts/statistics/', AlertStatisticsView.as_view()),
     path('api/v1/alerts/<int:alert_id>/acknowledge/', AlertAcknowledgeView.as_view()),
     path('api/v1/alerts/<int:alert_id>/', AlertDeleteView.as_view()),
     path('api/v1/auditlogs/', AuditLogListView.as_view()),
@@ -107,7 +120,7 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/alert-overrides/', DatabaseAlertOverrideListView.as_view()),
     path('api/v1/databases/<int:config_id>/alert-overrides/<str:metric_key>/', DatabaseAlertOverrideDetailView.as_view()),
 
-    # Legacy API
+    # Legacy API（向后兼容，新功能请在 api_views.py 中用 CBV 实现）
     path('api/metrics/<int:config_id>/', api_latest_metrics),
     path('api/baseline/<int:config_id>/', api_baseline),
     path('api/intelligent-baseline/<int:config_id>/', api_intelligent_baseline),
@@ -116,23 +129,50 @@ urlpatterns = [
     path('api/rca/<int:config_id>/', api_rca),
     path('api/health/', health_check),
 
-    # Remediation
-    path('monitor/remediation/', remediation_list),
-    path('monitor/remediation/<int:audit_id>/approve/', approve_operation),
-    path('monitor/remediation/<int:audit_id>/reject/', reject_operation),
-    path('monitor/remediation/<int:audit_id>/detail/', get_audit_detail),
-    path('monitor/remediation/<int:audit_id>/execute/', execute_operation),
+    # 自愈审批 JSON API
+    path('api/v1/remediation/<int:audit_id>/approve/', approve_operation),
+    path('api/v1/remediation/<int:audit_id>/reject/', reject_operation),
+    path('api/v1/remediation/<int:audit_id>/detail/', get_audit_detail),
+    path('api/v1/remediation/<int:audit_id>/execute/', execute_operation),
 
-    # DB Config
-    path('monitor/db/', db_list),
-    path('monitor/db/create/', db_create),
-    path('monitor/db/<int:config_id>/edit/', db_edit),
-    path('monitor/db/<int:config_id>/delete/', db_delete),
-    path('monitor/db/<int:config_id>/toggle/', db_toggle_active),
+    # 数据库启停切换
+    path('api/v1/databases/<int:config_id>/toggle-active/', db_toggle_active),
+
+    # ========== Dashboard API ==========
+    path('api/v1/dashboard/stats/', DashboardStatsView.as_view()),
+    path('api/v1/dashboard/charts/', DashboardChartsView.as_view()),
+    path('api/v1/dashboard/health-trend/', DashboardHealthTrendView.as_view()),
+    path('api/v1/dashboard/alert-trend/', DashboardAlertTrendView.as_view()),
+
+    # ========== SSE 实时推送 ==========
+    path('api/v1/events/', SSEView.as_view()),
+
+    # ========== Phase 4: 告警通知增强 ==========
+    path('api/v1/silence-windows/', SilenceWindowListView.as_view()),
+    path('api/v1/silence-windows/<int:pk>/', SilenceWindowDetailView.as_view()),
+    path('api/v1/notification-rules/', NotificationRuleListView.as_view()),
+    path('api/v1/notification-rules/<int:pk>/', NotificationRuleDetailView.as_view()),
+    path('api/v1/alerts/<int:alert_id>/notifications/', AlertNotificationLogView.as_view()),
+
+    # ========== Phase 4: 业务系统 ==========
+    path('api/v1/business-systems/', BusinessSystemListView.as_view()),
+    path('api/v1/business-systems/<int:pk>/', BusinessSystemDetailView.as_view()),
+
+    # ========== Phase 4: 数据库拓扑与影响分析 ==========
+    path('api/v1/databases/<int:config_id>/topology/', DatabaseTopologyView.as_view()),
+    path('api/v1/databases/<int:config_id>/impact/', DatabaseImpactView.as_view()),
+
+    # ========== Phase 4: 报表 ==========
+    path('api/v1/reports/', ReportListView.as_view()),
+    path('api/v1/reports/<int:pk>/download/', ReportDownloadView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),
     path('metrics/', prometheus_metrics_view, name='prometheus-metrics-slash'),
+
+    # ========== 自监控健康检查（供 Docker/K8s 探活） ==========
+    path('healthcheck/', PlatformHealthCheckView.as_view(), name='platform-healthcheck'),
+    path('healthcheck', PlatformHealthCheckView.as_view(), name='platform-healthcheck-no-slash'),
 ]
 
 # Frontend routes - serve React app

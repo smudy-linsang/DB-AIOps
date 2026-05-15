@@ -117,6 +117,9 @@ class Command(BaseCommand):
             print(f"  -- 跳过暂不支持的类型：{config.name} (MongoDB)")
         else:
             print(f"  -- 跳过未知类型：{config.name} ({config.db_type})")
+        # 采集完毕后主动释放本线程的数据库连接，防止连接池耗尽
+        from django.db import close_old_connections
+        close_old_connections()
 
     def _celery_dispatch_job(self, configs):
         """使用 Celery 异步分发采集任务（v3.0 推荐模式）"""
@@ -277,6 +280,16 @@ class Command(BaseCommand):
             message=json.dumps(data, ensure_ascii=False, default=str)
         )
 
+        # --- 3.5 SSE 实时推送指标更新 ---
+        try:
+            from monitor.sse_views import publish_metric_event
+            numeric_metrics = {k: v for k, v in data.items()
+                               if isinstance(v, (int, float)) and not isinstance(v, bool)}
+            if numeric_metrics:
+                publish_metric_event(config.id, config.name, config.db_type, numeric_metrics)
+        except Exception:
+            pass
+
         # --- 4. 同步写入 TimescaleDB（指标时序数据）---
         try:
             from monitor.timeseries import get_timeseries_storage
@@ -347,17 +360,24 @@ class Command(BaseCommand):
         - 容量预测 (定期)
         - 健康评分 (定期)
         """
+        _p2_start = datetime.datetime.now()
 
         # --- D1. 基线异常检测 (168时间槽 + 三重条件 + Phase 3智能告警收敛) ---
         try:
-            # Phase 3: 初始化智能告警引擎
-            alert_engine = AlertEngine(config)
-
             baseline_engine = BaselineEngine(config)
+            # Phase 3: 初始化智能告警引擎（必须传入 baseline_engine）
+            alert_engine = AlertEngine(config, baseline_engine)
+
             anomalies = baseline_engine.check_current_against_baseline(data)
 
+            # 增量更新基线模型（Welford 在线算法，O(1)复杂度）
+            try:
+                baseline_engine.update_baseline(data)
+            except Exception as ub_err:
+                print(f"  [BASELINE-UPDATE] 基线更新失败: {ub_err}")
+
             anomaly_keys = set()
-            for metric_name, current_val, baseline, anomaly_type, sev in anomalies:
+            for metric_name, current_val, baseline, anomaly_type, sev, _reason in anomalies:
                 anomaly_keys.add(metric_name)
 
                 direction_str = 'up' if anomaly_type == 'high' else 'down'
@@ -386,12 +406,13 @@ class Command(BaseCommand):
                             amp_severity = 'warning'
 
                 # Phase 3: 使用 AlertEngine.should_alert() 进行收敛判断
-                alert_result = alert_engine.should_alert(metric_name, current_val, direction_str)
+                # should_alert 返回 (bool, Optional[AlertEvent])
+                should_fire, alert_event = alert_engine.should_alert(metric_name, current_val, direction_str)
 
                 # 振幅配置命中时，用振幅等级替换原始等级
-                final_severity = amp_severity or (alert_result.get('severity') if alert_result['should_fire'] else None)
+                final_severity = amp_severity or (alert_event.severity if alert_event else None) or sev
 
-                if alert_result['should_fire'] or amp_severity:
+                if should_fire or amp_severity:
                     normal_range = f"{baseline.normal_min:.2f} ~ {baseline.normal_max:.2f}"
                     direction_label = '暴涨' if anomaly_type == 'high' else '骤降'
                     sev_label = final_severity or sev
@@ -433,6 +454,8 @@ class Command(BaseCommand):
             print(f"  [WARNING] 基线检测异常：{e}")
 
         # --- D2. RCA 根因分析 ---
+        _d2_start = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D1 baseline={(_d2_start-_p2_start).total_seconds():.1f}s")
         try:
             rca_engine = RCAEngine(config)
             rca_report = rca_engine.analyze(data)
@@ -473,6 +496,8 @@ class Command(BaseCommand):
             print(f"  [WARNING] RCA分析异常：{e}")
 
         # --- D3. 健康评分 (每小时一次) ---
+        _d3_start = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D2 rca={(_d3_start-_d2_start).total_seconds():.1f}s")
         try:
             from django.core.cache import cache
             health_cache_key = f"health_score_{config.id}"
@@ -481,6 +506,9 @@ class Command(BaseCommand):
             if last_health_check is None:  # 首次检查或缓存过期
                 health_engine = HealthEngine(config)
                 health_report = health_engine.calculate(data)
+
+                # 持久化健康评分到数据库
+                health_engine.save_result(health_report)
 
                 # 缓存1小时
                 cache.set(health_cache_key, health_report, 3600)
@@ -511,6 +539,8 @@ class Command(BaseCommand):
             print(f"  [WARNING] 健康评分异常：{e}")
 
         # --- D4. 容量预测 (每天一次) ---
+        _d4_start = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D3 health={(_d4_start-_d3_start).total_seconds():.1f}s")
         try:
             from django.core.cache import cache
             capacity_cache_key = f"capacity_forecast_{config.id}"
@@ -519,6 +549,12 @@ class Command(BaseCommand):
             if last_capacity_check is None:  # 首次检查或缓存过期
                 capacity_engine = CapacityEngine(config)
                 capacity_report = capacity_engine.analyze_all_metrics()
+
+                # 持久化容量预测结果到数据库
+                try:
+                    capacity_engine.save_predictions(capacity_report)
+                except Exception as sp_err:
+                    print(f"  [CAPACITY-SAVE] 预测结果保存失败: {sp_err}")
 
                 # 缓存24小时
                 cache.set(capacity_cache_key, capacity_report, 86400)
@@ -543,6 +579,71 @@ class Command(BaseCommand):
 
         except Exception as e:
             print(f"  [WARNING] 容量预测异常：{e}")
+
+        # --- D5. 慢查询检测 (每10分钟) ---
+        _d5_start = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D4 capacity={(_d5_start-_d4_start).total_seconds():.1f}s")
+        try:
+            from django.core.cache import cache
+            slow_query_cache_key = f"slow_query_check_{config.id}"
+            if cache.get(slow_query_cache_key) is None:
+                from monitor.slow_query_engine import SlowQueryEngine
+                sq_engine = SlowQueryEngine(config)
+                slow_queries = sq_engine.collect_slow_queries_from_db(time_range='1h', limit=10)
+                if slow_queries:
+                    top_slow = slow_queries[0]
+                    body = (
+                        f"检测到 {len(slow_queries)} 条慢查询\n"
+                        f"最慢查询耗时：{top_slow.get('total_time_sec', 0):.2f}s\n"
+                        f"执行次数：{top_slow.get('exec_count', 0)}\n"
+                        f"SQL摘要：{top_slow.get('query', '')[:200]}"
+                    )
+                    am.fire(
+                        alert_type='slow_query', metric_key='slow_queries',
+                        title='[WARNING] 慢查询检测',
+                        description=body, severity='warning',
+                    )
+                    print(f"  [SLOW_QUERY] 检测到 {len(slow_queries)} 条慢查询")
+                # 缓存10分钟
+                cache.set(slow_query_cache_key, True, 600)
+        except Exception as e:
+            print(f"  [WARNING] 慢查询检测异常：{e}")
+
+        # --- D6. 配置检查 (每天一次) ---
+        _d6_start = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D5 slow_query={(_d6_start-_d5_start).total_seconds():.1f}s")
+        try:
+            from django.core.cache import cache
+            config_check_cache_key = f"config_check_{config.id}"
+            if cache.get(config_check_cache_key) is None:
+                from monitor.config_advisor import ConfigAdvisor
+                from monitor.db_connector import DbConnector
+                advisor = ConfigAdvisor(config)
+                try:
+                    check_conn = DbConnector.get_connection(config)
+                    report = advisor.check_configuration(check_conn)
+                finally:
+                    try: DbConnector.close_connection(check_conn)
+                    except Exception: pass
+                if report and hasattr(report, 'results') and report.results:
+                    critical_issues = [r for r in report.results if getattr(r, 'severity', '') in ('critical', 'high')]
+                    if critical_issues:
+                        body = f"发现 {len(critical_issues)} 个高优先级配置问题:\n"
+                        for issue in critical_issues[:5]:
+                            body += f"\u2022 {getattr(issue, 'parameter', '')}: {getattr(issue, 'suggestion', '')}\n"
+                        am.fire(
+                            alert_type='config', metric_key='config_check',
+                            title='[WARNING] 数据库配置检查',
+                            description=body, severity='warning',
+                        )
+                        print(f"  [CONFIG] 发现 {len(critical_issues)} 个配置问题")
+                # 缓存24小时
+                cache.set(config_check_cache_key, True, 86400)
+        except Exception as e:
+            print(f"  [WARNING] 配置检查异常：{e}")
+
+        _p2_end = datetime.datetime.now()
+        print(f"  [P2-TIMING] {config.name} D6 config+total={(_p2_end-_p2_start).total_seconds():.1f}s")
 
     def _build_lock_msg(self, locks):
         """构建锁等待告警消息"""

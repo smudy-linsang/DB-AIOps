@@ -3,9 +3,13 @@
 PostgreSQL 数据库检查器 (含流复制)
 
 从 start_monitor.py 中提取，v3.0 重构 + P0-2 指标补充。
-采集 14 大类指标：基础信息、会话、空间、性能、等待事件、会话详情、
-SQL统计、复制集群、对象统计、配置参数、缓冲池、事务、日志、高可用、资源限制。
+采集 23 大类指标：基础信息、会话、空间、性能、等待事件、会话详情、
+SQL统计、复制集群、对象统计、配置参数、缓冲池、事务、日志、高可用、资源限制、
+WAL统计、复制槽、长事务、数据库级汇总、Autovacuum、索引膨胀、
+Top SQL扩展、高可用状态汇总、资源限制增强。
 """
+
+import traceback
 
 import psycopg2
 
@@ -40,16 +44,18 @@ class PostgreSQLChecker(BaseDBChecker):
         data_directory = cur.fetchone()[0]
 
         cur.execute("SHOW port")
-        port = int(cur.fetchone()[0])
+        port = int(cur.fetchone()[0] or 5432)
 
         cur.execute("SELECT extract(epoch from (now() - pg_postmaster_start_time()))")
-        uptime = int(cur.fetchone()[0])
+        uptime_row = cur.fetchone()
+        uptime = int(uptime_row[0]) if uptime_row and uptime_row[0] else 0
 
         cur.execute("SELECT current_database()")
         current_database = cur.fetchone()[0]
 
         cur.execute("SELECT inet_server_addr()")
-        server_addr = str(cur.fetchone()[0])
+        server_addr_row = cur.fetchone()
+        server_addr = str(server_addr_row[0]) if server_addr_row and server_addr_row[0] else '127.0.0.1'
 
         # =============================================
         # 2. 连接与会话 (session)
@@ -128,7 +134,7 @@ class PostgreSQLChecker(BaseDBChecker):
             FROM pg_stat_database WHERE datname = current_database()
         """)
         db_stats = cur.fetchone()
-        if db_stats:
+        if db_stats and db_stats[0] is not None:
             numbackends = db_stats[0]
             xact_commit = db_stats[1]
             xact_rollback = db_stats[2]
@@ -351,13 +357,13 @@ class PostgreSQLChecker(BaseDBChecker):
         for row in cur.fetchall():
             table_scan_stats.append({
                 "relname": row[0],
-                "seq_scan": int(row[1]),
-                "idx_scan": int(row[2]),
-                "n_tup_ins": int(row[3]),
-                "n_tup_upd": int(row[4]),
-                "n_tup_del": int(row[5]),
-                "n_live_tup": int(row[6]),
-                "n_dead_tup": int(row[7])
+                "seq_scan": int(row[1] or 0),
+                "idx_scan": int(row[2] or 0),
+                "n_tup_ins": int(row[3] or 0),
+                "n_tup_upd": int(row[4] or 0),
+                "n_tup_del": int(row[5] or 0),
+                "n_live_tup": int(row[6] or 0),
+                "n_dead_tup": int(row[7] or 0)
             })
 
         # =============================================
@@ -391,7 +397,7 @@ class PostgreSQLChecker(BaseDBChecker):
         cur.execute("SHOW wal_level")
         wal_level = cur.fetchone()[0]
         cur.execute("SHOW max_wal_senders")
-        max_wal_senders = int(cur.fetchone()[0])
+        max_wal_senders = int(cur.fetchone()[0] or 0)
 
         # WAL延迟
         try:
@@ -574,6 +580,271 @@ class PostgreSQLChecker(BaseDBChecker):
             except Exception:
                 pass
 
+        # =============================================
+        # 16. WAL 统计 (wal) - P0
+        # =============================================
+        wal_stats = {}
+        try:
+            cur.execute("SELECT pg_current_wal_lsn()")
+            wal_stats['current_lsn'] = str(cur.fetchone()[0])
+        except Exception:
+            try:
+                cur.execute("SELECT pg_current_xlog_location()")
+                wal_stats['current_lsn'] = str(cur.fetchone()[0])
+            except Exception:
+                wal_stats['current_lsn'] = 'N/A'
+
+        try:
+            cur.execute("""
+                SELECT archived_count, failed_count,
+                       COALESCE(last_archived_time, '1970-01-01') as last_archived_time,
+                       COALESCE(last_failed_time, '1970-01-01') as last_failed_time
+                FROM pg_stat_archiver
+            """)
+            arch_row = cur.fetchone()
+            wal_stats['archived_count'] = int(arch_row[0] or 0)
+            wal_stats['archived_failed'] = int(arch_row[1] or 0)
+            wal_stats['last_archived_time'] = str(arch_row[2])
+            wal_stats['last_failed_time'] = str(arch_row[3])
+        except Exception:
+            wal_stats['archived_count'] = 0
+            wal_stats['archived_failed'] = 0
+
+        try:
+            cur.execute("SHOW archive_mode")
+            wal_stats['archive_mode'] = cur.fetchone()[0]
+        except Exception:
+            wal_stats['archive_mode'] = 'off'
+
+        try:
+            cur.execute("SHOW wal_keep_size")
+            wal_stats['wal_keep_size'] = cur.fetchone()[0]
+        except Exception:
+            try:
+                cur.execute("SHOW wal_keep_segments")
+                wal_stats['wal_keep_segments'] = cur.fetchone()[0]
+            except Exception:
+                pass
+
+        # =============================================
+        # 17. 复制槽 (replication_slots) - P1
+        # =============================================
+        replication_slot_details = []
+        try:
+            cur.execute("""
+                SELECT slot_name, slot_type, active, restart_lsn,
+                       pg_size_pretty(pg_wal_lsn_diff(pg_current_wal_lsn(), restart_lsn)) as lag
+                FROM pg_replication_slots
+            """)
+            for row in cur.fetchall():
+                replication_slot_details.append({
+                    "slot_name": row[0],
+                    "slot_type": row[1],
+                    "active": row[2],
+                    "restart_lsn": str(row[3]) if row[3] else 'N/A',
+                    "lag": str(row[4]) if row[4] else 'N/A'
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 18. 长时间事务 (long_trx) - P0
+        # =============================================
+        long_transactions = []
+        try:
+            cur.execute("""
+                SELECT pid, usename, xact_start, state, query,
+                       EXTRACT(EPOCH FROM NOW() - xact_start)::integer as duration_sec
+                FROM pg_stat_activity
+                WHERE xact_start IS NOT NULL
+                  AND NOW() - xact_start > INTERVAL '60 seconds'
+                  AND pid != pg_backend_pid()
+                ORDER BY duration_sec DESC
+                LIMIT 20
+            """)
+            for row in cur.fetchall():
+                long_transactions.append({
+                    "pid": row[0],
+                    "usename": row[1] or 'N/A',
+                    "xact_start": str(row[2]),
+                    "state": row[3] or 'N/A',
+                    "query": (row[4] or 'N/A')[:200],
+                    "duration_sec": int(row[5] or 0)
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 19. 数据库级汇总 (db_level_stats) - P1
+        # =============================================
+        db_level_stats = []
+        try:
+            cur.execute("""
+                SELECT datname, numbackends, xact_commit, xact_rollback,
+                       blks_read, blks_hit, tup_returned, tup_fetched,
+                       tup_inserted, tup_updated, tup_deleted,
+                       conflicts, deadlocks, temp_files, temp_bytes
+                FROM pg_stat_database
+                WHERE datistemplate = false
+                ORDER BY xact_commit DESC
+            """)
+            for row in cur.fetchall():
+                blks_r = int(row[4] or 0)
+                blks_h = int(row[5] or 0)
+                db_level_stats.append({
+                    "datname": row[0],
+                    "numbackends": int(row[1] or 0),
+                    "xact_commit": int(row[2] or 0),
+                    "xact_rollback": int(row[3] or 0),
+                    "cache_hit_ratio": round(blks_h / (blks_h + blks_r) * 100, 2) if (blks_h + blks_r) > 0 else 0,
+                    "deadlocks": int(row[12] or 0),
+                    "temp_files": int(row[13] or 0),
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 20. Autovacuum 统计 (autovacuum) - P1
+        # =============================================
+        autovacuum_stats = []
+        try:
+            cur.execute("""
+                SELECT schemaname, relname,
+                       last_vacuum, last_autovacuum,
+                       last_analyze, last_autoanalyze,
+                       vacuum_count, autovacuum_count,
+                       analyze_count, autoanalyze_count
+                FROM pg_stat_user_tables
+                WHERE last_autovacuum IS NOT NULL
+                   OR last_vacuum IS NOT NULL
+                ORDER BY COALESCE(last_autovacuum, last_vacuum) DESC
+                LIMIT 20
+            """)
+            for row in cur.fetchall():
+                autovacuum_stats.append({
+                    "schema": row[0],
+                    "table": row[1],
+                    "last_vacuum": str(row[2]) if row[2] else 'N/A',
+                    "last_autovacuum": str(row[3]) if row[3] else 'N/A',
+                    "last_analyze": str(row[4]) if row[4] else 'N/A',
+                    "last_autoanalyze": str(row[5]) if row[5] else 'N/A',
+                    "vacuum_count": int(row[6] or 0),
+                    "autovacuum_count": int(row[7] or 0),
+                    "analyze_count": int(row[8] or 0),
+                    "autoanalyze_count": int(row[9] or 0)
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 21. 索引膨胀 (index_bloat) - P2
+        # =============================================
+        index_bloat_candidates = []
+        try:
+            cur.execute("""
+                SELECT schemaname, relname, indexrelname,
+                       idx_scan, idx_tup_read, idx_tup_fetch,
+                       pg_size_pretty(pg_relation_size(indexrelid)) as index_size
+                FROM pg_stat_user_indexes
+                WHERE idx_scan = 0
+                  AND schemaname NOT IN ('pg_catalog', 'information_schema')
+                ORDER BY pg_relation_size(indexrelid) DESC
+                LIMIT 20
+            """)
+            for row in cur.fetchall():
+                index_bloat_candidates.append({
+                    "schema": row[0],
+                    "table": row[1],
+                    "index": row[2],
+                    "idx_scan": int(row[3] or 0),
+                    "idx_tup_read": int(row[4] or 0),
+                    "idx_tup_fetch": int(row[5] or 0),
+                    "index_size": str(row[6])
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 22. Top SQL 扩展 (sql_extended) - P1
+        # =============================================
+        top_sql_by_shared_blks = []
+        try:
+            cur.execute("""
+                SELECT query, calls, shared_blks_read, shared_blks_hit,
+                       shared_blks_dirtied, shared_blks_written
+                FROM pg_stat_statements
+                WHERE shared_blks_read > 0
+                ORDER BY shared_blks_read DESC
+                LIMIT 10
+            """)
+            for row in cur.fetchall():
+                top_sql_by_shared_blks.append({
+                    "query": (row[0] or 'N/A')[:200],
+                    "calls": int(row[1]),
+                    "shared_blks_read": int(row[2]),
+                    "shared_blks_hit": int(row[3]),
+                    "shared_blks_dirtied": int(row[4]),
+                    "shared_blks_written": int(row[5])
+                })
+        except Exception:
+            pass
+
+        top_sql_by_rows = []
+        try:
+            cur.execute("""
+                SELECT query, calls, rows, shared_blks_read
+                FROM pg_stat_statements
+                WHERE rows > 0
+                ORDER BY rows DESC
+                LIMIT 10
+            """)
+            for row in cur.fetchall():
+                top_sql_by_rows.append({
+                    "query": (row[0] or 'N/A')[:200],
+                    "calls": int(row[1]),
+                    "rows": int(row[2]),
+                    "shared_blks_read": int(row[3])
+                })
+        except Exception:
+            pass
+
+        # =============================================
+        # 23. 高可用状态汇总 (ha_status) - P2
+        # =============================================
+        ha_status = {
+            "role": "STANDBY" if is_in_recovery else "PRIMARY",
+            "is_in_recovery": is_in_recovery,
+            "wal_level": wal_level,
+            "replication_count": replication_count,
+            "wal_lag": wal_lag,
+            "archive_mode": wal_stats.get('archive_mode', 'off'),
+        }
+        if is_in_recovery:
+            ha_status["last_wal_receive_lsn"] = last_wal_receive_lsn
+            ha_status["last_wal_replay_lsn"] = last_wal_replay_lsn
+
+        # =============================================
+        # 24. 资源限制增强 (resource_limits) - P1
+        # =============================================
+        resource_limits = [
+            {
+                "resource_name": "max_connections",
+                "current_utilization": total_connections,
+                "limit_value": max_connections,
+                "usage_pct": conn_usage_pct
+            }
+        ]
+        for resource in ['max_prepared_transactions', 'max_locks_per_transaction', 'max_worker_processes', 'max_wal_senders']:
+            try:
+                cur.execute(f"SHOW {resource}")
+                value = cur.fetchone()[0]
+                resource_limits.append({
+                    "resource_name": resource,
+                    "value": value
+                })
+            except Exception:
+                pass
+
         cur.close()
 
         return {
@@ -685,5 +956,30 @@ class PostgreSQLChecker(BaseDBChecker):
             "replication_lag_bytes": wal_lag,
 
             # 资源限制
-            "resource_limits": resource_limits
+            "resource_limits": resource_limits,
+
+            # WAL 统计
+            "wal_stats": wal_stats,
+
+            # 复制槽详情
+            "replication_slot_details": replication_slot_details,
+
+            # 长时间事务
+            "long_transactions": long_transactions,
+
+            # 数据库级汇总
+            "db_level_stats": db_level_stats,
+
+            # Autovacuum 统计
+            "autovacuum_stats": autovacuum_stats,
+
+            # 索引膨胀
+            "index_bloat_candidates": index_bloat_candidates,
+
+            # Top SQL 扩展
+            "top_sql_by_shared_blks": top_sql_by_shared_blks,
+            "top_sql_by_rows": top_sql_by_rows,
+
+            # 高可用状态汇总
+            "ha_status": ha_status,
         }
