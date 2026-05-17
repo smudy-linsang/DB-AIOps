@@ -642,6 +642,9 @@ class OracleChecker(BaseDBChecker):
             "max_connections": max_connections,
             "conn_usage_pct": conn_usage_pct,
             "blocked_sessions": blocked_sessions,
+            # 前端兼容字段
+            "active_sessions": active_connections,
+            "total_sessions": total_connections,
 
             # 空间
             "tablespaces": tablespaces,

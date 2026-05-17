@@ -42,6 +42,15 @@ class TDSQLChecker(BaseDBChecker):
             except Exception:
                 server_id = 0
 
+            host_name = ''
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'hostname'")
+                row = cursor.fetchone()
+                if row:
+                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
+
             cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
             uptime = int(cursor.fetchone()['Value'])
 
@@ -54,6 +63,34 @@ class TDSQLChecker(BaseDBChecker):
                 version_comment = cursor.fetchone()['Value']
             except Exception:
                 version_comment = 'N/A'
+
+            # SSL状态 (toolkit集成)
+            have_ssl = 'DISABLED'
+            ssl_cipher = ''
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'have_ssl'")
+                row = cursor.fetchone()
+                if row:
+                    have_ssl = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
+            try:
+                cursor.execute("SHOW STATUS LIKE 'Ssl_cipher'")
+                row = cursor.fetchone()
+                if row:
+                    ssl_cipher = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
+
+            # Proxy连接检测 (toolkit集成: 通过/*proxy*/注释检测)
+            tdsql_conn_type = 'direct'
+            try:
+                cursor.execute("/*proxy*/SHOW ROUTES")
+                proxy_result = cursor.fetchall()
+                if proxy_result and len(proxy_result) > 0:
+                    tdsql_conn_type = 'proxy'
+            except Exception:
+                pass
 
             # =============================================
             # 2. 连接与会话 (session)
@@ -510,18 +547,111 @@ class TDSQLChecker(BaseDBChecker):
                 (1 - innodb_buffer_pool_reads / innodb_buffer_pool_read_requests) * 100, 2
             ) if innodb_buffer_pool_read_requests > 0 else 0
 
+            # InnoDB 缓冲池页面详情 (toolkit集成)
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_total'")
+            try:
+                innodb_buffer_pool_pages_total = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_buffer_pool_pages_total = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_free'")
+            try:
+                innodb_buffer_pool_pages_free = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_buffer_pool_pages_free = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_buffer_pool_pages_dirty'")
+            try:
+                innodb_buffer_pool_pages_dirty = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_buffer_pool_pages_dirty = 0
+            buffer_dirty_ratio = round(
+                innodb_buffer_pool_pages_dirty / innodb_buffer_pool_pages_total * 100, 2
+            ) if innodb_buffer_pool_pages_total > 0 else 0
+
             # =============================================
             # 11. InnoDB 行操作 (innodb_rows) - P1
             # =============================================
             innodb_row_stats = {}
+            innodb_rows_read = innodb_rows_inserted = innodb_rows_updated = innodb_rows_deleted = 0
             for key in ['Innodb_rows_read', 'Innodb_rows_inserted', 'Innodb_rows_updated', 'Innodb_rows_deleted']:
                 try:
                     cursor.execute(f"SHOW GLOBAL STATUS LIKE '{key}'")
                     row = cursor.fetchone()
                     if row:
-                        innodb_row_stats[key] = int(row['Value'])
+                        val = int(row['Value'])
+                        innodb_row_stats[key] = val
+                        if key == 'Innodb_rows_read':
+                            innodb_rows_read = val
+                        elif key == 'Innodb_rows_inserted':
+                            innodb_rows_inserted = val
+                        elif key == 'Innodb_rows_updated':
+                            innodb_rows_updated = val
+                        elif key == 'Innodb_rows_deleted':
+                            innodb_rows_deleted = val
                 except Exception:
                     pass
+
+            # =============================================
+            # 11.5 InnoDB IO & 日志详情 (toolkit集成)
+            # =============================================
+            innodb_data_reads = innodb_data_writes = innodb_data_fsyncs = 0
+            innodb_os_log_written = innodb_log_waits = 0
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_data_reads'")
+                innodb_data_reads = int(cursor.fetchone()['Value'])
+            except Exception:
+                pass
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_data_writes'")
+                innodb_data_writes = int(cursor.fetchone()['Value'])
+            except Exception:
+                pass
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_data_fsyncs'")
+                innodb_data_fsyncs = int(cursor.fetchone()['Value'])
+            except Exception:
+                pass
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_os_log_written'")
+                innodb_os_log_written = int(cursor.fetchone()['Value'])
+            except Exception:
+                pass
+            try:
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_log_waits'")
+                innodb_log_waits = int(cursor.fetchone()['Value'])
+            except Exception:
+                pass
+
+            # =============================================
+            # 11.6 死锁 & Key Buffer & 线程缓存 (toolkit集成)
+            # =============================================
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+            try:
+                innodb_deadlocks = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_deadlocks = 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Key_reads'")
+            try:
+                key_reads = int(cursor.fetchone()['Value'])
+            except Exception:
+                key_reads = 0
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Key_read_requests'")
+            try:
+                key_read_requests = int(cursor.fetchone()['Value'])
+            except Exception:
+                key_read_requests = 0
+            key_buffer_hit_ratio = round(
+                (1 - key_reads / key_read_requests) * 100, 2
+            ) if key_read_requests > 0 else 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Threads_created'")
+            try:
+                threads_created = int(cursor.fetchone()['Value'])
+            except Exception:
+                threads_created = 0
+            thread_cache_hit_ratio = round(
+                (1 - threads_created / (threads_connected + threads_created)) * 100, 2
+            ) if (threads_connected + threads_created) > 0 else 0
 
             # =============================================
             # 12. 临时表统计 (temp_table) - P0
@@ -604,18 +734,61 @@ class TDSQLChecker(BaseDBChecker):
             # 17. Top SQL (top_sql) - P1
             # =============================================
             top_sql_by_latency = []
+            # SQL摘要统计 (toolkit集成: 从digest表采集更详细统计)
+            sql_digest_stats = []
             try:
                 cursor.execute("""
-                    SELECT DIGEST_TEXT as sql_text, COUNT_STAR as exec_count,
-                           SUM_TIMER_WAIT/1000000000000 as total_latency_sec
+                    SELECT DIGEST_TEXT as sql_text, SCHEMA_NAME, COUNT_STAR as exec_count,
+                           ROUND(SUM_TIMER_WAIT/1000000000000, 4) as total_latency_sec,
+                           ROUND(AVG_TIMER_WAIT/1000000000000, 6) as avg_latency_sec,
+                           ROUND(MAX_TIMER_WAIT/1000000000000, 4) as max_latency_sec,
+                           SUM_ROWS_EXAMINED as rows_examined,
+                           SUM_ROWS_SENT as rows_sent,
+                           SUM_ERRORS as errors,
+                           SUM_NO_INDEX_USED as no_index_used
                     FROM performance_schema.events_statements_summary_by_digest
-                    ORDER BY SUM_TIMER_WAIT DESC LIMIT 10
+                    WHERE SCHEMA_NAME IS NOT NULL AND COUNT_STAR > 0
+                    ORDER BY SUM_TIMER_WAIT DESC LIMIT 20
                 """)
                 for row in cursor.fetchall():
-                    top_sql_by_latency.append({
+                    item = {
                         "sql_text": (row['sql_text'] or 'N/A')[:200],
+                        "schema_name": row.get('SCHEMA_NAME', 'N/A'),
                         "exec_count": int(row['exec_count'] or 0),
-                        "total_latency_sec": round(float(row['total_latency_sec'] or 0), 4)
+                        "total_latency_sec": round(float(row['total_latency_sec'] or 0), 4),
+                        "avg_latency_sec": round(float(row['avg_latency_sec'] or 0), 6),
+                        "max_latency_sec": round(float(row['max_latency_sec'] or 0), 4),
+                        "rows_examined": int(row['rows_examined'] or 0),
+                        "rows_sent": int(row['rows_sent'] or 0),
+                        "errors": int(row['errors'] or 0),
+                        "no_index_used": int(row['no_index_used'] or 0),
+                    }
+                    top_sql_by_latency.append(item)
+                    sql_digest_stats.append(item)
+            except Exception:
+                pass
+
+            # =============================================
+            # 17.5 未使用索引分析 (toolkit集成)
+            # =============================================
+            unused_indexes = []
+            try:
+                cursor.execute("""
+                    SELECT OBJECT_SCHEMA as schema_name, OBJECT_NAME as table_name,
+                           INDEX_NAME as index_name
+                    FROM performance_schema.table_io_waits_summary_by_index_usage
+                    WHERE INDEX_NAME IS NOT NULL
+                      AND INDEX_NAME != 'PRIMARY'
+                      AND COUNT_STAR = 0
+                      AND OBJECT_SCHEMA NOT IN ('mysql', 'performance_schema', 'information_schema', 'sys')
+                    ORDER BY OBJECT_SCHEMA, OBJECT_NAME
+                    LIMIT 50
+                """)
+                for row in cursor.fetchall():
+                    unused_indexes.append({
+                        "schema_name": row['schema_name'],
+                        "table_name": row['table_name'],
+                        "index_name": row['index_name'],
                     })
             except Exception:
                 pass
@@ -696,6 +869,10 @@ class TDSQLChecker(BaseDBChecker):
             "version_comment": version_comment,
             "current_database": current_db,
             "uptime_seconds": uptime,
+            "host_name": host_name,
+            "ssl_enabled": have_ssl not in ('DISABLED', 'NO', ''),
+            "ssl_cipher": ssl_cipher,
+            "tdsql_conn_type": tdsql_conn_type,
 
             # 连接会话
             "threads_connected": threads_connected,
@@ -715,6 +892,7 @@ class TDSQLChecker(BaseDBChecker):
 
             # SQL统计
             "slow_queries_total": slow_queries,
+            "slow_queries": slow_queries,
             "long_query_time_sec": long_query_time,
 
             # 复制集群 - TDSQL特有
@@ -736,6 +914,11 @@ class TDSQLChecker(BaseDBChecker):
             "tdsql_cluster_health": tdsql_cluster_health,
             "tdsql_cluster_issues": tdsql_cluster_issues,
             "tdsql_cluster_summary": tdsql_cluster_summary,
+            # 前端兼容字段
+            "tdsql_zk_node_count": len(tdsql_zk_nodes) if tdsql_zk_nodes else 0,
+            "tdsql_proxy_count": len(tdsql_proxy_nodes) if tdsql_proxy_nodes else 0,
+            "tdsql_dn_total_count": tdsql_dn_total_count,
+            "tdsql_dn_primary_count": tdsql_dn_primary_count,
 
             # 锁
             "locks": locks,
@@ -746,9 +929,38 @@ class TDSQLChecker(BaseDBChecker):
             # InnoDB 缓冲池
             "innodb_buffer_pool_size_mb": innodb_buffer_pool_size_mb,
             "buffer_hit_ratio": buffer_hit_ratio,
+            "innodb_buffer_pool_hit_ratio": buffer_hit_ratio,
+            "innodb_buffer_pool_pages_total": innodb_buffer_pool_pages_total,
+            "innodb_buffer_pool_pages_free": innodb_buffer_pool_pages_free,
+            "innodb_buffer_pool_pages_dirty": innodb_buffer_pool_pages_dirty,
+            "buffer_dirty_ratio": buffer_dirty_ratio,
 
             # InnoDB 行操作
             "innodb_row_stats": innodb_row_stats,
+
+            # InnoDB 行操作速率 (toolkit集成)
+            "innodb_rows_read_ps": round(innodb_rows_read / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_inserted_ps": round(innodb_rows_inserted / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_updated_ps": round(innodb_rows_updated / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_deleted_ps": round(innodb_rows_deleted / uptime, 2) if uptime > 0 else 0,
+            "innodb_deadlocks": innodb_deadlocks,
+
+            # InnoDB IO (toolkit集成)
+            "innodb_data_reads": innodb_data_reads,
+            "innodb_data_writes": innodb_data_writes,
+            "innodb_data_fsyncs": innodb_data_fsyncs,
+            "innodb_data_reads_ps": round(innodb_data_reads / uptime, 2) if uptime > 0 else 0,
+            "innodb_data_writes_ps": round(innodb_data_writes / uptime, 2) if uptime > 0 else 0,
+            "innodb_log_waits": innodb_log_waits,
+            "innodb_log_waits_ps": round(innodb_log_waits / uptime, 2) if uptime > 0 else 0,
+            "innodb_os_log_written": innodb_os_log_written,
+            "innodb_os_log_written_ps": round(innodb_os_log_written / uptime, 2) if uptime > 0 else 0,
+
+            # 缓存效率 (toolkit集成)
+            "key_buffer_hit_ratio": key_buffer_hit_ratio,
+            "thread_cache_hit_ratio": thread_cache_hit_ratio,
+            "table_open_cache_hit_ratio": table_cache_hit_ratio,
+            "table_cache_hit_ratio": table_cache_hit_ratio,
 
             # 临时表
             "created_tmp_tables": created_tmp_tables,
@@ -771,8 +983,12 @@ class TDSQLChecker(BaseDBChecker):
             "table_open_cache": table_open_cache,
             "table_cache_hit_ratio": table_cache_hit_ratio,
 
-            # Top SQL
+            # Top SQL (增强版, toolkit集成)
             "top_sql_by_latency": top_sql_by_latency,
+            "sql_digest_stats": sql_digest_stats,
+
+            # 未使用索引 (toolkit集成)
+            "unused_indexes": unused_indexes,
 
             # 对象统计
             "table_size_top20": table_size_top20,

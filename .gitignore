@@ -135,11 +135,25 @@ test_results_*.json
 debug_*.py
 query
 
+# Dev PID file
+scripts/.dev-pids.json
+
 # Qoder IDE
 .qoder/
+
+# MemPalace
+mempalace.yaml
+entities.json
 
 # Plans (local only)
 plans/
 
 # Claude settings
 .claude/
+
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json
+# MemPalace per-project files (issue #185)
+mempalace.yaml
+entities.json

@@ -130,7 +130,8 @@ class PostgreSQLChecker(BaseDBChecker):
         cur.execute("""
             SELECT numbackends, xact_commit, xact_rollback, blks_read, blks_hit, 
                    tup_returned, tup_fetched, tup_inserted, tup_updated, tup_deleted,
-                   conflicts, temp_files, temp_bytes, deadlocks
+                   conflicts, temp_files, temp_bytes, deadlocks,
+                   blk_read_time, blk_write_time
             FROM pg_stat_database WHERE datname = current_database()
         """)
         db_stats = cur.fetchone()
@@ -149,10 +150,13 @@ class PostgreSQLChecker(BaseDBChecker):
             temp_files = db_stats[11]
             temp_bytes = db_stats[12]
             deadlocks = db_stats[13]
+            blk_read_time = db_stats[14] if len(db_stats) > 14 else 0
+            blk_write_time = db_stats[15] if len(db_stats) > 15 else 0
         else:
             numbackends = xact_commit = xact_rollback = blks_read = blks_hit = 0
             tup_returned = tup_fetched = tup_inserted = tup_updated = tup_deleted = 0
             conflicts = temp_files = temp_bytes = deadlocks = 0
+            blk_read_time = blk_write_time = 0
 
         tps = round((xact_commit + xact_rollback) / uptime, 2) if uptime > 0 else 0
         cache_hit_ratio = round(blks_hit / (blks_hit + blks_read) * 100, 2) if (blks_hit + blks_read) > 0 else 0
@@ -172,7 +176,8 @@ class PostgreSQLChecker(BaseDBChecker):
         # BGWriter 统计
         cur.execute("""
             SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, 
-                   checkpoint_sync_time, buffers_checkpoint, buffers_clean, buffers_backend
+                   checkpoint_sync_time, buffers_checkpoint, buffers_clean, buffers_backend,
+                   buffers_backend_fsync
             FROM pg_stat_bgwriter
         """)
         bgwriter_stats = cur.fetchone()
@@ -184,9 +189,13 @@ class PostgreSQLChecker(BaseDBChecker):
             buffers_checkpoint = bgwriter_stats[4]
             buffers_clean = bgwriter_stats[5]
             buffers_backend = bgwriter_stats[6]
+            buffers_backend_fsync = bgwriter_stats[7]
+            maxwritten_clean = 0
         else:
             checkpoints_timed = checkpoints_req = checkpoint_write_time = 0
             checkpoint_sync_time = buffers_checkpoint = buffers_clean = buffers_backend = 0
+            buffers_backend_fsync = 0
+            maxwritten_clean = 0
 
         # =============================================
         # 5. 等待事件 (wait) - 增强
@@ -400,6 +409,9 @@ class PostgreSQLChecker(BaseDBChecker):
         max_wal_senders = int(cur.fetchone()[0] or 0)
 
         # WAL延迟
+        wal_write_lag_ms = 0
+        wal_flush_lag_ms = 0
+        wal_replay_lag_ms = 0
         try:
             cur.execute("""
                 SELECT pg_last_wal_receive_lsn(), pg_last_wal_replay_lsn(),
@@ -412,6 +424,23 @@ class PostgreSQLChecker(BaseDBChecker):
         except Exception:
             last_wal_receive_lsn = last_wal_replay_lsn = 'N/A'
             wal_lag = 0
+
+        # WAL write/flush/replay 延迟（从pg_stat_replication提取）
+        try:
+            cur.execute("""
+                SELECT 
+                    EXTRACT(EPOCH FROM write_lag)::float * 1000 as write_lag_ms,
+                    EXTRACT(EPOCH FROM flush_lag)::float * 1000 as flush_lag_ms,
+                    EXTRACT(EPOCH FROM replay_lag)::float * 1000 as replay_lag_ms
+                FROM pg_stat_replication LIMIT 1
+            """)
+            lag_row = cur.fetchone()
+            if lag_row:
+                wal_write_lag_ms = round(float(lag_row[0] or 0), 2)
+                wal_flush_lag_ms = round(float(lag_row[1] or 0), 2)
+                wal_replay_lag_ms = round(float(lag_row[2] or 0), 2)
+        except Exception:
+            pass
 
         # 复制类型
         try:
@@ -888,6 +917,7 @@ class PostgreSQLChecker(BaseDBChecker):
             "conflicts": conflicts,
             "temp_files": temp_files,
             "temp_bytes": temp_bytes,
+            "temp_bytes_mb": round(temp_bytes / 1024 / 1024, 2),
             "deadlocks": deadlocks,
             "shared_buffers": shared_buffers,
             "effective_cache_size": effective_cache_size,
@@ -899,6 +929,10 @@ class PostgreSQLChecker(BaseDBChecker):
             "buffers_checkpoint": buffers_checkpoint,
             "buffers_clean": buffers_clean,
             "buffers_backend": buffers_backend,
+            "maxwritten_clean": maxwritten_clean,
+            "buffers_backend_fsync": buffers_backend_fsync,
+            "blk_read_time_ms": round(blk_read_time, 2),
+            "blk_write_time_ms": round(blk_write_time, 2),
 
             # 等待事件
             "locks": locks,
@@ -954,6 +988,17 @@ class PostgreSQLChecker(BaseDBChecker):
             "last_wal_receive_lsn": last_wal_receive_lsn,
             "last_wal_replay_lsn": last_wal_replay_lsn,
             "replication_lag_bytes": wal_lag,
+
+            # 前端兼容字段 - 复制
+            "wal_write_lag_ms": wal_write_lag_ms,
+            "wal_flush_lag_ms": wal_flush_lag_ms,
+            "wal_replay_lag_ms": wal_replay_lag_ms,
+            "replication_status": 'active' if replication_count > 0 else ('standby' if is_in_recovery else 'none'),
+
+            # 前端兼容字段 - AutoVacuum
+            "autovacuum_workers": len([s for s in session_list if 'autovacuum' in str(s.get('query', '')).lower()]) if session_list else 0,
+            "n_dead_tup_total": sum(t.get('n_dead_tup', 0) for t in tables_needing_vacuum) if tables_needing_vacuum else 0,
+            "transaction_id_age": max([t.get('n_dead_tup', 0) for t in tables_needing_vacuum]) if tables_needing_vacuum else 0,
 
             # 资源限制
             "resource_limits": resource_limits,

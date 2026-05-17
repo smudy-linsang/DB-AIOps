@@ -859,6 +859,10 @@ class DamengChecker(BaseDBChecker):
             "max_connections": max_sessions,
             "conn_usage_pct": conn_usage_pct,
             "session_wait_count": session_wait_count,
+            # 前端兼容字段
+            "active_sessions": active_sessions,
+            "total_sessions": total_sessions,
+            "max_sessions": max_sessions,
 
             # 空间
             "tablespaces": tablespaces,
@@ -871,6 +875,8 @@ class DamengChecker(BaseDBChecker):
             "tps": tps,
             "buffer_size_mb": buffer_size_mb,
             "cache_hit_ratio": cache_hit_ratio,
+            # 前端兼容字段
+            "buffer_hit_ratio": cache_hit_ratio,
             "sql_count": sql_count,
             "tran_count": tran_count,
 

@@ -41,6 +41,15 @@ class GbaseChecker(BaseDBChecker):
             except Exception:
                 server_id = 0
 
+            host_name = ''
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'hostname'")
+                row = cursor.fetchone()
+                if row:
+                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
+
             cursor.execute("SHOW GLOBAL STATUS LIKE 'Uptime'")
             uptime = int(cursor.fetchone()['Value'])
 
@@ -657,6 +666,7 @@ class GbaseChecker(BaseDBChecker):
             "server_id": server_id,
             "current_database": current_db,
             "uptime_seconds": uptime,
+            "host_name": host_name,
 
             # 连接会话
             "threads_connected": threads_connected,
@@ -693,6 +703,7 @@ class GbaseChecker(BaseDBChecker):
             "gbase_cluster_health": gbase_cluster_health,
             "gbase_cluster_issues": gbase_cluster_issues,
             "gbase_cluster_summary": gbase_cluster_summary,
+            "gbase_node_count": gbase_cm_total_count + gbase_dn_total_count,
 
             # 锁
             "locks": locks,

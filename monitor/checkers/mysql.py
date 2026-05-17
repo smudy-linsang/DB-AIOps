@@ -39,6 +39,15 @@ class MySQLChecker(BaseDBChecker):
             except Exception:
                 server_id = 0
 
+            host_name = ''
+            try:
+                cursor.execute("SHOW VARIABLES LIKE 'hostname'")
+                row = cursor.fetchone()
+                if row:
+                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
+
             cursor.execute("SELECT @@datadir")
             datadir = cursor.fetchone()['@@datadir']
 
@@ -72,6 +81,15 @@ class MySQLChecker(BaseDBChecker):
             cursor.execute("SHOW VARIABLES LIKE 'max_connections'")
             max_connections = int(cursor.fetchone()['Value'])
             conn_usage_pct = round((threads_connected / max_connections) * 100, 2) if max_connections > 0 else 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Threads_created'")
+            try:
+                threads_created = int(cursor.fetchone()['Value'])
+            except Exception:
+                threads_created = 0
+            thread_cache_hit_ratio = round(
+                (1 - threads_created / (threads_connected + threads_created)) * 100, 2
+            ) if (threads_connected + threads_created) > 0 else 0
 
             cursor.execute("SHOW GLOBAL STATUS LIKE 'Aborted_connects'")
             aborted_connects = int(cursor.fetchone()['Value'])
@@ -182,6 +200,12 @@ class MySQLChecker(BaseDBChecker):
                 innodb_rows_deleted = int(cursor.fetchone()['Value'])
             except Exception:
                 innodb_rows_deleted = 0
+
+            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+            try:
+                innodb_deadlocks = int(cursor.fetchone()['Value'])
+            except Exception:
+                innodb_deadlocks = 0
 
             # 缓冲池
             cursor.execute("SHOW VARIABLES LIKE 'innodb_buffer_pool_size'")
@@ -643,6 +667,15 @@ class MySQLChecker(BaseDBChecker):
                 have_ssl = cursor.fetchone()['Value']
             except Exception:
                 have_ssl = 'DISABLED'
+
+            ssl_cipher = ''
+            try:
+                cursor.execute("SHOW STATUS LIKE 'Ssl_cipher'")
+                row = cursor.fetchone()
+                if row:
+                    ssl_cipher = row['Value'] if isinstance(row, dict) else row[1]
+            except Exception:
+                pass
 
             # =============================================
             # 14. 对象统计 (object) - P2补全
@@ -1286,6 +1319,7 @@ class MySQLChecker(BaseDBChecker):
             "port": port,
             "current_database": current_db,
             "uptime_seconds": uptime,
+            "host_name": host_name,
 
             # 连接会话
             "threads_connected": threads_connected,
@@ -1320,6 +1354,8 @@ class MySQLChecker(BaseDBChecker):
             "innodb_buffer_pool_pages_total": innodb_buffer_pool_pages_total,
             "innodb_buffer_pool_pages_free": innodb_buffer_pool_pages_free,
             "buffer_hit_ratio": buffer_hit_ratio,
+            # 前端兼容字段：InnoDB 缓冲池命中率
+            "innodb_buffer_pool_hit_ratio": buffer_hit_ratio,
 
             # 等待事件
             "innodb_row_lock_waits": innodb_row_lock_waits,
@@ -1409,6 +1445,9 @@ class MySQLChecker(BaseDBChecker):
             # 安全审计
             "max_used_connections": max_used_connections,
             "have_ssl": have_ssl,
+            # 前端兼容字段
+            "ssl_enabled": have_ssl not in ('DISABLED', 'NO', ''),
+            "ssl_cipher": ssl_cipher,
 
             # 对象统计
             "table_size_top20": table_size_top20,
@@ -1511,4 +1550,26 @@ class MySQLChecker(BaseDBChecker):
 
             # 资源限制
             "resource_limits": resource_limits,
+
+            # ===== 前端兼容字段 =====
+            # MySQL 性能指标 - 速率指标(per second)
+            "innodb_rows_read_ps": round(innodb_rows_read / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_inserted_ps": round(innodb_rows_inserted / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_updated_ps": round(innodb_rows_updated / uptime, 2) if uptime > 0 else 0,
+            "innodb_rows_deleted_ps": round(innodb_rows_deleted / uptime, 2) if uptime > 0 else 0,
+            "innodb_deadlocks": innodb_deadlocks,
+            "slow_queries": slow_queries_total,
+
+            # InnoDB IO - 速率指标(per second)
+            "innodb_data_reads_ps": round(innodb_data_reads / uptime, 2) if uptime > 0 else 0,
+            "innodb_data_writes_ps": round(innodb_data_writes / uptime, 2) if uptime > 0 else 0,
+            "innodb_log_waits_ps": round(innodb_log_waits / uptime, 2) if uptime > 0 else 0,
+            "innodb_os_log_written_ps": round(innodb_os_log_written / uptime, 2) if uptime > 0 else 0,
+
+            # 缓存效率
+            "table_open_cache_hit_ratio": table_cache_hit_ratio,
+            "key_buffer_hit_ratio": round(
+                (1 - key_reads / key_read_requests) * 100, 2
+            ) if key_read_requests > 0 else 0,
+            "thread_cache_hit_ratio": thread_cache_hit_ratio,
         }
