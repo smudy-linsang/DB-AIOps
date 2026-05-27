@@ -110,8 +110,8 @@ class AuditLogMiddleware:
         if auth_header.startswith('Bearer '):
             token = auth_header[7:]
             try:
-                from monitor.auth import TokenAuth
-                user_info = TokenAuth.verify_token(token)
+                from monitor.auth import TokenManager
+                user_info = TokenManager.validate_token(token)
                 if user_info:
                     return user_info.get('username', 'token_user')
             except Exception:

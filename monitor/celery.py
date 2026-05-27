@@ -59,6 +59,18 @@ app.conf.beat_schedule = {
         'schedule': crontab(hour=8, minute=0),
     },
 
+    # 每周一9:00生成周报
+    'generate-weekly-report': {
+        'task': 'monitor.tasks.generate_weekly_report',
+        'schedule': crontab(day_of_week=1, hour=9, minute=0),
+    },
+
+    # 每月1日9:00生成月报
+    'generate-monthly-report': {
+        'task': 'monitor.tasks.generate_monthly_report',
+        'schedule': crontab(day_of_month=1, hour=9, minute=0),
+    },
+
     # 每分钟更新平台指标
     'update-platform-metrics': {
         'task': 'monitor.tasks.update_platform_metrics',

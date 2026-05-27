@@ -23,20 +23,7 @@ logger = logging.getLogger(__name__)
 def collect_single_db(self, config_id):
     """采集单个数据库的指标（v3.0: 使用模块化 Checker）"""
     from monitor.models import DatabaseConfig, MonitorLog
-    from monitor.checkers import (
-        OracleChecker, MySQLChecker, PostgreSQLChecker,
-        DamengChecker, GbaseChecker, TDSQLChecker
-    )
-
-    # 数据库类型 -> 检查器映射 (与 start_monitor.py 保持一致)
-    CHECKER_MAP = {
-        'oracle': OracleChecker,
-        'mysql': MySQLChecker,
-        'pgsql': PostgreSQLChecker,
-        'dm': DamengChecker,
-        'gbase': GbaseChecker,
-        'tdsql': TDSQLChecker,
-    }
+    from monitor.checkers import CHECKER_MAP
 
     try:
         config = DatabaseConfig.objects.get(id=config_id, is_active=True)
@@ -231,15 +218,45 @@ def run_health_scoring():
 @shared_task
 def generate_daily_report():
     """生成日报"""
-    from monitor.report_engine import ReportService
-
     try:
-        service = ReportService()
-        result = service.generate_daily_report()
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command('generate_report', type='daily', stdout=out)
         logger.info(f"[Celery] 日报生成完成")
-        return {'status': 'success', 'result': result}
+        return {'status': 'success'}
     except Exception as e:
         logger.error(f"[Celery] 日报生成失败: {e}")
+        return {'status': 'error', 'error': str(e)}
+
+
+@shared_task
+def generate_weekly_report():
+    """生成周报"""
+    try:
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command('generate_report', type='weekly', stdout=out)
+        logger.info(f"[Celery] 周报生成完成")
+        return {'status': 'success'}
+    except Exception as e:
+        logger.error(f"[Celery] 周报生成失败: {e}")
+        return {'status': 'error', 'error': str(e)}
+
+
+@shared_task
+def generate_monthly_report():
+    """生成月报"""
+    try:
+        from django.core.management import call_command
+        from io import StringIO
+        out = StringIO()
+        call_command('generate_report', type='monthly', stdout=out)
+        logger.info(f"[Celery] 月报生成完成")
+        return {'status': 'success'}
+    except Exception as e:
+        logger.error(f"[Celery] 月报生成失败: {e}")
         return {'status': 'error', 'error': str(e)}
 
 

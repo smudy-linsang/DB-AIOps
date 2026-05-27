@@ -17,6 +17,7 @@ import re
 
 logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
+from django.utils import timezone
 from typing import Dict, List, Optional, Any, Tuple
 from collections import defaultdict
 
@@ -381,7 +382,7 @@ class SlowQueryEngine:
         try:
             hours_map = {'1h': 1, '6h': 6, '24h': 24}
             hours = hours_map.get(time_range, 24)
-            since = datetime.now() - timedelta(hours=hours)
+            since = timezone.now() - timedelta(hours=hours)
 
             logs = MonitorLog.objects.filter(
                 db_config=self.config,

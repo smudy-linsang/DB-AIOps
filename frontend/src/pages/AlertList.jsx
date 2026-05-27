@@ -10,6 +10,8 @@ import {
   EyeOutlined, DeleteOutlined, CheckOutlined
 } from '@ant-design/icons'
 import { alertAPI } from '../services/api'
+import { PermissionGuard } from '../components/AuthGuard'
+import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
 
 const { Title, Text } = Typography
@@ -52,18 +54,18 @@ function AlertDetailModal({ alert, onClose, onAck, onDelete }) {
       footer={[
         <Button key="close" onClick={onClose}>关闭</Button>,
         alert.status === 'active' && (
-          <Button key="ack" type="primary" icon={<CheckOutlined />}
+          <PermissionGuard key="ack" code={Perm.ALERTS_ACKNOWLEDGE}><Button type="primary" icon={<CheckOutlined />}
             onClick={() => { onAck(alert.id); onClose() }}>
             确认告警
-          </Button>
+          </Button></PermissionGuard>
         ),
-        <Popconfirm key="del"
+        <PermissionGuard key="del" code={Perm.ALERTS_DELETE}><Popconfirm
           title="删除后该指标可重新触发告警，确认删除？"
           onConfirm={() => { onDelete(alert.id); onClose() }}
           okText="确认删除" okButtonProps={{ danger: true }}
         >
           <Button danger icon={<DeleteOutlined />}>删除告警</Button>
-        </Popconfirm>,
+        </Popconfirm></PermissionGuard>,
       ].filter(Boolean)}
     >
       <Descriptions column={2} bordered size="small">

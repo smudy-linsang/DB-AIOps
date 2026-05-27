@@ -35,7 +35,7 @@ from .models import MonitorLog, AlertLog, AuditLog, UserProfile, DatabaseConfig
 from .models import AlertSilenceWindow, AlertNotificationLog, NotificationRule
 from .models import BusinessSystem, DatabaseTopology, ReportRecord
 from .slow_query_engine import SlowQueryEngine
-from .auth import require_auth, require_role, get_user_role, get_user_database_ids, get_user_permissions, is_admin
+from .auth import require_auth, require_role, require_permission, require_any_permission, get_user_role_code, get_user_database_ids, get_user_permissions, get_user_menu_permissions, is_super_admin
 
 
 class JSONResponseMixin:
@@ -75,7 +75,7 @@ class HealthCheckView(JSONResponseMixin, View):
             db_status = f"error: {str(e)}"
         
         # 检查采集状态（最近5分钟有日志的数据库数）
-        recent_time = datetime.now() - timedelta(minutes=5)
+        recent_time = timezone.now() - timedelta(minutes=5)
         active_dbs = MonitorLog.objects.filter(
             create_time__gte=recent_time
         ).values('config_id').distinct().count()
@@ -85,7 +85,7 @@ class HealthCheckView(JSONResponseMixin, View):
         
         data = {
             'status': 'healthy',
-            'timestamp': datetime.now().isoformat(),
+            'timestamp': timezone.now().isoformat(),
             'components': {
                 'database': db_status,
                 'api': 'ok',
@@ -218,11 +218,11 @@ class DatabaseListView(JSONResponseMixin, View):
             'databases': result
         })
     
-    @method_decorator(require_role(['dba_supervisor', 'admin']))
+    @method_decorator(require_permission('databases.create'))
     def post(self, request):
         """
         POST /api/v1/databases/
-        创建新的数据库配置（仅 dba_supervisor 和 admin 可操作）
+        创建新的数据库配置（需要 databases.create 权限）
         """
         try:
             import json
@@ -559,11 +559,32 @@ class DatabaseStatusView(JSONResponseMixin, View):
                         if isinstance(raw_data, str):
                             import json as _json
                             raw_data = _json.loads(raw_data)
+                        # 获取健康评分
+                        health_score = None
+                        health_grade = None
+                        try:
+                            from django.core.cache import cache
+                            from .models import HealthScore
+                            cache_key = f'api_health_score_{config_id}'
+                            cached = cache.get(cache_key)
+                            if cached:
+                                health_score = cached.get('score')
+                                health_grade = cached.get('grade')
+                            else:
+                                today = timezone.now().date()
+                                hs = HealthScore.objects.filter(config_id=config_id, score_date=today).first()
+                                if hs:
+                                    health_score = hs.total_score
+                                    health_grade = hs.grade
+                        except Exception:
+                            pass
                         return self.json_response({
                             'config_id': config_id,
                             'status': row[1],
                             'collected_at': row[0].isoformat(),
                             'metrics': raw_data,
+                            'health_score': health_score,
+                            'health_grade': health_grade,
                             'source': 'timescaledb'
                         })
         except Exception as ts_err:
@@ -582,12 +603,54 @@ class DatabaseStatusView(JSONResponseMixin, View):
         except (json.JSONDecodeError, TypeError):
             metrics = {}
         
+        # 计算健康评分（缓存1小时，避免频繁计算）
+        health_score = None
+        health_grade = None
+        try:
+            from django.core.cache import cache
+            from .models import DatabaseConfig, HealthScore
+            from .health_engine import HealthEngine
+            
+            cache_key = f'api_health_score_{config_id}'
+            cached = cache.get(cache_key)
+            if cached:
+                health_score = cached.get('score')
+                health_grade = cached.get('grade')
+            else:
+                # 优先从 HealthScore 表读取今日评分
+                today = timezone.now().date()
+                hs = HealthScore.objects.filter(
+                    config_id=config_id, score_date=today
+                ).first()
+                if hs:
+                    health_score = hs.total_score
+                    health_grade = hs.grade
+                else:
+                    # 实时计算健康评分
+                    try:
+                        config = DatabaseConfig.objects.get(id=config_id)
+                        engine = HealthEngine(config)
+                        report = engine.calculate()
+                        health_score = report.get('overall_score', 0)
+                        health_grade = report.get('grade', 'F')
+                        # 保存到 HealthScore 表
+                        engine.save_result(report)
+                    except Exception:
+                        pass
+                # 缓存1小时
+                if health_score is not None:
+                    cache.set(cache_key, {'score': health_score, 'grade': health_grade}, 3600)
+        except Exception:
+            pass
+        
         data = {
             'config_id': config_id,
             'status': latest.status,
             'collected_at': latest.create_time.isoformat(),
             'message': latest.message,
             'metrics': metrics,
+            'health_score': health_score,
+            'health_grade': health_grade,
             'source': 'orm'
         }
         
@@ -911,7 +974,7 @@ class DatabaseHealthView(JSONResponseMixin, View):
         
         # 解析查询参数
         days = int(request.GET.get('days', 30))
-        start_date = datetime.now().date() - timedelta(days=days)
+        start_date = timezone.now().date() - timedelta(days=days)
         
         # 查询健康评分
         from .models import HealthScore
@@ -1059,10 +1122,10 @@ class AlertListView(JSONResponseMixin, View):
 
 class AlertAcknowledgeView(JSONResponseMixin, View):
     """告警确认 API"""
-    
+
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    @method_decorator(require_permission('alerts.acknowledge'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
@@ -1100,7 +1163,7 @@ class AlertDeleteView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    @method_decorator(require_permission('alerts.delete'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -1267,7 +1330,7 @@ class AuditLogApproveView(JSONResponseMixin, View):
         if role == 'dba_supervisor':
             if not audit_log.approver_1:
                 audit_log.approver_1 = request.user.username
-                audit_log.approve_1_at = datetime.now()
+                audit_log.approve_1_at = timezone.now()
                 # 如果是高风险工单，需要第二级审批
                 if audit_log.risk_level == 'high':
                     audit_log.status = 'pending_approval_2'
@@ -1275,13 +1338,13 @@ class AuditLogApproveView(JSONResponseMixin, View):
                     audit_log.status = 'approved'
             elif not audit_log.approver_2:
                 audit_log.approver_2 = request.user.username
-                audit_log.approve_2_at = datetime.now()
+                audit_log.approve_2_at = timezone.now()
                 audit_log.status = 'approved'
         elif role == 'admin':
             # admin 可以直接审批
             if not audit_log.approver_1:
                 audit_log.approver_1 = request.user.username
-                audit_log.approve_1_at = datetime.now()
+                audit_log.approve_1_at = timezone.now()
             audit_log.status = 'approved'
         
         audit_log.save()
@@ -1529,65 +1592,70 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
 
 class UserListView(JSONResponseMixin, View):
     """用户列表 API"""
-    
+
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['admin']))
+    @method_decorator(require_permission('users.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
-    
+
     def get(self, request):
         """
         GET /api/v1/users/
         获取用户列表
         """
+        from .models import Role as RoleModel
         users = User.objects.all().order_by('-date_joined')
-        
+
         result = []
         for user in users:
             try:
                 profile = user.profile
-                role = profile.role
+                role_code = profile.role.code if profile.role else None
+                role_name = profile.role.name if profile.role else '无角色'
                 allowed_dbs = profile.allowed_databases
             except Exception:
-                role = 'read_only_observer'
+                role_code = None
+                role_name = '无角色'
                 allowed_dbs = []
-            
+
             result.append({
                 'id': user.id,
                 'username': user.username,
                 'email': user.email,
                 'is_active': user.is_active,
                 'is_staff': user.is_staff,
-                'role': role,
+                'role': role_code,
+                'role_name': role_name,
                 'allowed_databases': allowed_dbs,
                 'date_joined': user.date_joined.isoformat() if user.date_joined else None,
                 'last_login': user.last_login.isoformat() if user.last_login else None
             })
-        
+
         return self.json_response({
             'total': len(result),
             'users': result
         })
-    
+
     def post(self, request):
         """
         POST /api/v1/users/
         创建用户
         """
+        from .models import Role as RoleModel
         import json
-        
+
         try:
             data = json.loads(request.body)
         except Exception:
             return self.error_response('Invalid JSON body', 400)
-        
+
         username = data.get('username', '').strip()
         password = data.get('password', '')
         email = data.get('email', '').strip()
-        role = data.get('role', 'read_only_observer')
+        role_code = data.get('role', 'readonly')
         allowed_databases = data.get('allowed_databases', [])
-        
+
         # 验证
         if not username:
             return self.error_response('Username is required', 400)
@@ -1595,21 +1663,27 @@ class UserListView(JSONResponseMixin, View):
             return self.error_response('Password is required', 400)
         if User.objects.filter(username=username).exists():
             return self.error_response('Username already exists', 400)
-        
+
+        # 获取角色对象
+        try:
+            role_obj = RoleModel.objects.get(code=role_code)
+        except RoleModel.DoesNotExist:
+            return self.error_response(f'Role "{role_code}" not found', 400)
+
         # 创建用户
         user = User.objects.create_user(
             username=username,
             password=password,
             email=email
         )
-        
+
         # 创建用户配置
         UserProfile.objects.create(
             user=user,
-            role=role,
+            role=role_obj,
             allowed_databases=allowed_databases
         )
-        
+
         return self.json_response({
             'status': 'success',
             'message': 'User created',
@@ -1619,76 +1693,85 @@ class UserListView(JSONResponseMixin, View):
 
 class UserDetailView(JSONResponseMixin, View):
     """用户详情 API"""
-    
+
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['admin']))
+    @method_decorator(require_permission('users.manage'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
-    
+
     def get(self, request, user_id: int):
         """
         GET /api/v1/users/{id}/
         获取用户详情
         """
+        from .models import Role as RoleModel
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return self.error_response('User not found', 404)
-        
+
         try:
             profile = user.profile
-            role = profile.role
+            role_code = profile.role.code if profile.role else None
+            role_name = profile.role.name if profile.role else '无角色'
             allowed_dbs = profile.allowed_databases
         except Exception:
-            role = 'read_only_observer'
+            role_code = None
+            role_name = '无角色'
             allowed_dbs = []
-        
+
         return self.json_response({
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'is_active': user.is_active,
             'is_staff': user.is_staff,
-            'role': role,
+            'role': role_code,
+            'role_name': role_name,
             'allowed_databases': allowed_dbs,
             'date_joined': user.date_joined.isoformat() if user.date_joined else None,
             'last_login': user.last_login.isoformat() if user.last_login else None
         })
-    
+
     def put(self, request, user_id: int):
         """
         PUT /api/v1/users/{id}/
         更新用户信息
         """
+        from .models import Role as RoleModel
         import json
-        
+
         try:
             user = User.objects.get(id=user_id)
         except User.DoesNotExist:
             return self.error_response('User not found', 404)
-        
+
         try:
             data = json.loads(request.body)
         except Exception:
             return self.error_response('Invalid JSON body', 400)
-        
+
         # 更新字段
         if 'email' in data:
             user.email = data['email'].strip()
         if 'is_active' in data:
             user.is_active = data['is_active']
-        
+
         user.save()
-        
+
         # 更新用户配置
         profile, _ = UserProfile.objects.get_or_create(user=user)
         if 'role' in data:
-            profile.role = data['role']
+            try:
+                role_obj = RoleModel.objects.get(code=data['role'])
+                profile.role = role_obj
+            except RoleModel.DoesNotExist:
+                pass
         if 'allowed_databases' in data:
             profile.allowed_databases = data['allowed_databases']
         profile.save()
-        
+
         return self.json_response({
             'status': 'success',
             'message': 'User updated'
@@ -1710,8 +1793,8 @@ class UserPasswordView(JSONResponseMixin, View):
         """
         import json
         
-        # 只有管理员或本人可以修改密码
-        if request.user.id != user_id and not is_admin(request.user):
+        # 只有超级管理员或本人可以修改密码
+        if request.user.id != user_id and not is_super_admin(request.user):
             return self.error_response('Permission denied', 403)
         
         try:
@@ -1751,25 +1834,26 @@ class CurrentUserView(JSONResponseMixin, View):
     def get(self, request):
         """
         GET /api/v1/users/me/
-        获取当前用户信息
+        获取当前用户信息（含权限和菜单可见性）
         """
         user = request.user
-        
+        menu_perms = get_user_menu_permissions(user)
+
         try:
             profile = user.profile
-            role = profile.role
             allowed_dbs = profile.allowed_databases
         except Exception:
-            role = 'read_only_observer'
             allowed_dbs = []
-        
+
         return self.json_response({
             'id': user.id,
             'username': user.username,
             'email': user.email,
             'is_active': user.is_active,
-            'role': role,
-            'permissions': get_user_permissions(user),
+            'role': menu_perms['role_code'],
+            'role_name': menu_perms['role_name'],
+            'permissions': menu_perms['permissions'],
+            'menus': menu_perms['menus'],
             'allowed_databases': allowed_dbs,
             'date_joined': user.date_joined.isoformat() if user.date_joined else None,
             'last_login': user.last_login.isoformat() if user.last_login else None
@@ -2760,18 +2844,117 @@ class DashboardChartsView(JSONResponseMixin, View):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request):
-        from .models import DatabaseConfig
+        from .models import DatabaseConfig, MonitorLog
         hours = int(request.GET.get('hours', 24))
         since = timezone.now() - timedelta(hours=hours)
+        
         # 尝试从 TimescaleDB 读取趋势
         try:
-            from .timeseries import TimeSeriesManager
-            db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
-            tsm = TimeSeriesManager()
-            trend_data = tsm.get_trend_for_dashboard(db_ids, since)
+            from .timeseries import get_timeseries_storage
+            ts = get_timeseries_storage()
+            if ts.enabled:
+                conn = ts._get_connection()
+                if conn:
+                    db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
+                    # 简单查询最近指标
+                    cur = conn.cursor()
+                    cur.execute(
+                        "SELECT time, db_config_id, metric_name, metric_value "
+                        "FROM metric_point "
+                        "WHERE db_config_id = ANY(%s) AND time >= %s "
+                        "ORDER BY time",
+                        (db_ids, since)
+                    )
+                    rows = cur.fetchall()
+                    cur.close()
+                    if rows:
+                        # 按时间聚合为趋势数据
+                        trend_data = self._aggregate_trend_from_rows(rows)
+                        return self.json_response({'trend': trend_data})
+        except Exception:
+            pass
+        
+        # 回退：从 MonitorLog ORM 读取趋势数据
+        try:
+            trend_data = self._get_trend_from_orm(since)
             return self.json_response({'trend': trend_data})
         except Exception:
             return self.json_response({'trend': []})
+    
+    def _get_trend_from_orm(self, since):
+        """从 MonitorLog 表聚合趋势数据"""
+        from .models import MonitorLog, DatabaseConfig
+        
+        logs = MonitorLog.objects.filter(
+            create_time__gte=since,
+            status='UP'
+        ).order_by('create_time')
+        
+        if not logs.exists():
+            return []
+        
+        # Python 侧聚合（message 是 JSON 字段，无法直接用 ORM 聚合）
+        hourly_data = {}
+        for log in logs:
+            try:
+                data = json.loads(log.message) if log.message else {}
+            except Exception:
+                continue
+            
+            hour_key = log.create_time.strftime('%Y-%m-%d %H:00')
+            if hour_key not in hourly_data:
+                hourly_data[hour_key] = {
+                    'qps': [], 'tps': [], 'conn': [], 'cpu': []
+                }
+            
+            # 收集数值型指标
+            for key in ['qps', 'queries_per_second']:
+                if key in data and isinstance(data[key], (int, float)):
+                    hourly_data[hour_key]['qps'].append(float(data[key]))
+            for key in ['tps', 'transactions_per_second']:
+                if key in data and isinstance(data[key], (int, float)):
+                    hourly_data[hour_key]['tps'].append(float(data[key]))
+            for key in ['active_connections', 'current_connections']:
+                if key in data and isinstance(data[key], (int, float)):
+                    hourly_data[hour_key]['conn'].append(float(data[key]))
+        
+        # 构建趋势数据
+        trend_data = []
+        for hour_key in sorted(hourly_data.keys()):
+            entry = hourly_data[hour_key]
+            point = {'time': hour_key}
+            if entry['qps']:
+                point['qps'] = round(sum(entry['qps']) / len(entry['qps']), 2)
+            if entry['tps']:
+                point['tps'] = round(sum(entry['tps']) / len(entry['tps']), 2)
+            if entry['conn']:
+                point['conn'] = round(sum(entry['conn']) / len(entry['conn']), 0)
+            trend_data.append(point)
+        
+        return trend_data
+    
+    def _aggregate_trend_from_rows(self, rows):
+        """从 TimescaleDB 结果聚合趋势数据"""
+        hourly = {}
+        for row in rows:
+            t, db_id, metric_name, value = row[0], row[1], row[2], float(row[3])
+            hour_key = t.strftime('%Y-%m-%d %H:00')
+            if hour_key not in hourly:
+                hourly[hour_key] = {}
+            key_map = {'qps': 'qps', 'tps': 'tps', 'active_connections': 'conn'}
+            mapped = key_map.get(metric_name)
+            if mapped:
+                if mapped not in hourly[hour_key]:
+                    hourly[hour_key][mapped] = []
+                hourly[hour_key][mapped].append(value)
+        
+        trend_data = []
+        for hour_key in sorted(hourly.keys()):
+            point = {'time': hour_key}
+            for k, vals in hourly[hour_key].items():
+                point[k] = round(sum(vals) / len(vals), 2)
+            trend_data.append(point)
+        return trend_data
 
 
 class DashboardHealthTrendView(JSONResponseMixin, View):
@@ -2790,10 +2973,10 @@ class DashboardHealthTrendView(JSONResponseMixin, View):
         days = int(request.GET.get('days', 7))
         since = timezone.now() - timedelta(days=days)
         scores = HealthScore.objects.filter(
-            calculated_at__gte=since
-        ).order_by('calculated_at').values('calculated_at', 'score')
+            score_date__gte=since.date()
+        ).order_by('score_date').values('score_date', 'total_score')
         data = [
-            {'time': s['calculated_at'].isoformat(), 'score': s['score']}
+            {'time': s['score_date'].isoformat(), 'score': s['total_score']}
             for s in scores
         ]
         return self.json_response({'health_trend': data})
@@ -2814,12 +2997,13 @@ class DashboardAlertTrendView(JSONResponseMixin, View):
         days = int(request.GET.get('days', 7))
         since = timezone.now() - timedelta(days=days)
         from django.db.models import Count
+        from django.db.models.functions import TruncDate
         from .models import AlertLog
         alerts_per_day = AlertLog.objects.filter(
             create_time__gte=since
-        ).extra({'day': "date(create_time)"}).values('day').annotate(count=Count('id'))
+        ).annotate(day=TruncDate('create_time')).values('day').annotate(count=Count('id'))
         data = [
-            {'date': a['day'], 'count': a['count']}
+            {'date': a['day'].isoformat() if a['day'] else None, 'count': a['count']}
             for a in alerts_per_day
         ]
         return self.json_response({'alert_trend': data})
@@ -3086,11 +3270,15 @@ class AlertNotificationLogView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
-    def get(self, request, alert_id):
-        logs = AlertNotificationLog.objects.filter(alert_id=alert_id).order_by('-send_time')
-        data = [{'id': n.id, 'channel': n.channel, 'status': n.status,
+    def get(self, request, alert_id=None):
+        # 支持两种模式：按 alert_id 过滤，或列出全部
+        if alert_id:
+            queryset = AlertNotificationLog.objects.filter(alert_id=alert_id).order_by('-send_time')
+        else:
+            queryset = AlertNotificationLog.objects.all().order_by('-send_time')[:100]
+        data = [{'id': n.id, 'alert_id': n.alert_id, 'channel': n.channel, 'status': n.status,
                  'error_message': n.error_message, 'send_time': n.send_time.isoformat()}
-                for n in logs]
+                for n in queryset]
         return self.json_response({'notifications': data})
 
 
@@ -3213,7 +3401,7 @@ class DatabaseTopologyView(JSONResponseMixin, View):
 # =============================================================================
 
 class DatabaseImpactView(JSONResponseMixin, View):
-    """数据库影响分析 API"""
+    """数据库影响分析 API（增强版）"""
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
@@ -3222,25 +3410,64 @@ class DatabaseImpactView(JSONResponseMixin, View):
 
     def get(self, request, config_id):
         config = get_object_or_404(DatabaseConfig, id=config_id)
+        from monitor.models import MonitorLog
+
+        # 当前数据库状态
+        latest = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+        current_status = latest.status if latest else 'UNKNOWN'
+
         # 关联的业务系统
         affected_systems = BusinessSystem.objects.filter(databases=config)
-        systems_data = [{'name': s.name, 'importance': s.importance, 'owner': s.owner, 'contact': s.contact}
+        systems_data = [{'name': s.name, 'importance': s.importance, 'owner': s.owner,
+                         'contact': s.contact, 'description': s.description}
                         for s in affected_systems]
+
         # 拓扑信息
         topo = DatabaseTopology.objects.filter(db_config=config).first()
         topology_data = None
+        failover_possible = False
+        peer_status_list = []
+
         if topo:
+            for d in topo.peer_databases.all():
+                peer_latest = MonitorLog.objects.filter(config=d).order_by('-create_time').first()
+                peer_topo = DatabaseTopology.objects.filter(db_config=d).first()
+                peer_status_list.append({
+                    'id': d.id, 'name': d.name, 'db_type': d.db_type,
+                    'role': peer_topo.role if peer_topo else 'unknown',
+                    'status': peer_latest.status if peer_latest else 'UNKNOWN',
+                    'host': d.host, 'port': d.port,
+                })
+
+            failover_possible = (
+                topo.topology_type in ('primary_standby', 'adg', 'mha')
+                and topo.role == 'primary'
+                and any(p['status'] == 'UP' for p in peer_status_list)
+            )
+
             topology_data = {
                 'role': topo.role, 'topology_type': topo.topology_type,
                 'cluster_name': topo.cluster_name, 'sync_mode': topo.sync_mode,
                 'lag_seconds': topo.lag_seconds,
-                'peer_databases': [{'id': d.id, 'name': d.name, 'role': getattr(d.topology_info.first(), 'role', 'unknown')}
-                                   for d in topo.peer_databases.all()],
-                'failover_possible': topo.topology_type in ('primary_standby', 'adg', 'mha') and topo.role == 'primary',
+                'peer_databases': peer_status_list,
+                'failover_possible': failover_possible,
             }
+
+        # 活跃告警
+        active_alerts = AlertLog.objects.filter(config=config, status='active')[:10]
+        alerts_data = [{'id': a.id, 'alert_type': a.alert_type, 'severity': a.severity,
+                        'title': a.title, 'create_time': a.create_time.isoformat()}
+                       for a in active_alerts]
+
         return self.json_response({
+            'database': {
+                'id': config.id, 'name': config.name, 'db_type': config.db_type,
+                'host': config.host, 'port': config.port, 'status': current_status,
+            },
             'affected_business_systems': systems_data,
             'topology': topology_data,
+            'failover_possible': failover_possible,
+            'active_alerts': alerts_data,
         })
 
 
@@ -3257,9 +3484,15 @@ class ReportListView(JSONResponseMixin, View):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request):
-        reports = ReportRecord.objects.all()[:50]
+        report_type = request.GET.get('report_type')
+        queryset = ReportRecord.objects.all()
+        if report_type:
+            queryset = queryset.filter(report_type=report_type)
+        reports = queryset[:50]
         data = [{'id': r.id, 'report_type': r.report_type, 'title': r.title,
+                 'content_html': r.content_html,
                  'period_start': str(r.period_start), 'period_end': str(r.period_end),
+                 'recipients': r.recipients,
                  'status': r.status, 'created_at': r.created_at.isoformat()}
                 for r in reports]
         return self.json_response({'reports': data})
@@ -3279,3 +3512,611 @@ class ReportDownloadView(JSONResponseMixin, View):
             return self.error_response('报表内容为空', 404)
         from django.http import HttpResponse
         return HttpResponse(r.content_html, content_type='text/html; charset=utf-8')
+
+
+# =============================================================================
+# Phase 5: 工单创建 API
+# =============================================================================
+
+class TicketCreateView(JSONResponseMixin, View):
+    """创建运维工单 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """
+        POST /api/v1/tickets/
+
+        请求体:
+        {
+            "config_id": int,
+            "action_type": str,
+            "description": str,
+            "sql_command": str,
+            "risk_level": "low"|"medium"|"high"|"critical",
+            "rollback_command": str (可选),
+            "source": "manual"|"ai_suggestion" (可选)
+        }
+        """
+        try:
+            body = json.loads(request.body)
+            config_id = body.get('config_id')
+            if not config_id:
+                return self.error_response('config_id 是必填项', 400)
+
+            # RBAC 检查
+            allowed_db_ids = get_user_database_ids(request.user)
+            if allowed_db_ids is not None and config_id not in allowed_db_ids:
+                return self.error_response('Permission denied', 403)
+
+            config = get_object_or_404(DatabaseConfig, id=config_id)
+
+            # 调用审批引擎创建工单
+            from monitor.approval_engine import ApprovalEngine
+            engine = ApprovalEngine()
+            audit_log = engine.create_ticket(
+                config=config,
+                action_type=body.get('action_type', 'manual_sql'),
+                description=body.get('description', ''),
+                sql_command=body.get('sql_command', ''),
+                risk_level=body.get('risk_level', 'medium'),
+                rollback_command=body.get('rollback_command'),
+                source=body.get('source', 'manual'),
+                created_by=request.user.username,
+            )
+
+            return self.json_response({
+                'id': audit_log.id,
+                'status': audit_log.status,
+                'risk_level': audit_log.risk_level,
+                'message': '工单已创建',
+            }, status=201)
+        except Exception as e:
+            return self.error_response(f'创建工单失败: {str(e)}', 400)
+
+
+# =============================================================================
+# Phase 5: 容量预测增强 API
+# =============================================================================
+
+class CapacityOverviewView(JSONResponseMixin, View):
+    """容量预测总览 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        """
+        GET /api/v1/capacity/overview/
+        返回所有数据库容量汇总统计
+        """
+        from monitor.models import PredictionResult
+
+        configs = DatabaseConfig.objects.filter(is_active=True)
+        overview = []
+        total_emergency = 0
+        total_warning = 0
+        total_safe = 0
+
+        for config in configs:
+            predictions = PredictionResult.objects.filter(
+                config=config
+            ).order_by('-generated_at')[:5]
+
+            db_data = {
+                'id': config.id,
+                'name': config.name,
+                'db_type': config.db_type,
+                'host': config.host,
+                'port': config.port,
+                'predictions': [],
+            }
+
+            for pred in predictions:
+                pred_item = {
+                    'metric_key': pred.metric_key,
+                    'resource_name': pred.resource_name,
+                    'current_value': float(pred.current_value) if pred.current_value else None,
+                    'monthly_growth_rate': float(pred.monthly_growth_rate) if pred.monthly_growth_rate else None,
+                    'predicted_warn_date': pred.predicted_warn_date.isoformat() if pred.predicted_warn_date else None,
+                    'predicted_crit_date': pred.predicted_crit_date.isoformat() if pred.predicted_crit_date else None,
+                    'model_used': pred.model_used,
+                    'confidence': float(pred.confidence) if pred.confidence else None,
+                    'recommendation': pred.recommendation,
+                }
+                db_data['predictions'].append(pred_item)
+
+                # 计算紧急程度
+                if pred.predicted_warn_date:
+                    days_to_warn = (pred.predicted_warn_date - timezone.now().date()).days
+                    if days_to_warn <= 7:
+                        total_emergency += 1
+                    elif days_to_warn <= 30:
+                        total_warning += 1
+                    else:
+                        total_safe += 1
+                else:
+                    total_safe += 1
+
+            overview.append(db_data)
+
+        return self.json_response({
+            'databases': overview,
+            'summary': {
+                'total': len(overview),
+                'emergency': total_emergency,
+                'warning': total_warning,
+                'safe': total_safe,
+            }
+        })
+
+
+class CapacityPredictNowView(JSONResponseMixin, View):
+    """手动触发容量预测 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request, config_id: int):
+        """
+        POST /api/v1/databases/<id>/predict-now/
+        立即触发一次容量预测并返回结果
+        """
+        # RBAC 检查
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            return self.error_response('Permission denied', 403)
+
+        config = get_object_or_404(DatabaseConfig, id=config_id)
+
+        try:
+            from monitor.capacity_engine import CapacityEngine
+            from monitor.models import PredictionResult
+
+            engine = CapacityEngine(config)
+            report = engine.analyze_all_metrics()
+
+            # 保存预测结果
+            engine.save_predictions(report)
+
+            # 格式化返回
+            result = []
+            for metric_name, metric_result in report.get('metrics', {}).items():
+                if 'error' not in metric_result:
+                    result.append({
+                        'metric_key': metric_name,
+                        'resource_name': metric_result.get('resource_name', ''),
+                        'current_value': metric_result.get('current_value'),
+                        'monthly_growth_rate': metric_result.get('monthly_growth_rate'),
+                        'predicted_warn_date': metric_result.get('predicted_warn_date'),
+                        'predicted_crit_date': metric_result.get('predicted_crit_date'),
+                        'model_used': metric_result.get('model_used'),
+                        'confidence': metric_result.get('confidence'),
+                        'recommendation': metric_result.get('recommendation', ''),
+                    })
+
+            return self.json_response({
+                'config_id': config_id,
+                'predictions': result,
+                'alerts': report.get('alerts', []),
+                'generated_at': timezone.now().isoformat(),
+            })
+        except Exception as e:
+            return self.error_response(f'容量预测失败: {str(e)}', 500)
+
+
+# =============================================================================
+# Phase 5: 拓扑总览 API
+# =============================================================================
+
+class TopologyOverviewView(JSONResponseMixin, View):
+    """全局拓扑总览 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        """
+        GET /api/v1/topology/overview/
+        返回全局拓扑关系图数据（节点+连线）
+        """
+        from monitor.models import DatabaseTopology, MonitorLog
+
+        # 获取所有拓扑记录
+        topologies = DatabaseTopology.objects.all().select_related('db_config').prefetch_related('peer_databases')
+
+        nodes = []
+        edges = []
+        node_set = set()
+
+        for topo in topologies:
+            config = topo.db_config
+            if config.id not in node_set:
+                # 获取实时状态
+                latest = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+                status = latest.status if latest else 'UNKNOWN'
+                nodes.append({
+                    'id': config.id,
+                    'name': config.name,
+                    'db_type': config.db_type,
+                    'host': config.host,
+                    'port': config.port,
+                    'role': topo.role,
+                    'topology_type': topo.topology_type,
+                    'cluster_name': topo.cluster_name,
+                    'status': status,
+                })
+                node_set.add(config.id)
+
+            # 添加关联连线
+            for peer in topo.peer_databases.all():
+                if peer.id not in node_set:
+                    peer_topo = DatabaseTopology.objects.filter(db_config=peer).first()
+                    peer_latest = MonitorLog.objects.filter(config=peer).order_by('-create_time').first()
+                    nodes.append({
+                        'id': peer.id,
+                        'name': peer.name,
+                        'db_type': peer.db_type,
+                        'host': peer.host,
+                        'port': peer.port,
+                        'role': peer_topo.role if peer_topo else 'single',
+                        'topology_type': peer_topo.topology_type if peer_topo else 'single',
+                        'cluster_name': peer_topo.cluster_name if peer_topo else '',
+                        'status': peer_latest.status if peer_latest else 'UNKNOWN',
+                    })
+                    node_set.add(peer.id)
+
+                # 获取延迟
+                lag = topo.lag_seconds
+                edges.append({
+                    'source': config.id,
+                    'target': peer.id,
+                    'sync_mode': topo.sync_mode,
+                    'lag_seconds': lag,
+                    'topology_type': topo.topology_type,
+                    'cluster_name': topo.cluster_name,
+                })
+
+        # 补充无拓扑配置的独立数据库
+        standalone = DatabaseConfig.objects.filter(is_active=True).exclude(id__in=node_set)
+        for config in standalone:
+            latest = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
+            nodes.append({
+                'id': config.id,
+                'name': config.name,
+                'db_type': config.db_type,
+                'host': config.host,
+                'port': config.port,
+                'role': 'single',
+                'topology_type': 'single',
+                'cluster_name': '',
+                'status': latest.status if latest else 'UNKNOWN',
+            })
+
+        return self.json_response({
+            'nodes': nodes,
+            'edges': edges,
+        })
+
+
+# =============================================================================
+# Phase 5: 报表生成 API
+# =============================================================================
+
+class ReportGenerateView(JSONResponseMixin, View):
+    """手动生成报表 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """
+        POST /api/v1/reports/generate/
+
+        请求体: {"report_type": "daily"|"weekly"|"monthly"}
+        """
+        try:
+            body = json.loads(request.body) if request.body else {}
+            report_type = body.get('report_type', 'daily')
+            if report_type not in ('daily', 'weekly', 'monthly'):
+                return self.error_response('无效的报表类型', 400)
+
+            now = timezone.now()
+            if report_type == 'daily':
+                period_start = (now - timedelta(days=1)).date()
+                period_end = now.date()
+                title = f"数据库巡检日报 - {period_end.strftime('%Y-%m-%d')}"
+            elif report_type == 'weekly':
+                period_start = (now - timedelta(days=7)).date()
+                period_end = now.date()
+                title = f"数据库巡检周报 - {period_start.strftime('%m/%d')}~{period_end.strftime('%m/%d')}"
+            else:
+                period_start = (now - timedelta(days=30)).date()
+                period_end = now.date()
+                title = f"数据库巡检月报 - {period_end.strftime('%Y-%m')}"
+
+            # 调用 generate_report 命令的逻辑
+            from django.core.management import call_command
+            from io import StringIO
+            out = StringIO()
+            call_command('generate_report', type=report_type, stdout=out)
+
+            # 获取刚生成的报表
+            report = ReportRecord.objects.filter(
+                report_type=report_type
+            ).order_by('-created_at').first()
+
+            if not report:
+                return self.error_response('报表生成失败', 500)
+
+            return self.json_response({
+                'id': report.id,
+                'report_type': report.report_type,
+                'title': report.title,
+                'period_start': str(report.period_start),
+                'period_end': str(report.period_end),
+                'status': report.status,
+                'created_at': report.created_at.isoformat(),
+                'message': '报表生成成功',
+            }, status=201)
+        except Exception as e:
+            return self.error_response(f'报表生成失败: {str(e)}', 500)
+
+
+# =============================================================================
+# Phase 5: 通知测试 API
+# =============================================================================
+
+class NotificationTestView(JSONResponseMixin, View):
+    """通知测试 API - 发送测试消息到指定渠道"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        """
+        POST /api/v1/notification-rules/test/
+
+        请求体: {"channels": ["email", "dingtalk", "wecom"]}
+        """
+        try:
+            body = json.loads(request.body) if request.body else {}
+            channels = body.get('channels', ['email'])
+            title = "[DB-AIOps] 通知测试"
+            body_text = f"这是一条来自 DB-AIOps 的测试通知，发送时间: {timezone.now().strftime('%Y-%m-%d %H:%M:%S')}"
+
+            results = {}
+            from monitor.notifications import send_email_alert, send_dingtalk_alert, send_wecom_alert
+
+            for ch in channels:
+                if ch == 'email':
+                    results['email'] = send_email_alert(title, body_text)
+                elif ch == 'dingtalk':
+                    results['dingtalk'] = send_dingtalk_alert(title, body_text)
+                elif ch == 'wecom':
+                    results['wecom'] = send_wecom_alert(title, body_text)
+                else:
+                    results[ch] = False
+
+            return self.json_response({
+                'results': results,
+                'message': '测试通知已发送',
+            })
+        except Exception as e:
+            return self.error_response(f'测试通知发送失败: {str(e)}', 500)
+
+
+# =============================================================================
+# 角色管理 API（RBAC v2.0）
+# =============================================================================
+
+from .auth import Perm, PERMISSION_META, PERMISSION_GROUPS, BUILTIN_ROLES_META
+
+
+class RoleListView(JSONResponseMixin, View):
+    """角色列表 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission('roles.view'))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        """
+        GET /api/v1/roles/
+        获取所有角色及其权限
+        """
+        from .models import Role as RoleModel, RolePermission as RolePermissionModel
+        roles = RoleModel.objects.all().order_by('is_builtin', 'code')
+
+        result = []
+        for role in roles:
+            perm_codes = list(
+                RolePermissionModel.objects.filter(role=role).values_list('permission_code', flat=True)
+            )
+            result.append({
+                'id': role.id,
+                'code': role.code,
+                'name': role.name,
+                'description': role.description,
+                'is_builtin': role.is_builtin,
+                'permissions': perm_codes,
+                'user_count': role.users.count() if hasattr(role, 'users') else 0,
+                'create_time': role.create_time.isoformat() if role.create_time else None,
+                'update_time': role.update_time.isoformat() if role.update_time else None,
+            })
+
+        return self.json_response({
+            'total': len(result),
+            'roles': result,
+            'permission_meta': PERMISSION_META,
+            'permission_groups': PERMISSION_GROUPS,
+        })
+
+    def post(self, request):
+        """
+        POST /api/v1/roles/
+        创建自定义角色
+        """
+        from .models import Role as RoleModel, RolePermission as RolePermissionModel
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON body', 400)
+
+        code = data.get('code', '').strip()
+        name = data.get('name', '').strip()
+        description = data.get('description', '')
+        permissions = data.get('permissions', [])
+
+        if not code or not name:
+            return self.error_response('code and name are required', 400)
+
+        if RoleModel.objects.filter(code=code).exists():
+            return self.error_response(f'Role code "{code}" already exists', 400)
+
+        # 验证权限编码
+        valid_perms = set(PERMISSION_META.keys())
+        invalid_perms = [p for p in permissions if p not in valid_perms]
+        if invalid_perms:
+            return self.error_response(f'Invalid permission codes: {", ".join(invalid_perms)}', 400)
+
+        role = RoleModel.objects.create(
+            code=code,
+            name=name,
+            description=description,
+            is_builtin=False,
+        )
+
+        # 创建权限关联
+        for perm_code in permissions:
+            RolePermissionModel.objects.create(role=role, permission_code=perm_code)
+
+        return self.json_response({
+            'id': role.id,
+            'code': role.code,
+            'name': role.name,
+            'message': 'Role created',
+        }, status=201)
+
+
+class RoleDetailView(JSONResponseMixin, View):
+    """角色详情 API"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission('roles.manage'))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request, role_id: int):
+        """
+        GET /api/v1/roles/{id}/
+        获取角色详情
+        """
+        from .models import Role as RoleModel, RolePermission as RolePermissionModel
+
+        try:
+            role = RoleModel.objects.get(id=role_id)
+        except RoleModel.DoesNotExist:
+            return self.error_response('Role not found', 404)
+
+        perm_codes = list(
+            RolePermissionModel.objects.filter(role=role).values_list('permission_code', flat=True)
+        )
+
+        return self.json_response({
+            'id': role.id,
+            'code': role.code,
+            'name': role.name,
+            'description': role.description,
+            'is_builtin': role.is_builtin,
+            'permissions': perm_codes,
+            'user_count': role.users.count() if hasattr(role, 'users') else 0,
+            'create_time': role.create_time.isoformat() if role.create_time else None,
+            'update_time': role.update_time.isoformat() if role.update_time else None,
+        })
+
+    def put(self, request, role_id: int):
+        """
+        PUT /api/v1/roles/{id}/
+        更新角色（名称、描述、权限）
+        """
+        from .models import Role as RoleModel, RolePermission as RolePermissionModel
+
+        try:
+            role = RoleModel.objects.get(id=role_id)
+        except RoleModel.DoesNotExist:
+            return self.error_response('Role not found', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON body', 400)
+
+        # 更新基本信息
+        if 'name' in data:
+            role.name = data['name'].strip()
+        if 'description' in data:
+            role.description = data['description']
+        role.save()
+
+        # 更新权限（全量替换）
+        if 'permissions' in data:
+            valid_perms = set(PERMISSION_META.keys())
+            new_perms = data['permissions']
+            invalid_perms = [p for p in new_perms if p not in valid_perms]
+            if invalid_perms:
+                return self.error_response(f'Invalid permission codes: {", ".join(invalid_perms)}', 400)
+
+            # 删除旧权限，创建新权限
+            RolePermissionModel.objects.filter(role=role).delete()
+            for perm_code in new_perms:
+                RolePermissionModel.objects.create(role=role, permission_code=perm_code)
+
+        return self.json_response({
+            'status': 'success',
+            'message': 'Role updated',
+        })
+
+    def delete(self, request, role_id: int):
+        """
+        DELETE /api/v1/roles/{id}/
+        删除角色（内置角色不可删除）
+        """
+        from .models import Role as RoleModel
+
+        try:
+            role = RoleModel.objects.get(id=role_id)
+        except RoleModel.DoesNotExist:
+            return self.error_response('Role not found', 404)
+
+        if role.is_builtin:
+            return self.error_response('Cannot delete built-in role', 400)
+
+        # 检查是否有关联用户
+        user_count = UserProfile.objects.filter(role=role).count()
+        if user_count > 0:
+            return self.error_response(f'Cannot delete role with {user_count} associated users. Please reassign users first.', 400)
+
+        role.delete()
+
+        return self.json_response({
+            'status': 'success',
+            'message': 'Role deleted',
+        })

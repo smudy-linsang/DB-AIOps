@@ -33,10 +33,9 @@ from monitor.checkers import (
     OracleChecker,
     MySQLChecker,
     PostgreSQLChecker,
-    DamengChecker,
     GbaseChecker,
     TDSQLChecker,
-    CHECKER_MAP,
+    CHECKER_MAP as _CHECKER_MAP,
     get_checker,
     COLLECT_TIMEOUT_SEC,
     COLLECT_WORKERS,
@@ -47,6 +46,12 @@ from monitor.checkers import (
     CAPACITY_CHECK_INTERVAL_HOURS,
     HEALTH_CHECK_INTERVAL_HOURS,
 )
+
+# 达梦 DM8 驱动为可选依赖
+try:
+    from monitor.checkers import DamengChecker
+except ImportError:
+    DamengChecker = None
 
 # v3.0: 是否使用 Celery 异步采集 (优先使用 Celery，不可用时回退 ThreadPool)
 USE_CELERY = getattr(settings, 'MONITOR_USE_CELERY', False)
@@ -76,12 +81,13 @@ class Command(BaseCommand):
         'oracle': OracleChecker,
         'mysql': MySQLChecker,
         'pgsql': PostgreSQLChecker,
-        'dm': DamengChecker,
         'gbase': GbaseChecker,
         'tdsql': TDSQLChecker,
         'redis': RedisChecker,
         'mongo': None,  # TODO: MongoDB 支持
     }
+    if DamengChecker is not None:
+        CHECKER_MAP['dm'] = DamengChecker
 
     def handle(self, *args, **options):
         print(f"[{datetime.datetime.now()}] 全栈监控守护进程 v3.0 (Phase 2 智能增强版 + 模块化Checkers) 已启动")

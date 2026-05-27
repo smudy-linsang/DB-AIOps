@@ -15,6 +15,8 @@ import {
   InfoCircleOutlined, FireOutlined, EditOutlined
 } from '@ant-design/icons'
 import { databaseAPI, alertAPI } from '../services/api'
+import { PermissionGuard } from '../components/AuthGuard'
+import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
@@ -911,41 +913,45 @@ const DatabaseList = () => {
               详情
             </Button>
           </Link>
-          <Button
-            type="link"
-            size="small"
-            icon={<EditOutlined />}
-            onClick={(e) => { e.stopPropagation(); openEditModal(record) }}
-          >
-            编辑
-          </Button>
-          <Popconfirm
-            title="确认删除"
-            description={
-              <span>
-                确定要删除数据库「{record.name}」吗？<br />
-                <Text type="danger" style={{ fontSize: 12 }}>
-                  所有关联的监控日志、告警记录、健康评分、基线模型、容量预测数据将一并删除！
-                </Text>
-              </span>
-            }
-            onConfirm={(e) => { e?.stopPropagation(); handleDeleteDatabase(record) }}
-            onCancel={(e) => e?.stopPropagation()}
-            okText="确认删除"
-            cancelText="取消"
-            okButtonProps={{ danger: true }}
-            placement="left"
-          >
+          <PermissionGuard code={Perm.DATABASES_UPDATE}>
             <Button
               type="link"
               size="small"
-              danger
-              icon={<CloseCircleOutlined />}
-              onClick={(e) => e.stopPropagation()}
+              icon={<EditOutlined />}
+              onClick={(e) => { e.stopPropagation(); openEditModal(record) }}
             >
-              删除
+              编辑
             </Button>
-          </Popconfirm>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.DATABASES_DELETE}>
+            <Popconfirm
+              title="确认删除"
+              description={
+                <span>
+                  确定要删除数据库「{record.name}」吗？<br />
+                  <Text type="danger" style={{ fontSize: 12 }}>
+                    所有关联的监控日志、告警记录、健康评分、基线模型、容量预测数据将一并删除！
+                  </Text>
+                </span>
+              }
+              onConfirm={(e) => { e?.stopPropagation(); handleDeleteDatabase(record) }}
+              onCancel={(e) => e?.stopPropagation()}
+              okText="确认删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+              placement="left"
+            >
+              <Button
+                type="link"
+                size="small"
+                danger
+                icon={<CloseCircleOutlined />}
+                onClick={(e) => e.stopPropagation()}
+              >
+                删除
+              </Button>
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       )
     }
@@ -1162,6 +1168,7 @@ const DatabaseList = () => {
                 </Button>
               </Dropdown>
               {selectedRowKeys.length > 0 && (
+                <PermissionGuard code={Perm.DATABASES_DELETE}>
                 <Button
                   type="primary"
                   danger
@@ -1171,10 +1178,11 @@ const DatabaseList = () => {
                 >
                   批量删除（{selectedRowKeys.length}）
                 </Button>
+                </PermissionGuard>
               )}
-              <Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
+              <PermissionGuard code={Perm.DATABASES_CREATE}><Button type="primary" icon={<PlusOutlined />} onClick={openAddModal}>
                 添加数据库
-              </Button>
+              </Button></PermissionGuard>
             </Space>
           </Col>
         </Row>

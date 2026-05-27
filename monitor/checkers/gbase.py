@@ -16,12 +16,14 @@ class GbaseChecker(BaseDBChecker):
     """Gbase8a 检查器 - 基于MySQL协议，增加集群特性"""
 
     def get_connection(self, config):
-        """Gbase8a 使用 MySQL 协议连接"""
+        """Gbase8a 使用 MySQL 协议连接，需指定默认数据库"""
+        database = getattr(config, 'service_name', None) or 'gbase'
         return pymysql.connect(
             host=config.host,
             port=config.port,
             user=config.username,
             password=config.get_password(),
+            database=database,
             connect_timeout=5,
             cursorclass=pymysql.cursors.DictCursor,
         )
@@ -46,7 +48,7 @@ class GbaseChecker(BaseDBChecker):
                 cursor.execute("SHOW VARIABLES LIKE 'hostname'")
                 row = cursor.fetchone()
                 if row:
-                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+                    host_name = row['Value']
             except Exception:
                 pass
 
@@ -54,7 +56,8 @@ class GbaseChecker(BaseDBChecker):
             uptime = int(cursor.fetchone()['Value'])
 
             cursor.execute("SELECT DATABASE()")
-            current_db = cursor.fetchone()['DATABASE()']
+            current_db_row = cursor.fetchone()
+            current_db = (current_db_row.get('DATABASE()') or current_db_row.get('database()') or 'N/A') if current_db_row else 'N/A'
 
             # =============================================
             # 2. 连接与会话 (session)
@@ -134,26 +137,33 @@ class GbaseChecker(BaseDBChecker):
             # =============================================
             # 5. 会话详情 (session_detail)
             # =============================================
-            cursor.execute("""
-                SELECT 
-                    id, user, host, db, command, time, state, info
-                FROM information_schema.processlist
-                WHERE command != 'Daemon'
-                ORDER BY time DESC
-                LIMIT 50
-            """)
-            session_list = []
-            for row in cursor.fetchall():
-                session_list.append({
-                    "id": str(row['id']),
-                    "user": row['user'] or 'N/A',
-                    "host": row['host'] or 'N/A',
-                    "db": row['db'] or 'N/A',
-                    "command": row['command'] or 'N/A',
-                    "time": int(row['time']) if row['time'] else 0,
-                    "state": row['state'] or 'N/A',
-                    "info": (row['info'] or 'N/A')[:200]
-                })
+            # GBase 8A processlist 列名大写，且不支持字符串比较过滤
+            try:
+                cursor.execute("""
+                    SELECT 
+                        ID as id, USER as user, HOST as host, DB as db,
+                        COMMAND as command, TIME as time, STATE as state, INFO as info
+                    FROM information_schema.processlist
+                    ORDER BY TIME DESC
+                    LIMIT 50
+                """)
+                session_list = []
+                for row in cursor.fetchall():
+                    cmd = str(row.get('command', row.get('COMMAND', '')))
+                    if cmd.lower() == 'daemon':
+                        continue
+                    session_list.append({
+                        "id": str(row.get('id', row.get('ID', 'N/A'))),
+                        "user": row.get('user', row.get('USER')) or 'N/A',
+                        "host": row.get('host', row.get('HOST')) or 'N/A',
+                        "db": row.get('db', row.get('DB')) or 'N/A',
+                        "command": cmd or 'N/A',
+                        "time": int(row.get('time', row.get('TIME', 0)) or 0),
+                        "state": row.get('state', row.get('STATE')) or 'N/A',
+                        "info": (row.get('info', row.get('INFO')) or 'N/A')[:200]
+                    })
+            except Exception:
+                session_list = []
 
             # =============================================
             # 6. SQL统计 (sql)
@@ -179,6 +189,7 @@ class GbaseChecker(BaseDBChecker):
                 binlog_file = master_status['File'] if master_status else 'N/A'
                 binlog_position = master_status['Position'] if master_status else 0
             except Exception:
+                # GBase 8A 社区版不支持 SHOW MASTER STATUS
                 binlog_file = 'N/A'
                 binlog_position = 0
 
@@ -198,7 +209,7 @@ class GbaseChecker(BaseDBChecker):
                 """)
                 for row in cursor.fetchall():
                     gbase_cm_total_count += 1
-                    node_status = str(row[4]).upper() if row[4] else 'UNKNOWN'
+                    node_status = str(row.get('STATUS', row.get('status', 'UNKNOWN'))).upper()
                     if (
                         'ONLINE' in node_status
                         or 'ACTIVE' in node_status
@@ -206,15 +217,15 @@ class GbaseChecker(BaseDBChecker):
                     ):
                         gbase_cm_healthy_count += 1
                     gbase_cm_nodes.append({
-                        "node_id": str(row[0]) if row[0] else 'N/A',
-                        "node_name": str(row[1]) if row[1] else 'N/A',
-                        "node_ip": str(row[2]) if row[2] else 'N/A',
-                        "node_type": str(row[3]) if row[3] else 'N/A',
+                        "node_id": str(row.get('NODEID', row.get('node_id', 'N/A'))),
+                        "node_name": str(row.get('NODENAME', row.get('node_name', 'N/A'))),
+                        "node_ip": str(row.get('NODEIP', row.get('node_ip', 'N/A'))),
+                        "node_type": str(row.get('NODETYPE', row.get('node_type', 'N/A'))),
                         "status": node_status,
-                        "master_slave": str(row[5]) if row[5] else 'N/A',
-                        "online_time": str(row[6]) if row[6] else 'N/A',
-                        "cpu_used": float(row[7]) if row[7] else 0,
-                        "mem_used": float(row[8]) if row[8] else 0
+                        "master_slave": str(row.get('MASTER_SLAVE', row.get('master_slave', 'N/A'))),
+                        "online_time": str(row.get('ONLINE_TIME', row.get('online_time', 'N/A'))),
+                        "cpu_used": float(row.get('CPU_USED', row.get('cpu_used', 0)) or 0),
+                        "mem_used": float(row.get('MEM_USED', row.get('mem_used', 0)) or 0)
                     })
             except Exception:
                 # 备选查询 - 尝试其他视图
@@ -261,7 +272,7 @@ class GbaseChecker(BaseDBChecker):
                 """)
                 for row in cursor.fetchall():
                     gbase_dn_total_count += 1
-                    node_status = str(row[4]).upper() if row[4] else 'UNKNOWN'
+                    node_status = str(row.get('STATUS', row.get('status', 'UNKNOWN'))).upper()
                     if (
                         'ONLINE' in node_status
                         or 'ACTIVE' in node_status
@@ -269,18 +280,18 @@ class GbaseChecker(BaseDBChecker):
                     ):
                         gbase_dn_healthy_count += 1
                     gbase_dn_nodes.append({
-                        "node_id": str(row[0]) if row[0] else 'N/A',
-                        "node_name": str(row[1]) if row[1] else 'N/A',
-                        "node_ip": str(row[2]) if row[2] else 'N/A',
-                        "node_type": str(row[3]) if row[3] else 'N/A',
+                        "node_id": str(row.get('NODEID', row.get('node_id', 'N/A'))),
+                        "node_name": str(row.get('NODENAME', row.get('node_name', 'N/A'))),
+                        "node_ip": str(row.get('NODEIP', row.get('node_ip', 'N/A'))),
+                        "node_type": str(row.get('NODETYPE', row.get('node_type', 'N/A'))),
                         "status": node_status,
-                        "replica_num": int(row[5]) if row[5] else 0,
-                        "datanode_num": int(row[6]) if row[6] else 0,
-                        "total_space_gb": float(row[7]) / 1024 if row[7] else 0,
-                        "free_space_gb": float(row[8]) / 1024 if row[8] else 0,
-                        "read_count": int(row[9]) if row[9] else 0,
-                        "write_count": int(row[10]) if row[10] else 0,
-                        "sync_status": str(row[11]) if row[11] else 'N/A'
+                        "replica_num": int(row.get('REPLICA_NUM', row.get('replica_num', 0)) or 0),
+                        "datanode_num": int(row.get('DATANODE_NUM', row.get('datanode_num', 0)) or 0),
+                        "total_space_gb": float(row.get('TOTAL_SPACE', row.get('total_space', 0)) or 0) / 1024,
+                        "free_space_gb": float(row.get('FREE_SPACE', row.get('free_space', 0)) or 0) / 1024,
+                        "read_count": int(row.get('READ_COUNT', row.get('read_count', 0)) or 0),
+                        "write_count": int(row.get('WRITE_COUNT', row.get('write_count', 0)) or 0),
+                        "sync_status": str(row.get('SYNC_STATUS', row.get('sync_status', 'N/A')))
                     })
             except Exception:
                 # 备选查询 - 尝试其他视图

@@ -1,0 +1,183 @@
+version: '3.8'
+
+services:
+  # ==========================================
+  # 基础设施服务
+  # ==========================================
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: db-aiops-timescaledb
+    ports:
+      - "5432:5432"
+    environment:
+      POSTGRES_DB: db_monitor
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: postgres123
+    volumes:
+      - timeseries_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  redis:
+    image: redis:7-alpine
+    container_name: db-aiops-redis
+    ports:
+      - "6379:6379"
+    volumes:
+      - redis_data:/data
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  elasticsearch:
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
+    container_name: db-aiops-elasticsearch
+    ports:
+      - "9200:9200"
+    environment:
+      - discovery.type=single-node
+      - xpack.security.enabled=false
+      - ES_JAVA_OPTS=-Xms512m -Xmx512m
+    volumes:
+      - es_data:/usr/share/elasticsearch/data
+    healthcheck:
+      test: ["CMD-SHELL", "curl -sf http://localhost:9200/_cluster/health"]
+      interval: 15s
+      timeout: 10s
+      retries: 10
+
+  # ==========================================
+  # 监控目标数据库 - MySQL 8.0
+  # Host port: 3306
+  # root: root123 | monitor user: monitor / monitor123
+  # ==========================================
+  mysql:
+    image: mysql:8.0
+    container_name: db-aiops-mysql
+    environment:
+      MYSQL_ROOT_PASSWORD: root123
+      MYSQL_DATABASE: testdb
+      MYSQL_USER: monitor
+      MYSQL_PASSWORD: monitor123
+    ports:
+      - "3306:3306"
+    volumes:
+      - mysql_data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --slow-query-log=ON
+      --long-query-time=1
+      --performance_schema=ON
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+  # ==========================================
+  # 监控目标数据库 - Oracle XE 21c (免费版)
+  # Host port: 1521
+  # system: oracle123 | monitor user: monitor / monitor123
+  # ==========================================
+  oracle:
+    image: gvenzl/oracle-xe:21
+    container_name: db-aiops-oracle
+    environment:
+      ORACLE_PASSWORD: oracle123
+    ports:
+      - "1521:1521"
+    volumes:
+      - oracle_data:/opt/oracle/oradata
+    healthcheck:
+      test: ["CMD-SHELL", "echo 'SELECT 1 FROM DUAL;' | sqlplus -s system/oracle123@localhost/XEPDB1"]
+      interval: 30s
+      timeout: 10s
+      retries: 10
+      start_period: 120s
+
+  # ==========================================
+  # 监控目标数据库 - PostgreSQL (独立实例，用于监控测试)
+  # Host port: 5433 (避免与 TimescaleDB 端口冲突)
+  # postgres: pgtest123 | monitor user: monitor / monitor123
+  # ==========================================
+  postgres-monitor:
+    image: postgres:16
+    container_name: db-aiops-postgres
+    environment:
+      POSTGRES_DB: testdb
+      POSTGRES_USER: postgres
+      POSTGRES_PASSWORD: pgtest123
+    ports:
+      - "5433:5432"
+    volumes:
+      - postgres_monitor_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  # ==========================================
+  # 监控目标数据库 - GBase 8A (真实镜像)
+  # Host port: 5258
+  # root: root | 默认数据库: gbase
+  # ==========================================
+  gbase:
+    image: shihd/gbase8a:1.0
+    container_name: db-aiops-gbase
+    privileged: true
+    ports:
+      - "5258:5258"
+    volumes:
+      - gbase_data:/opt/gbase
+    healthcheck:
+      test: ["CMD-SHELL", "gbase -uroot -proot -e 'SELECT 1' 2>/dev/null || exit 1"]
+      interval: 15s
+      timeout: 10s
+      retries: 15
+      start_period: 60s
+
+  # ==========================================
+  # 监控目标数据库 - TDSQL 模拟 (基于 MySQL 协议)
+  # 使用独立 MySQL 8.0 实例模拟 TDSQL
+  # Host port: 3308
+  # root: tdsql123 | monitor user: monitor / monitor123
+  # ==========================================
+  tdsql-sim:
+    image: mysql:8.0
+    container_name: db-aiops-tdsql-sim
+    environment:
+      MYSQL_ROOT_PASSWORD: tdsql123
+      MYSQL_DATABASE: tdsqldb
+      MYSQL_USER: monitor
+      MYSQL_PASSWORD: monitor123
+    ports:
+      - "3308:3306"
+    volumes:
+      - tdsql_sim_data:/var/lib/mysql
+    command: >
+      --default-authentication-plugin=mysql_native_password
+      --slow-query-log=ON
+      --long-query-time=2
+      --gtid-mode=ON
+      --enforce-gtid-consistency=ON
+    healthcheck:
+      test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-ptdsql123"]
+      interval: 10s
+      timeout: 5s
+      retries: 10
+
+volumes:
+  timeseries_data:
+  redis_data:
+  es_data:
+  mysql_data:
+  oracle_data:
+  postgres_monitor_data:
+  gbase_data:
+  tdsql_sim_data:

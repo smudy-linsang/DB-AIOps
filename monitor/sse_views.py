@@ -138,6 +138,7 @@ class SSEView(View):
     def _event_stream(self, request, user_info):
         """SSE 事件流生成器"""
         global _active_connections
+        pubsub = None
 
         try:
             r = get_redis_client()
@@ -187,8 +188,9 @@ class SSEView(View):
             with _connections_lock:
                 _active_connections = max(0, _active_connections - 1)
             try:
-                pubsub.unsubscribe()
-                pubsub.close()
+                if pubsub:
+                    pubsub.unsubscribe()
+                    pubsub.close()
             except Exception:
                 pass
 

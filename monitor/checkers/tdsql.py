@@ -47,7 +47,7 @@ class TDSQLChecker(BaseDBChecker):
                 cursor.execute("SHOW VARIABLES LIKE 'hostname'")
                 row = cursor.fetchone()
                 if row:
-                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+                    host_name = row['Value']
             except Exception:
                 pass
 
@@ -71,14 +71,14 @@ class TDSQLChecker(BaseDBChecker):
                 cursor.execute("SHOW VARIABLES LIKE 'have_ssl'")
                 row = cursor.fetchone()
                 if row:
-                    have_ssl = row['Value'] if isinstance(row, dict) else row[1]
+                    have_ssl = row['Value']
             except Exception:
                 pass
             try:
                 cursor.execute("SHOW STATUS LIKE 'Ssl_cipher'")
                 row = cursor.fetchone()
                 if row:
-                    ssl_cipher = row['Value'] if isinstance(row, dict) else row[1]
+                    ssl_cipher = row['Value']
             except Exception:
                 pass
 

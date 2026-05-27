@@ -10,7 +10,7 @@
  * │  树    │                                 │
  * └────────┴─────────────────────────────────┘
  */
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Layout, Input, Badge, Dropdown, Avatar, Space, Typography, Tag, Menu, Breadcrumb,
 } from 'antd';
@@ -20,11 +20,14 @@ import {
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
   BellFilled, ApartmentOutlined, FileTextOutlined,
+  TeamOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { authAPI, alertAPI } from '../services/api';
+import { authAPI, alertAPI, setUser } from '../services/api';
 import useAppStore from '../stores/useAppStore';
 import TargetNavigationTree from './TargetNavigationTree';
+import { hasPermission } from '../utils/permission';
+import { Perm } from '../utils/permission';
 
 const { Header, Sider, Content } = Layout;
 const { Title, Text } = Typography;
@@ -39,12 +42,25 @@ const EMLayout = ({ children }) => {
   } = useAppStore();
 
   const [userName, setUserName] = useState('');
+  const [userRole, setUserRole] = useState('');
+  const [permVersion, setPermVersion] = useState(0); // 权限版本号，用于触发 useMemo 重算
 
   useEffect(() => {
     const user = localStorage.getItem('user')
       ? JSON.parse(localStorage.getItem('user'))
       : null;
     setUserName(user?.username || 'Admin');
+    setUserRole(user?.role_name || user?.role || '');
+
+    // 检查 user 数据是否包含权限信息（兼容旧版本 localStorage 数据）
+    if (user && (!user.permissions || !user.role)) {
+      authAPI.getCurrentUser().then(res => {
+        const userData = res.data || res;
+        setUser(userData);
+        setUserRole(userData.role_name || userData.role || '');
+        setPermVersion(v => v + 1); // 触发菜单重新计算
+      }).catch(() => {});
+    }
   }, []);
 
   // 加载告警统计
@@ -123,6 +139,35 @@ const EMLayout = ({ children }) => {
     dm: '#ee2222', gbase: '#00a854', tdsql: '#108ee9',
   };
 
+  // 根据权限过滤菜单项
+  const menuItems = useMemo(() => {
+    const allItems = [
+      { key: '/', icon: <DashboardOutlined />, label: '仪表盘', perm: Perm.DASHBOARD_VIEW },
+      { key: '/databases', icon: <DatabaseOutlined />, label: '数据库管理', perm: Perm.DATABASES_VIEW },
+      { key: '/alerts', icon: <AlertOutlined />, label: '告警中心', perm: Perm.ALERTS_VIEW },
+      { key: '/alert-config', icon: <ToolOutlined />, label: '告警配置', perm: Perm.ALERT_CONFIG_VIEW },
+      { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', perm: Perm.SQL_MONITORING_VIEW },
+      { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', perm: Perm.CAPACITY_VIEW },
+      { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },
+      { type: 'divider' },
+      { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },
+      { key: '/business-systems', icon: <ApartmentOutlined />, label: '业务拓扑', perm: Perm.BUSINESS_TOPOLOGY_VIEW },
+      { key: '/reports', icon: <FileTextOutlined />, label: '报表中心', perm: Perm.REPORTS_VIEW },
+      { key: '/user-management', icon: <TeamOutlined />, label: '用户管理', perm: Perm.USERS_VIEW },
+    ];
+
+    return allItems.filter(item => {
+      if (item.type === 'divider') return true;
+      return hasPermission(item.perm);
+    }).map(item => {
+      if (item.type === 'divider') return item;
+      const { perm, ...rest } = item;
+      return {
+        ...rest,
+        onClick: () => navigate(item.key),
+      };
+    });  }, [navigate, permVersion]);
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       {/* ──────── 顶部栏 ──────── */}
@@ -182,6 +227,7 @@ const EMLayout = ({ children }) => {
             <Space style={{ cursor: 'pointer', color: '#fff' }}>
               <Avatar size="small" icon={<UserOutlined />} style={{ background: '#1890ff' }} />
               <Text style={{ color: '#fff', fontSize: 13 }}>{userName}</Text>
+              {userRole && <Tag color="blue" style={{ marginLeft: 4, fontSize: 11 }}>{userRole}</Tag>}
             </Space>
           </Dropdown>
         </Space>
@@ -212,7 +258,7 @@ const EMLayout = ({ children }) => {
             </Space>
           </div>
           <TargetNavigationTree />
-          {/* 功能快捷菜单 */}
+          {/* 功能快捷菜单 - 根据权限过滤 */}
           <div style={{ borderTop: '1px solid #e8e8e8', padding: '8px 12px', marginTop: 4 }}>
             <Text strong style={{ fontSize: 12, color: '#666' }}>功能菜单</Text>
           </div>
@@ -220,19 +266,7 @@ const EMLayout = ({ children }) => {
             mode="inline"
             selectedKeys={[location.pathname]}
             style={{ border: 'none', background: 'transparent', fontSize: 12 }}
-            items={[
-              { key: '/', icon: <DashboardOutlined />, label: '仪表盘', onClick: () => navigate('/') },
-              { key: '/databases', icon: <DatabaseOutlined />, label: '数据库管理', onClick: () => navigate('/databases') },
-              { key: '/alerts', icon: <AlertOutlined />, label: '告警中心', onClick: () => navigate('/alerts') },
-              { key: '/alert-config', icon: <ToolOutlined />, label: '告警配置', onClick: () => navigate('/alert-config') },
-              { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', onClick: () => navigate('/sql-monitoring') },
-              { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', onClick: () => navigate('/capacity') },
-              { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', onClick: () => navigate('/tickets') },
-              { type: 'divider' },
-              { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', onClick: () => navigate('/notification-settings') },
-              { key: '/business-systems', icon: <ApartmentOutlined />, label: '业务拓扑', onClick: () => navigate('/business-systems') },
-              { key: '/reports', icon: <FileTextOutlined />, label: '报表中心', onClick: () => navigate('/reports') },
-            ]}
+            items={menuItems}
           />
         </Sider>
 

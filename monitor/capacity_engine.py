@@ -16,6 +16,7 @@ import math
 
 logger = logging.getLogger(__name__)
 from datetime import datetime, timedelta
+from django.utils import timezone
 from typing import Dict, List, Tuple, Optional, Any
 from collections import defaultdict
 
@@ -294,7 +295,7 @@ class CapacityEngine:
         返回:
             [{'date': '2024-01-01', 'value': 75.5}, ...]
         """
-        cutoff = datetime.now() - timedelta(days=days)
+        cutoff = timezone.now() - timedelta(days=days)
         
         logs = MonitorLog.objects.filter(
             config=self.config,

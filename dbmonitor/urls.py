@@ -40,6 +40,11 @@ from monitor.api_views import (
     BusinessSystemListView, BusinessSystemDetailView,
     DatabaseTopologyView, DatabaseImpactView,
     ReportListView, ReportDownloadView,
+    # Phase 5 API
+    TicketCreateView, CapacityOverviewView, CapacityPredictNowView,
+    TopologyOverviewView, ReportGenerateView, NotificationTestView,
+    # RBAC v2.0 API
+    RoleListView, RoleDetailView,
 )
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
@@ -153,6 +158,7 @@ urlpatterns = [
     path('api/v1/notification-rules/', NotificationRuleListView.as_view()),
     path('api/v1/notification-rules/<int:pk>/', NotificationRuleDetailView.as_view()),
     path('api/v1/alerts/<int:alert_id>/notifications/', AlertNotificationLogView.as_view()),
+    path('api/v1/alert-notifications/', AlertNotificationLogView.as_view()),
 
     # ========== Phase 4: 业务系统 ==========
     path('api/v1/business-systems/', BusinessSystemListView.as_view()),
@@ -165,6 +171,24 @@ urlpatterns = [
     # ========== Phase 4: 报表 ==========
     path('api/v1/reports/', ReportListView.as_view()),
     path('api/v1/reports/<int:pk>/download/', ReportDownloadView.as_view()),
+    path('api/v1/reports/generate/', ReportGenerateView.as_view()),
+
+    # ========== Phase 5: 工单创建 ==========
+    path('api/v1/tickets/', TicketCreateView.as_view()),
+
+    # ========== Phase 5: 容量预测增强 ==========
+    path('api/v1/capacity/overview/', CapacityOverviewView.as_view()),
+    path('api/v1/databases/<int:config_id>/predict-now/', CapacityPredictNowView.as_view()),
+
+    # ========== Phase 5: 拓扑总览 ==========
+    path('api/v1/topology/overview/', TopologyOverviewView.as_view()),
+
+    # ========== Phase 5: 通知测试 ==========
+    path('api/v1/notification-rules/test/', NotificationTestView.as_view()),
+
+    # ========== RBAC v2.0: 角色管理 ==========
+    path('api/v1/roles/', RoleListView.as_view()),
+    path('api/v1/roles/<int:role_id>/', RoleDetailView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

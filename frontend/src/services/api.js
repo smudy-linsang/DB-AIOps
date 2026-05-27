@@ -182,6 +182,14 @@ export const auditLogAPI = {
 }
 
 // ==========================================
+// 工单创建 API (Phase 5)
+// ==========================================
+
+export const ticketAPI = {
+  create: (data) => api.post('/tickets/', data),
+}
+
+// ==========================================
 // 用户管理 API
 // ==========================================
 
@@ -384,6 +392,7 @@ export const notificationRuleAPI = {
   getDetail: (id) => api.get(`/notification-rules/${id}/`),
   update: (id, data) => api.put(`/notification-rules/${id}/`, data),
   delete: (id) => api.delete(`/notification-rules/${id}/`),
+  test: (data) => api.post('/notification-rules/test/', data),
 }
 
 // ==========================================
@@ -417,6 +426,8 @@ export const topologyAPI = {
   saveTopology: (dbId, data) => api.post(`/databases/${dbId}/topology/`, data),
   // 影响分析
   getImpact: (dbId) => api.get(`/databases/${dbId}/impact/`),
+  // 全局拓扑总览
+  getOverview: () => api.get('/topology/overview/'),
 }
 
 // ==========================================
@@ -426,6 +437,28 @@ export const topologyAPI = {
 export const reportAPI = {
   list: (params = {}) => api.get('/reports/', { params }),
   download: (id) => api.get(`/reports/${id}/download/`, { responseType: 'blob' }),
+  generate: (data) => api.post('/reports/generate/', data),
+}
+
+// ==========================================
+// 容量预测增强 API (Phase 5)
+// ==========================================
+
+export const capacityAPI = {
+  overview: () => api.get('/capacity/overview/'),
+  predictNow: (dbId) => api.post(`/databases/${dbId}/predict-now/`),
+}
+
+// ==========================================
+// 角色管理 API (RBAC v2.0)
+// ==========================================
+
+export const roleAPI = {
+  list: () => api.get('/roles/'),
+  create: (data) => api.post('/roles/', data),
+  getDetail: (id) => api.get(`/roles/${id}/`),
+  update: (id, data) => api.put(`/roles/${id}/`, data),
+  delete: (id) => api.delete(`/roles/${id}/`),
 }
 
 export default api

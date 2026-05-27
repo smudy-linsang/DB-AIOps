@@ -218,28 +218,66 @@ class AlertLog(models.Model):
 
 
 # ==========================================
+# 角色（RBAC 权限控制）
+# ==========================================
+class Role(models.Model):
+    """角色定义，支持内置角色和自定义角色"""
+
+    code = models.CharField(max_length=50, unique=True, verbose_name="角色编码", help_text="如 super_admin, dba, auditor")
+    name = models.CharField(max_length=100, verbose_name="角色名称", help_text="如 超级管理员, 数据库管理员")
+    description = models.TextField(blank=True, default='', verbose_name="角色描述")
+    is_builtin = models.BooleanField(default=False, verbose_name="是否内置角色", help_text="内置角色不可删除")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        prefix = "[内置] " if self.is_builtin else ""
+        return f"{prefix}{self.name} ({self.code})"
+
+    class Meta:
+        verbose_name = "角色"
+        verbose_name_plural = "角色列表"
+        ordering = ['is_builtin', 'code']
+
+
+class RolePermission(models.Model):
+    """角色权限关联，每条记录代表一个角色拥有一个权限编码"""
+
+    role = models.ForeignKey(Role, on_delete=models.CASCADE, related_name='permissions', verbose_name="角色")
+    permission_code = models.CharField(max_length=100, verbose_name="权限编码", help_text="格式: module.action，如 databases.view")
+
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "角色权限"
+        verbose_name_plural = "角色权限列表"
+        unique_together = [('role', 'permission_code')]
+        indexes = [
+            models.Index(fields=['permission_code']),
+        ]
+
+    def __str__(self):
+        return f"{self.role.name} -> {self.permission_code}"
+
+
+# ==========================================
 # 用户配置（用于 RBAC 权限控制）
 # ==========================================
 class UserProfile(models.Model):
-    """用户配置信息，用于角色和权限管理"""
-    
-    ROLE_CHOICES = (
-        ('admin', '管理员'),
-        ('supervisor', 'Supervisor'),
-        ('user', '普通用户'),
-        ('readonly', '只读用户'),
-    )
-    
+    """用户配置信息，用于角色和数据范围管理"""
+
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='profile', verbose_name="用户")
-    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='user', verbose_name="角色")
+    role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users', verbose_name="角色")
     allowed_databases = models.JSONField(null=True, blank=True, verbose_name="可访问数据库列表", help_text="为空表示可访问所有数据库，列表形式指定可访问的数据库ID")
-    
+
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
-    
+
     def __str__(self):
-        return f"{self.user.username} - {self.get_role_display()}"
-    
+        role_name = self.role.name if self.role else '无角色'
+        return f"{self.user.username} - {role_name}"
+
     class Meta:
         verbose_name = "用户配置"
         verbose_name_plural = "用户配置列表"

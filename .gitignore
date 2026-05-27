@@ -127,6 +127,7 @@ htmlcov/
 node_modules/
 frontend/node_modules/
 frontend/NUL
+frontend/dist/
 
 # Test results
 test_results_*.json
@@ -147,6 +148,9 @@ entities.json
 
 # Plans (local only)
 plans/
+
+# Screenshots (local only)
+*.png
 
 # Claude settings
 .claude/

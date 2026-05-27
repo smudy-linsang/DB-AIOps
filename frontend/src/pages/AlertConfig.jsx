@@ -11,6 +11,8 @@ import {
   UnorderedListOutlined, SwapOutlined
 } from '@ant-design/icons'
 import { alertRuleAPI, alertTemplateAPI, databaseAPI } from '../services/api'
+import { PermissionGuard } from '../components/AuthGuard'
+import { Perm } from '../utils/permission'
 import { Spin } from 'antd'
 
 const { Title, Text } = Typography
@@ -599,22 +601,28 @@ function TemplateGroupTab() {
       width: 220,
       render: (_, r) => (
         <Space>
-          <Button
-            size="small" icon={<EditOutlined />}
-            onClick={() => { setEditing(r); setModalOpen(true) }}
-          >编辑</Button>
-          <Tooltip title="克隆模板组及所有规则">
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
             <Button
-              size="small" icon={<CopyOutlined />}
-              onClick={() => { setCloning(r); setCloneOpen(true) }}
-            >克隆</Button>
-          </Tooltip>
-          <Popconfirm
-            title="删除模板组将同时删除组内所有规则，确定删除？"
-            onConfirm={() => handleDelete(r.id)}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+              size="small" icon={<EditOutlined />}
+              onClick={() => { setEditing(r); setModalOpen(true) }}
+            >编辑</Button>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            <Tooltip title="克隆模板组及所有规则">
+              <Button
+                size="small" icon={<CopyOutlined />}
+                onClick={() => { setCloning(r); setCloneOpen(true) }}
+              >克隆</Button>
+            </Tooltip>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            <Popconfirm
+              title="删除模板组将同时删除组内所有规则，确定删除？"
+              onConfirm={() => handleDelete(r.id)}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       ),
     },
@@ -627,12 +635,12 @@ function TemplateGroupTab() {
           {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
         </Select>
         <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
-        <Button
+        <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}><Button
           type="primary" icon={<PlusOutlined />}
           onClick={() => { setEditing(null); setModalOpen(true) }}
         >
           新建模板组
-        </Button>
+        </Button></PermissionGuard>
         <Text type="secondary">
           <InfoCircleOutlined /> 模板组是告警规则的容器，在「规则配置」Tab 中添加具体指标规则
         </Text>
@@ -810,13 +818,17 @@ function RuleConfigTab() {
       width: 120,
       render: (_, r) => (
         <Space>
-          <Button
-            size="small" icon={<EditOutlined />}
-            onClick={() => { setEditing(r); setModalOpen(true) }}
-          >编辑</Button>
-          <Popconfirm title="确认删除此规则？" onConfirm={() => handleDelete(r.id)}>
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            <Button
+              size="small" icon={<EditOutlined />}
+              onClick={() => { setEditing(r); setModalOpen(true) }}
+            >编辑</Button>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            <Popconfirm title="确认删除此规则？" onConfirm={() => handleDelete(r.id)}>
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       ),
     },
@@ -849,13 +861,14 @@ function RuleConfigTab() {
         <Button icon={<ReloadOutlined />} onClick={loadRules} disabled={!selectedGroupId}>刷新</Button>
         {selectedGroupId && (
           <>
-            <Button
+            <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}><Button
               type="primary" icon={<PlusOutlined />}
               onClick={() => { setEditing(null); setModalOpen(true) }}
             >
               新增规则
-            </Button>
+            </Button></PermissionGuard>
             <Divider type="vertical" />
+            <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
             <Button
               size="small"
               icon={<ThunderboltOutlined />}
@@ -864,6 +877,8 @@ function RuleConfigTab() {
             >
               批量启用
             </Button>
+            </PermissionGuard>
+            <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
             <Button
               size="small"
               onClick={() => handleBatchToggle(false)}
@@ -871,6 +886,7 @@ function RuleConfigTab() {
             >
               批量停用
             </Button>
+            </PermissionGuard>
             {selectedRowKeys.length > 0 && (
               <Text type="secondary">已选 {selectedRowKeys.length} 条</Text>
             )}
@@ -1051,15 +1067,19 @@ function AssignmentTab() {
       width: 150,
       render: (_, r) => (
         <Space>
-          <Button
-            size="small" icon={<EditOutlined />}
-            onClick={() => { setEditingRow(r); setModalOpen(true) }}
-          >覆盖</Button>
-          {r.override && (
-            <Popconfirm title="删除覆盖配置后将恢复模板默认值" onConfirm={() => handleReset(r.metric_key)}>
-              <Button size="small" icon={<DeleteOutlined />}>重置</Button>
-            </Popconfirm>
-          )}
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            <Button
+              size="small" icon={<EditOutlined />}
+              onClick={() => { setEditingRow(r); setModalOpen(true) }}
+            >覆盖</Button>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+            {r.override && (
+              <Popconfirm title="删除覆盖配置后将恢复模板默认值" onConfirm={() => handleReset(r.metric_key)}>
+                <Button size="small" icon={<DeleteOutlined />}>重置</Button>
+              </Popconfirm>
+            )}
+          </PermissionGuard>
         </Space>
       ),
     },
@@ -1083,25 +1103,29 @@ function AssignmentTab() {
         {selectedDbInfo && (
           <>
             <Divider type="vertical" />
-            <Text strong>分配模板：</Text>
-            <Select
-              value={assignedTemplate?.id || (defaultTgForType?.id || '__none__')}
-              onChange={handleAssignTemplate}
-              loading={assignLoading}
-              style={{ width: 280 }}
-              placeholder="选择模板组"
-              options={[
-                ...(defaultTgForType
-                  ? [{ value: defaultTgForType.id, label: `${defaultTgForType.name} (默认)` }]
-                  : []),
-                ...templateGroups
-                  .filter(g => !g.is_default)
-                  .map(g => ({ value: g.id, label: g.name })),
-              ]}
-            />
-            <Tooltip title="选择「无」则使用同类型的默认模板">
-              <Button size="small" onClick={() => handleAssignTemplate(null)}>恢复默认</Button>
-            </Tooltip>
+            <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+              <Text strong>分配模板：</Text>
+              <Select
+                value={assignedTemplate?.id || (defaultTgForType?.id || '__none__')}
+                onChange={handleAssignTemplate}
+                loading={assignLoading}
+                style={{ width: 280 }}
+                placeholder="选择模板组"
+                options={[
+                  ...(defaultTgForType
+                    ? [{ value: defaultTgForType.id, label: `${defaultTgForType.name} (默认)` }]
+                    : []),
+                  ...templateGroups
+                    .filter(g => !g.is_default)
+                    .map(g => ({ value: g.id, label: g.name })),
+                ]}
+              />
+            </PermissionGuard>
+            <PermissionGuard code={Perm.ALERT_CONFIG_MANAGE}>
+              <Tooltip title="选择「无」则使用同类型的默认模板">
+                <Button size="small" onClick={() => handleAssignTemplate(null)}>恢复默认</Button>
+              </Tooltip>
+            </PermissionGuard>
           </>
         )}
         <Button icon={<ReloadOutlined />} onClick={loadOverrides}>刷新</Button>

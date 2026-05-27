@@ -41,13 +41,13 @@ HEALTH_WEIGHTS = {
     'operations': 0.10,
 }
 
-# 健康等级阈值
+# 健康等级阈值（区间连续，无间隙）
 HEALTH_GRADES = {
     'A': (90, 100, '优秀', 'green'),
-    'B': (80, 89, '良好', 'limegreen'),
-    'C': (70, 79, '一般', 'orange'),
-    'D': (60, 69, '较差', 'orangered'),
-    'F': (0, 59, '危险', 'red'),
+    'B': (80, 89.9, '良好', 'limegreen'),
+    'C': (70, 79.9, '一般', 'orange'),
+    'D': (60, 69.9, '较差', 'orangered'),
+    'F': (0, 59.9, '危险', 'red'),
 }
 
 # 子维度权重 (每个大维度内的权重)
@@ -243,8 +243,12 @@ class PerformanceScorer:
         """
         details = {}
         
-        # 1. QPS 评分 (假设基线 QPS = 1000)
-        qps = data.get('qps', 0)
+        # 1. QPS/TPS 评分
+        # 兼容不同数据库的字段名：qps/queries_per_second/tps/xact_commit
+        qps = data.get('qps', data.get('queries_per_second', 0))
+        # PostgreSQL 无 QPS 概念，使用 TPS
+        if qps == 0:
+            qps = data.get('tps', 0)
         baseline_qps = data.get('baseline_qps', 1000)
         
         if qps >= baseline_qps * 0.8:  # 达到基线 80% 以上
@@ -254,7 +258,8 @@ class PerformanceScorer:
         elif qps > 0:
             details['qps'] = 80.0 * qps / (baseline_qps * 0.5)
         else:
-            details['qps'] = 0.0
+            # QPS=0 表示空闲，给予中等偏上评分（空闲≠不健康）
+            details['qps'] = 70.0
         
         # 2. 响应时间评分 (ms)
         response_time = data.get('response_time_ms', 0)
@@ -269,7 +274,13 @@ class PerformanceScorer:
         details['response_time'] = _linear_score(response_time, good_rt, bad_rt, reverse=True)
         
         # 3. 慢查询数量评分
-        slow_queries = data.get('slow_queries_active', 0)
+        # 兼容不同数据库的字段名：slow_queries_active/slow_queries/slow_queries_total
+        slow_queries = data.get('slow_queries_active',
+                               data.get('slow_queries',
+                                        data.get('slow_queries_total', 0)))
+        # 如果 slow_queries 是列表类型（达梦），取长度
+        if isinstance(slow_queries, list):
+            slow_queries = len(slow_queries)
         # 根据连接数调整阈值
         active_conns = data.get('active_connections', 100)
         threshold = max(5, active_conns * 0.05)  # 至少5个，或连接数的5%
@@ -401,18 +412,16 @@ class OperationsScorer:
                      if l.get('create_time') and l['create_time'] > cutoff]
         
         # 理想: 每5分钟一条日志，24小时应有 288 条
+        # 优化：开发/测试环境采集间隔较长，放宽阈值
         expected_logs = 288
         actual_logs = len(logs_24h)
         coverage_ratio = actual_logs / expected_logs
         
-        if coverage_ratio >= 1.0:
-            details['monitoring'] = 100.0
-        elif coverage_ratio >= 0.8:
-            details['monitoring'] = 100.0
-        elif coverage_ratio >= 0.5:
-            details['monitoring'] = 80.0 * coverage_ratio / 0.5
+        # 至少有1条日志即视为有监控覆盖
+        if actual_logs >= 1:
+            details['monitoring'] = min(100.0, 50.0 + 50.0 * min(coverage_ratio, 1.0))
         else:
-            details['monitoring'] = max(0.0, 40.0 * coverage_ratio / 0.5)
+            details['monitoring'] = 0.0
         
         # 计算加权得分
         score = details['backup'] * self.weights['backup'] + details['monitoring'] * self.weights['monitoring']

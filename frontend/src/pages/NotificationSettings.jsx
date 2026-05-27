@@ -14,12 +14,14 @@ import {
 } from 'antd';
 import {
   PlusOutlined, EditOutlined, DeleteOutlined, BellOutlined,
-  ClockCircleOutlined, HistoryOutlined, SettingOutlined,
+  ClockCircleOutlined, HistoryOutlined, SettingOutlined, ThunderboltOutlined,
 } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import {
   notificationRuleAPI, silenceWindowAPI, alertNotificationAPI, databaseAPI,
 } from '../services/api';
+import { PermissionGuard } from '../components/AuthGuard';
+import { Perm } from '../utils/permission';
 
 const { TabPane } = Tabs;
 const { Option } = Select;
@@ -37,7 +39,7 @@ function NotificationRulesTab() {
     setLoading(true);
     try {
       const res = await notificationRuleAPI.list();
-      setRules(res?.data || res || []);
+      setRules(res?.rules || res?.data || []);
     } catch (e) {
       message.error('加载通知规则失败');
     }
@@ -47,7 +49,7 @@ function NotificationRulesTab() {
   const loadDatabases = useCallback(async () => {
     try {
       const res = await databaseAPI.list();
-      setDatabases(res?.data || res || []);
+      setDatabases(res?.databases || res?.data || []);
     } catch (_) {}
   }, []);
 
@@ -89,7 +91,11 @@ function NotificationRulesTab() {
     try {
       const values = await form.validateFields();
       const payload = { ...values };
-      if (!payload.db_config) delete payload.db_config;
+      // 前端 db_config 映射为后端 db_config_id
+      if (payload.db_config) {
+        payload.db_config_id = payload.db_config;
+      }
+      delete payload.db_config;
       if (!payload.schedule?.work_hours) delete payload.schedule;
 
       if (editingRule) {
@@ -123,6 +129,23 @@ function NotificationRulesTab() {
       loadRules();
     } catch (e) {
       message.error('操作失败');
+    }
+  };
+
+  const handleTest = async () => {
+    try {
+      const res = await notificationRuleAPI.test({ channels: ['email', 'dingtalk', 'wecom'] });
+      const results = res?.results || {};
+      const successChannels = Object.entries(results).filter(([_, v]) => v).map(([k]) => k);
+      const failChannels = Object.entries(results).filter(([_, v]) => !v).map(([k]) => k);
+      if (successChannels.length > 0) {
+        message.success(`测试通知已发送成功: ${successChannels.join(', ')}`);
+      }
+      if (failChannels.length > 0) {
+        message.warning(`以下渠道发送失败或未配置: ${failChannels.join(', ')}`);
+      }
+    } catch (e) {
+      message.error('测试通知发送失败: ' + (e.message || '未知错误'));
     }
   };
 
@@ -165,10 +188,14 @@ function NotificationRulesTab() {
       title: '操作', key: 'actions', width: 100,
       render: (_, r) => (
         <Space>
-          <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} /></Tooltip>
-          <Popconfirm title="确认删除此规则?" onConfirm={() => handleDelete(r.id)}>
-            <Tooltip title="删除"><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
-          </Popconfirm>
+          <PermissionGuard code={Perm.NOTIFICATION_MANAGE}>
+            <Tooltip title="编辑"><Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} /></Tooltip>
+          </PermissionGuard>
+          <PermissionGuard code={Perm.NOTIFICATION_MANAGE}>
+            <Popconfirm title="确认删除此规则?" onConfirm={() => handleDelete(r.id)}>
+              <Tooltip title="删除"><Button type="link" size="small" danger icon={<DeleteOutlined />} /></Tooltip>
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       ),
     },
@@ -183,7 +210,10 @@ function NotificationRulesTab() {
         title={() => (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span><BellOutlined /> 通知规则列表</span>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreate}>新建规则</Button>
+            <Space>
+              <Button size="small" icon={<ThunderboltOutlined />} onClick={handleTest}>测试通知</Button>
+              <PermissionGuard code={Perm.NOTIFICATION_MANAGE}><Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreate}>新建规则</Button></PermissionGuard>
+            </Space>
           </div>
         )}
       />
@@ -279,7 +309,7 @@ function SilenceWindowsTab() {
     setLoading(true);
     try {
       const res = await silenceWindowAPI.list();
-      setWindows(res?.data || res || []);
+      setWindows(res?.silence_windows || res?.data || []);
     } catch (e) {
       message.error('加载静默窗口失败');
     }
@@ -289,7 +319,7 @@ function SilenceWindowsTab() {
   const loadDatabases = useCallback(async () => {
     try {
       const res = await databaseAPI.list();
-      setDatabases(res?.data || res || []);
+      setDatabases(res?.databases || res?.data || []);
     } catch (_) {}
   }, []);
 
@@ -324,7 +354,11 @@ function SilenceWindowsTab() {
         end_time: values.end_time?.format('HH:mm'),
         weekdays: values.weekdays?.join(',') || '1,2,3,4,5',
       };
-      if (!payload.config) delete payload.config;
+      // 前端 config 映射为后端 config_id
+      if (payload.config) {
+        payload.config_id = payload.config;
+      }
+      delete payload.config;
 
       if (editingWin) {
         await silenceWindowAPI.update(editingWin.id, payload);
@@ -378,10 +412,14 @@ function SilenceWindowsTab() {
       title: '操作', key: 'actions', width: 100,
       render: (_, r) => (
         <Space>
-          <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
-          <Popconfirm title="确认删除?" onConfirm={() => handleDelete(r.id)}>
-            <Button type="link" size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermissionGuard code={Perm.NOTIFICATION_MANAGE}>
+            <Button type="link" size="small" icon={<EditOutlined />} onClick={() => handleEdit(r)} />
+          </PermissionGuard>
+          <PermissionGuard code={Perm.NOTIFICATION_MANAGE}>
+            <Popconfirm title="确认删除?" onConfirm={() => handleDelete(r.id)}>
+              <Button type="link" size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       ),
     },
@@ -396,7 +434,7 @@ function SilenceWindowsTab() {
         title={() => (
           <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
             <span><ClockCircleOutlined /> 静默窗口列表</span>
-            <Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreate}>新建窗口</Button>
+            <PermissionGuard code={Perm.NOTIFICATION_MANAGE}><Button type="primary" size="small" icon={<PlusOutlined />} onClick={handleCreate}>新建窗口</Button></PermissionGuard>
           </div>
         )}
       />
@@ -474,7 +512,7 @@ function NotificationLogTab() {
     try {
       const res = await alertNotificationAPI.list({ page, page_size: pagination.pageSize });
       const data = res?.data || res || {};
-      setLogs(data.results || data || []);
+      setLogs(data.notifications || data.results || []);
       setPagination(prev => ({ ...prev, current: page, total: data.count || 0 }));
     } catch (e) {
       message.error('加载通知日志失败');

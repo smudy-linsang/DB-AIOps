@@ -29,21 +29,29 @@ from monitor.checkers.base import (
 from monitor.checkers.oracle import OracleChecker
 from monitor.checkers.mysql import MySQLChecker
 from monitor.checkers.pgsql import PostgreSQLChecker
-from monitor.checkers.dm import DamengChecker
+
+# 达梦 DM8 驱动为可选依赖（需官方授权安装 dmPython）
+try:
+    from monitor.checkers.dm import DamengChecker
+except ImportError:
+    DamengChecker = None
+
 from monitor.checkers.gbase import GbaseChecker
 from monitor.checkers.tdsql import TDSQLChecker
 
 # RedisChecker 保留在 start_monitor.py 中，因为实现尚未完成
 
 # Checker 工厂映射 (v3.0)
+# 注意：DamengChecker 仅在 dmPython 可用时才注册
 CHECKER_MAP = {
     'oracle': OracleChecker,
     'mysql': MySQLChecker,
     'pgsql': PostgreSQLChecker,
-    'dm': DamengChecker,
     'gbase': GbaseChecker,
     'tdsql': TDSQLChecker,
 }
+if DamengChecker is not None:
+    CHECKER_MAP['dm'] = DamengChecker
 
 
 def get_checker(db_type: str):

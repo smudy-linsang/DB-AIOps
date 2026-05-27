@@ -327,3 +327,42 @@ def get_timeseries_storage() -> TimeseriesStorage:
     if _timeseries_storage is None:
         _timeseries_storage = TimeseriesStorage()
     return _timeseries_storage
+
+
+def create_hypertable() -> bool:
+    """创建 TimescaleDB 超表（兼容管理命令调用）"""
+    storage = get_timeseries_storage()
+    return storage.init_hypertables()
+
+
+def drop_hypertable() -> bool:
+    """删除 TimescaleDB 超表"""
+    storage = get_timeseries_storage()
+    conn = storage._get_connection()
+    if not conn:
+        logger.warning("[Timeseries] TimescaleDB 未启用或连接失败，无法删除超表")
+        return False
+
+    cur = conn.cursor()
+    try:
+        # 删除连续聚合视图
+        for view_name in ('metric_daily', 'metric_hourly'):
+            try:
+                cur.execute(f"DROP MATERIALIZED VIEW IF EXISTS {view_name} CASCADE;")
+            except Exception as e:
+                logger.info(f"[Timeseries] 删除视图 {view_name} 时出错: {e}")
+
+        # 删除超表
+        for table_name in ('collection_snapshot', 'metric_point'):
+            try:
+                cur.execute(f"DROP TABLE IF EXISTS {table_name} CASCADE;")
+            except Exception as e:
+                logger.info(f"[Timeseries] 删除表 {table_name} 时出错: {e}")
+
+        logger.info("[Timeseries] 超表已删除")
+        return True
+    except Exception as e:
+        logger.error(f"[Timeseries] 删除超表失败: {e}")
+        return False
+    finally:
+        cur.close()

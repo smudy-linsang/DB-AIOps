@@ -44,7 +44,7 @@ class MySQLChecker(BaseDBChecker):
                 cursor.execute("SHOW VARIABLES LIKE 'hostname'")
                 row = cursor.fetchone()
                 if row:
-                    host_name = row['Value'] if isinstance(row, dict) else row[1]
+                    host_name = row['Value']
             except Exception:
                 pass
 
@@ -673,7 +673,7 @@ class MySQLChecker(BaseDBChecker):
                 cursor.execute("SHOW STATUS LIKE 'Ssl_cipher'")
                 row = cursor.fetchone()
                 if row:
-                    ssl_cipher = row['Value'] if isinstance(row, dict) else row[1]
+                    ssl_cipher = row['Value']
             except Exception:
                 pass
 
@@ -695,10 +695,10 @@ class MySQLChecker(BaseDBChecker):
             table_size_top20 = []
             for row in cursor.fetchall():
                 table_size_top20.append({
-                    "schema": row[0],
-                    "table_name": row[1],
-                    "size_mb": float(row[2]),
-                    "rows": int(row[3]) if row[3] else 0
+                    "schema": row.get('table_schema', row.get('TABLE_SCHEMA', '')),
+                    "table_name": row.get('table_name', row.get('TABLE_NAME', '')),
+                    "size_mb": float(row.get('size_mb', 0)),
+                    "rows": int(row.get('table_rows', row.get('TABLE_ROWS', 0)) or 0)
                 })
 
             # 未使用索引
@@ -714,9 +714,9 @@ class MySQLChecker(BaseDBChecker):
                 """)
                 for row in cursor.fetchall():
                     unused_indexes.append({
-                        "schema": row[0],
-                        "table": row[1],
-                        "index": row[2]
+                        "schema": row.get('object_schema', row.get('OBJECT_SCHEMA', '')),
+                        "table": row.get('object_name', row.get('OBJECT_NAME', '')),
+                        "index": row.get('index_name', row.get('INDEX_NAME', ''))
                     })
             except Exception:
                 pass
@@ -734,9 +734,9 @@ class MySQLChecker(BaseDBChecker):
                 """)
                 for row in cursor.fetchall():
                     redundant_indexes.append({
-                        "schema": row[0],
-                        "table": row[1],
-                        "index": row[2]
+                        "schema": row.get('TABLE_SCHEMA', row.get('table_schema', '')),
+                        "table": row.get('TABLE_NAME', row.get('table_name', '')),
+                        "index": row.get('INDEX_NAME', row.get('index_name', ''))
                     })
             except Exception:
                 pass
@@ -751,8 +751,8 @@ class MySQLChecker(BaseDBChecker):
             table_count_by_schema = []
             for row in cursor.fetchall():
                 table_count_by_schema.append({
-                    "schema": row[0],
-                    "count": int(row[1] or 0)
+                    "schema": row.get('table_schema', row.get('TABLE_SCHEMA', '')),
+                    "count": int(row.get('table_count', 0) or 0)
                 })
 
             # =============================================
