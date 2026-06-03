@@ -461,4 +461,35 @@ export const roleAPI = {
   delete: (id) => api.delete(`/roles/${id}/`),
 }
 
+// ==========================================
+// 告警 RCA 2.0 API (Phase 5 P0)
+// ==========================================
+
+export const alertRcaAPI = {
+  // 一站式:上下文 + RCA + 影响 + 方案
+  getDetail: (alertId) => api.get(`/alerts/${alertId}/rca/`),
+  // 快速 RCA(不查上下文)
+  quickRca: (data) => api.post('/alerts/quick-rca/', data),
+  // 案例库
+  listCases: (params = {}) => api.get('/alert-cases/', { params }),
+  searchCases: (data) => api.post('/alert-cases/search/', data),
+  // Phase 5 统计
+  getStats: () => api.get('/phase5/stats/'),
+}
+
+// ==========================================
+// 巡检 API (Phase 5 P1)
+// ==========================================
+
+export const inspectionAPI = {
+  // 巡检执行
+  listRuns: (params = {}) => api.get('/inspection/runs/', { params }),
+  triggerRun: (data) => api.post('/inspection/runs/trigger/', data),
+  getRunDetail: (runId) => api.get(`/inspection/runs/${runId}/`),
+  // 巡检项定义
+  listItems: (params = {}) => api.get('/inspection/items/', { params }),
+  // 问题模式
+  listPatterns: (params = {}) => api.get('/inspection/patterns/', { params }),
+}
+
 export default api

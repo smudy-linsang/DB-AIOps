@@ -20,7 +20,7 @@ import {
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
   BellFilled, ApartmentOutlined, FileTextOutlined,
-  TeamOutlined,
+  TeamOutlined, CheckCircleOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, setUser } from '../services/api';
@@ -111,6 +111,8 @@ const EMLayout = ({ children }) => {
       crumbs.push({ title: '通知设置', path: '/notification-settings' });
     } else if (path.includes('/business-systems')) {
       crumbs.push({ title: '业务拓扑', path: '/business-systems' });
+    } else if (path.includes('/inspection')) {
+      crumbs.push({ title: '智能巡检', path: '/inspection' });
     } else if (path.includes('/reports')) {
       crumbs.push({ title: '报表中心', path: '/reports' });
     }
@@ -149,6 +151,7 @@ const EMLayout = ({ children }) => {
       { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', perm: Perm.SQL_MONITORING_VIEW },
       { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', perm: Perm.CAPACITY_VIEW },
       { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },
+      { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },
       { type: 'divider' },
       { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },
       { key: '/business-systems', icon: <ApartmentOutlined />, label: '业务拓扑', perm: Perm.BUSINESS_TOPOLOGY_VIEW },

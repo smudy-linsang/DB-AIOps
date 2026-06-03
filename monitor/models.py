@@ -861,3 +861,305 @@ class ReportRecord(models.Model):
         verbose_name = "报表记录"
         verbose_name_plural = "报表记录列表"
         ordering = ['-created_at']
+
+
+# ==========================================
+# Phase 5: 告警案例库（RCA 2.0）
+# ==========================================
+class AlertCase(models.Model):
+    """历史告警处置案例库 - 用于相似度匹配和方案复用"""
+    case_id = models.CharField(max_length=64, unique=True, verbose_name="案例ID")
+    title = models.CharField(max_length=200, verbose_name="案例标题")
+    db_type = models.CharField(max_length=20, choices=DB_TYPES, verbose_name="数据库类型")
+    symptom_signature = models.JSONField(default=dict, verbose_name="症状特征向量",
+        help_text="触发该案例的关键指标快照，如 {conn_usage_pct: 95, ...}")
+    root_cause = models.TextField(verbose_name="根因描述")
+    resolution = models.TextField(verbose_name="解决方案")
+    sql_used = models.TextField(blank=True, default='', verbose_name="使用的SQL")
+    commands_used = models.JSONField(default=list, verbose_name="使用的命令列表")
+    tags = models.JSONField(default=list, verbose_name="标签",
+        help_text="如 ['oracle','tablespace','oltp']")
+    severity = models.CharField(max_length=20, default='warning', verbose_name="严重程度")
+    success_count = models.IntegerField(default=0, verbose_name="成功引用次数")
+    fail_count = models.IntegerField(default=0, verbose_name="失败引用次数")
+    confidence = models.FloatField(default=0.0, verbose_name="案例置信度",
+        help_text="基于成功/失败比计算")
+    references = models.JSONField(default=list, verbose_name="参考链接")
+    created_by = models.CharField(max_length=100, blank=True, default='', verbose_name="创建人")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+    last_used_at = models.DateTimeField(null=True, blank=True, verbose_name="最后引用时间")
+
+    def __str__(self):
+        return f"{self.case_id}: {self.title}"
+
+    class Meta:
+        verbose_name = "告警案例库"
+        verbose_name_plural = "告警案例库"
+        ordering = ['-update_time']
+        indexes = [
+            models.Index(fields=['db_type', 'severity']),
+        ]
+
+
+class RemediationPlan(models.Model):
+    """处置方案 - 每次告警生成的修复方案"""
+    RISK_CHOICES = (
+        ('low', '低风险'),
+        ('medium', '中风险'),
+        ('high', '高风险'),
+        ('critical', '极高风险'),
+    )
+    SCENARIO_CHOICES = (
+        ('conservative', '保守方案'),
+        ('standard', '标准方案'),
+        ('aggressive', '激进方案'),
+    )
+    STATUS_CHOICES = (
+        ('pending', '待执行'),
+        ('approved', '已批准'),
+        ('rejected', '已拒绝'),
+        ('executing', '执行中'),
+        ('success', '执行成功'),
+        ('failed', '执行失败'),
+        ('cancelled', '已取消'),
+    )
+
+    plan_id = models.CharField(max_length=64, unique=True, verbose_name="方案ID")
+    alert = models.ForeignKey(AlertLog, on_delete=models.CASCADE,
+        related_name='remediation_plans', null=True, blank=True, verbose_name="关联告警")
+    db_config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='remediation_plans', verbose_name="数据库")
+    rule_id = models.CharField(max_length=20, blank=True, default='', verbose_name="RCA规则ID")
+    scenario = models.CharField(max_length=20, choices=SCENARIO_CHOICES, verbose_name="方案类型")
+    risk_level = models.CharField(max_length=20, choices=RISK_CHOICES, verbose_name="风险等级")
+    title = models.CharField(max_length=200, verbose_name="方案标题")
+    description = models.TextField(verbose_name="方案描述")
+    steps = models.JSONField(default=list, verbose_name="执行步骤")
+    rollback_plan = models.TextField(blank=True, default='', verbose_name="回滚方案")
+    estimated_impact = models.TextField(blank=True, default='', verbose_name="预期影响")
+    business_impact_summary = models.JSONField(default=dict, verbose_name="业务影响摘要")
+    requires_approval = models.BooleanField(default=False, verbose_name="是否需要审批")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='pending', verbose_name="状态")
+    matched_case = models.ForeignKey(AlertCase, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='matched_plans', verbose_name="匹配案例")
+    matched_case_similarity = models.FloatField(default=0.0, verbose_name="案例相似度")
+    executed_by = models.CharField(max_length=100, blank=True, default='', verbose_name="执行人")
+    executed_at = models.DateTimeField(null=True, blank=True, verbose_name="执行时间")
+    execution_result = models.TextField(blank=True, default='', verbose_name="执行结果")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        return f"{self.plan_id} [{self.scenario}|{self.risk_level}] {self.status}"
+
+    class Meta:
+        verbose_name = "处置方案"
+        verbose_name_plural = "处置方案列表"
+        ordering = ['-create_time']
+
+
+class BusinessImpactAssessment(models.Model):
+    """业务影响评估记录"""
+    SEVERITY_CHOICES = (
+        ('fatal', '致命'),
+        ('severe', '严重'),
+        ('moderate', '中等'),
+        ('minor', '轻微'),
+        ('none', '无影响'),
+    )
+
+    alert = models.ForeignKey(AlertLog, on_delete=models.CASCADE,
+        related_name='business_impacts', null=True, blank=True, verbose_name="关联告警")
+    db_config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='business_impacts', verbose_name="数据库")
+    overall_severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, verbose_name="综合严重度")
+    health_score_before = models.FloatField(verbose_name="健康度评估前")
+    health_score_after = models.FloatField(verbose_name="健康度评估后")
+    health_affected_dimensions = models.JSONField(default=list, verbose_name="受影响健康度维度")
+    affected_systems = models.JSONField(default=list, verbose_name="受影响业务系统清单")
+    critical_systems_affected = models.IntegerField(default=0, verbose_name="核心系统受影响数")
+    estimated_loss_per_minute = models.FloatField(default=0.0, verbose_name="估算损失(元/分钟)")
+    estimated_loss_per_hour = models.FloatField(default=0.0, verbose_name="估算损失(元/小时)")
+    sla_breach_risk = models.CharField(max_length=20, default='low',
+        verbose_name="SLA违约风险",
+        help_text="low/medium/high/critical")
+    detail = models.JSONField(default=dict, verbose_name="详细评估数据")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "业务影响评估"
+        verbose_name_plural = "业务影响评估列表"
+        ordering = ['-create_time']
+
+
+# ==========================================
+# Phase 5: 智能巡检引擎
+# ==========================================
+class InspectionItem(models.Model):
+    """巡检项定义 - 所有可执行的检查项"""
+    CATEGORY_CHOICES = (
+        ('tablespace', '表空间'),
+        ('index', '索引'),
+        ('object', '对象'),
+        ('log', '日志'),
+        ('replication', '复制'),
+        ('cluster', '集群'),
+        ('task', '自动任务'),
+        ('performance', '性能'),
+        ('security', '安全'),
+        ('capacity', '容量'),
+        ('config', '配置'),
+        ('awr', 'AWR'),
+        ('sequence', '序列'),
+        ('statistics', '统计信息'),
+    )
+    LEVEL_CHOICES = (
+        ('daily', '日检'),
+        ('weekly', '周检'),
+        ('monthly', '月检'),
+    )
+    SEVERITY_CHOICES = (
+        ('info', '信息'),
+        ('warn', '警告'),
+        ('error', '错误'),
+        ('critical', '严重'),
+    )
+
+    item_id = models.CharField(max_length=64, unique=True, verbose_name="巡检项ID")
+    title = models.CharField(max_length=200, verbose_name="巡检项标题")
+    category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, verbose_name="分类")
+    level = models.CharField(max_length=20, choices=LEVEL_CHOICES, verbose_name="巡检级别")
+    severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='warn', verbose_name="默认严重度")
+    applicable_db_types = models.JSONField(default=list, verbose_name="适用数据库类型")
+    description = models.TextField(blank=True, default='', verbose_name="描述")
+    detect_sql = models.TextField(blank=True, default='', verbose_name="检测SQL")
+    detect_method = models.CharField(max_length=100, blank=True, default='', verbose_name="检测方法",
+        help_text="如 detect_high_blevel_index")
+    threshold = models.JSONField(default=dict, verbose_name="阈值配置",
+        help_text="如 {warn: 5, error: 10, critical: 20}")
+    recommendation = models.TextField(blank=True, default='', verbose_name="修复建议")
+    auto_fixable = models.BooleanField(default=False, verbose_name="是否可自动修复")
+    auto_fix_sql = models.TextField(blank=True, default='', verbose_name="自动修复SQL")
+    references = models.JSONField(default=list, verbose_name="参考链接")
+    est_inspect_time_sec = models.IntegerField(default=10, verbose_name="预计耗时(秒)")
+    is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        return f"[{self.get_level_display()}] {self.item_id}: {self.title}"
+
+    class Meta:
+        verbose_name = "巡检项定义"
+        verbose_name_plural = "巡检项定义"
+        ordering = ['level', 'category', 'item_id']
+        indexes = [
+            models.Index(fields=['level', 'is_enabled']),
+            models.Index(fields=['category']),
+        ]
+
+
+class InspectionRun(models.Model):
+    """巡检执行记录"""
+    STATUS_CHOICES = (
+        ('running', '执行中'),
+        ('success', '成功'),
+        ('partial', '部分成功'),
+        ('failed', '失败'),
+    )
+    LEVEL_CHOICES = InspectionItem.LEVEL_CHOICES
+
+    run_id = models.CharField(max_length=64, unique=True, verbose_name="执行ID")
+    db_config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='inspection_runs', verbose_name="数据库")
+    level = models.CharField(max_length=20, choices=LEVEL_CHOICES, verbose_name="巡检级别")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='running', verbose_name="状态")
+    started_at = models.DateTimeField(verbose_name="开始时间")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="结束时间")
+    duration_sec = models.FloatField(null=True, blank=True, verbose_name="耗时(秒)")
+    total_items = models.IntegerField(default=0, verbose_name="总项数")
+    executed_items = models.IntegerField(default=0, verbose_name="已执行项数")
+    passed_items = models.IntegerField(default=0, verbose_name="通过项数")
+    failed_items = models.IntegerField(default=0, verbose_name="失败项数")
+    error_items = models.IntegerField(default=0, verbose_name="错误项数")
+    critical_count = models.IntegerField(default=0, verbose_name="严重问题数")
+    error_count = models.IntegerField(default=0, verbose_name="错误问题数")
+    warn_count = models.IntegerField(default=0, verbose_name="警告问题数")
+    info_count = models.IntegerField(default=0, verbose_name="信息提示数")
+    total_risk_score = models.FloatField(default=0.0, verbose_name="总风险评分")
+    summary = models.JSONField(default=dict, verbose_name="汇总数据")
+    error_message = models.TextField(blank=True, default='', verbose_name="错误信息")
+    triggered_by = models.CharField(max_length=50, default='scheduler',
+        verbose_name="触发方式", help_text="scheduler/manual/api")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    def __str__(self):
+        return f"{self.run_id} | {self.db_config.name} | {self.level} | {self.status}"
+
+    class Meta:
+        verbose_name = "巡检执行"
+        verbose_name_plural = "巡检执行列表"
+        ordering = ['-started_at']
+        indexes = [
+            models.Index(fields=['db_config', '-started_at']),
+            models.Index(fields=['status']),
+        ]
+
+
+class InspectionFinding(models.Model):
+    """巡检发现的具体问题"""
+    run = models.ForeignKey(InspectionRun, on_delete=models.CASCADE,
+        related_name='findings', verbose_name="巡检执行")
+    item = models.ForeignKey(InspectionItem, on_delete=models.CASCADE,
+        related_name='findings', null=True, blank=True, verbose_name="巡检项")
+    item_code = models.CharField(max_length=64, verbose_name="巡检项ID")
+    title = models.CharField(max_length=200, verbose_name="问题标题")
+    category = models.CharField(max_length=30, verbose_name="分类")
+    severity = models.CharField(max_length=20, verbose_name="严重程度")
+    risk_score = models.FloatField(default=0.0, verbose_name="风险评分")
+    raw_data = models.JSONField(default=dict, verbose_name="原始检测数据")
+    threshold_violated = models.JSONField(default=dict, verbose_name="违反的阈值")
+    recommendation = models.TextField(blank=True, default='', verbose_name="修复建议")
+    auto_fixable = models.BooleanField(default=False, verbose_name="是否可自动修复")
+    status = models.CharField(max_length=20, default='open', verbose_name="状态",
+        help_text="open/auto_fixed/manual_fixed/ignored/closed")
+    auto_fixed = models.BooleanField(default=False, verbose_name="是否已自动修复")
+    fix_record = models.TextField(blank=True, default='', verbose_name="修复记录")
+    related_object = models.CharField(max_length=200, blank=True, default='', verbose_name="关联对象")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "巡检发现"
+        verbose_name_plural = "巡检发现列表"
+        ordering = ['-risk_score', '-create_time']
+        indexes = [
+            models.Index(fields=['run', 'severity']),
+            models.Index(fields=['status']),
+        ]
+
+
+class InspectionIssuePattern(models.Model):
+    """巡检问题模式识别 - 用于预测"""
+    pattern_signature = models.CharField(max_length=128, unique=True, verbose_name="模式签名")
+    description = models.CharField(max_length=200, verbose_name="模式描述")
+    category = models.CharField(max_length=30, verbose_name="分类")
+    occurrence_count = models.IntegerField(default=1, verbose_name="发生次数")
+    first_seen = models.DateTimeField(verbose_name="首次发现")
+    last_seen = models.DateTimeField(verbose_name="最近发现")
+    last_db_config = models.ForeignKey(DatabaseConfig, on_delete=models.SET_NULL,
+        null=True, blank=True, verbose_name="最近发生数据库")
+    recommended_action = models.TextField(blank=True, default='', verbose_name="推荐处理")
+    auto_resolve_possible = models.BooleanField(default=False, verbose_name="可自动修复")
+    severity = models.CharField(max_length=20, default='warn', verbose_name="典型严重度")
+    avg_risk_score = models.FloatField(default=0.0, verbose_name="平均风险评分")
+    sample_item_id = models.CharField(max_length=64, blank=True, default='', verbose_name="样本巡检项")
+
+    def __str__(self):
+        return f"{self.pattern_signature}: {self.description} (x{self.occurrence_count})"
+
+    class Meta:
+        verbose_name = "巡检问题模式"
+        verbose_name_plural = "巡检问题模式列表"
+        ordering = ['-occurrence_count']

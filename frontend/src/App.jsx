@@ -19,6 +19,9 @@ import BusinessSystems from './pages/BusinessSystems';
 import ReportList from './pages/ReportList';
 import Login from './pages/Login';
 import UserManagement from './pages/UserManagement';
+import AlertDetail from './pages/AlertDetail';
+import InspectionCenter from './pages/InspectionCenter';
+import InspectionDetail from './pages/InspectionDetail';
 import { canAccessRoute, getUserRole } from './utils/permission';
 import { authAPI, setUser as saveUserToStorage } from './services/api';
 
@@ -97,6 +100,9 @@ function LayoutRoutes() {
           <Route path="/databases/:id" element={<PermissionRoute path="/databases/:id"><DatabaseDetail /></PermissionRoute>} />
           <Route path="/databases/:id/performance" element={<PermissionRoute path="/databases/:id/performance"><DatabasePerformanceHub /></PermissionRoute>} />
           <Route path="/alerts" element={<PermissionRoute path="/alerts"><AlertList /></PermissionRoute>} />
+          <Route path="/alerts/:id" element={<PermissionRoute path="/alerts"><AlertDetail /></PermissionRoute>} />
+          <Route path="/inspection" element={<PermissionRoute path="/inspection"><InspectionCenter /></PermissionRoute>} />
+          <Route path="/inspection/runs/:runId" element={<PermissionRoute path="/inspection"><InspectionDetail /></PermissionRoute>} />
           <Route path="/alert-config" element={<PermissionRoute path="/alert-config"><AlertConfig /></PermissionRoute>} />
           <Route path="/capacity" element={<PermissionRoute path="/capacity"><CapacityPlanning /></PermissionRoute>} />
           <Route path="/tickets" element={<PermissionRoute path="/tickets"><TicketManagement /></PermissionRoute>} />
