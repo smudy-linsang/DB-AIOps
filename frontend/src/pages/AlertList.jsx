@@ -131,18 +131,22 @@ function AlertTable({ alerts, loading, showAck, onAck, onDelete, onView }) {
         <Space size={4}>
           <Button size="small" icon={<EyeOutlined />} onClick={() => onView(r)}>详情</Button>
           {showAck && r.status === 'active' && (
-            <Tooltip title="确认后移入已确认列表，继续抑制重复推送">
-              <Button size="small" icon={<CheckOutlined />}
-                onClick={() => onAck(r.id)}>确认</Button>
-            </Tooltip>
+            <PermissionGuard code={Perm.ALERTS_ACKNOWLEDGE}>
+              <Tooltip title="确认后移入已确认列表，继续抑制重复推送">
+                <Button size="small" icon={<CheckOutlined />}
+                  onClick={() => onAck(r.id)}>确认</Button>
+              </Tooltip>
+            </PermissionGuard>
           )}
-          <Popconfirm
-            title="删除后该指标可重新触发告警"
-            onConfirm={() => onDelete(r.id)}
-            okText="确认" okButtonProps={{ danger: true }}
-          >
-            <Button size="small" danger icon={<DeleteOutlined />} />
-          </Popconfirm>
+          <PermissionGuard code={Perm.ALERTS_DELETE}>
+            <Popconfirm
+              title="删除后该指标可重新触发告警"
+              onConfirm={() => onDelete(r.id)}
+              okText="确认" okButtonProps={{ danger: true }}
+            >
+              <Button size="small" danger icon={<DeleteOutlined />} />
+            </Popconfirm>
+          </PermissionGuard>
         </Space>
       ),
     },
