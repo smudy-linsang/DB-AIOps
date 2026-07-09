@@ -1274,6 +1274,187 @@ class GenericDetector:
 
 
 # ============================================================================
+# TDSQL 专项检测 (基于真实 proxy + set 架构, 2026-07)
+# 数据来源: 采集器写入 MonitorLog 的最新拓扑快照 (checkers/tdsql.py),
+# 避免巡检再走一次高延迟互联网链路。
+# ============================================================================
+
+class TDSQLDetector:
+    """TDSQL 专项巡检: set 主备健康 / proxy 网关 / 分片表配置"""
+
+    @staticmethod
+    def _latest_snapshot(db_config):
+        """读取该实例最近一次采集快照, 返回 (log, data_dict)"""
+        from monitor.models import MonitorLog
+        log = MonitorLog.objects.filter(config=db_config).order_by('-create_time').first()
+        if not log:
+            return None, {}
+        data = log.message
+        if isinstance(data, str):
+            try:
+                data = json.loads(data)
+            except Exception:
+                data = {}
+        return log, data if isinstance(data, dict) else {}
+
+    @staticmethod
+    def detect_tdsql_set_health(ctx: DetectionContext) -> DetectionResult:
+        """set 主备健康: 主节点缺失/状态异常 → critical; 无备节点单点 → warning"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", ""),
+            item_title=ctx.item.get("title", ""),
+            detection_method="tdsql_set_health",
+        )
+        try:
+            log, data = TDSQLDetector._latest_snapshot(ctx.db_config)
+            if log is None:
+                result.status = "skip"
+                result.summary = "无采集快照, 请先运行 start_monitor"
+                return result
+            if log.status == 'DOWN':
+                result.status = "critical"
+                result.severity = "critical"
+                result.summary = "实例最近一次采集为 DOWN"
+                result.findings.append({"type": "instance_down",
+                                        "message": "实例连接失败"})
+                return result
+
+            sets = data.get('tdsql_sets') or []
+            health = data.get('tdsql_cluster_health', 'UNKNOWN')
+            result.metrics["set_count"] = len(sets)
+            result.metrics["cluster_health"] = health
+
+            if not sets:
+                result.status = "warning"
+                result.severity = "warning"
+                result.summary = "未获取到 set 拓扑 (网关命令不可用?)"
+                return result
+
+            for s in sets:
+                label = s.get('alias') or s.get('set_name', '')
+                if not s.get('master_ip'):
+                    result.status = "critical"
+                    result.severity = "critical"
+                    result.findings.append({
+                        "type": "no_master", "set": label,
+                        "message": f"set {label} 无主节点",
+                    })
+                elif str(s.get('status', '0')) not in ('', '0'):
+                    if result.status != "critical":
+                        result.status = "warning"
+                        result.severity = "warning"
+                    result.findings.append({
+                        "type": "set_abnormal", "set": label,
+                        "message": f"set {label} 状态异常({s.get('status')})",
+                    })
+                if s.get('slave_count', 0) == 0:
+                    if result.status == "ok":
+                        result.status = "warning"
+                        result.severity = "warning"
+                    result.findings.append({
+                        "type": "single_point", "set": label,
+                        "message": f"set {label} 无备节点, 存在单点风险",
+                    })
+            healthy = sum(1 for s in sets if s.get('is_healthy'))
+            result.summary = (
+                f"集群 {health}: {healthy}/{len(sets)} 个 set 健康"
+                + (f", {len(result.findings)} 项发现" if result.findings else "")
+            )
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_tdsql_proxy(ctx: DetectionContext) -> DetectionResult:
+        """proxy 网关: 网关命令可用性 / 网关节点信息"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", ""),
+            item_title=ctx.item.get("title", ""),
+            detection_method="tdsql_proxy",
+        )
+        try:
+            log, data = TDSQLDetector._latest_snapshot(ctx.db_config)
+            if log is None:
+                result.status = "skip"
+                result.summary = "无采集快照"
+                return result
+            conn_type = data.get('tdsql_conn_type', 'direct')
+            endpoints = data.get('tdsql_proxy_endpoints') or []
+            result.metrics["conn_type"] = conn_type
+            result.metrics["proxy_version"] = data.get('tdsql_proxy_version', 'N/A')
+            result.metrics["endpoint_count"] = len(endpoints)
+            result.metrics["rw_split"] = data.get('tdsql_rw_split')
+            if conn_type != 'proxy':
+                result.status = "warning"
+                result.severity = "warning"
+                result.findings.append({
+                    "type": "proxy_unavailable",
+                    "message": "/*proxy*/ 网关命令不可用, 无法获取集群拓扑",
+                })
+                result.summary = "网关命令不可用"
+            else:
+                eps = ', '.join(e.get('endpoint', '') for e in endpoints) or '未观测到'
+                result.summary = (
+                    f"网关正常 ({data.get('tdsql_proxy_version', 'N/A')}), "
+                    f"观测到网关节点: {eps}"
+                )
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_tdsql_shardkey(ctx: DetectionContext) -> DetectionResult:
+        """分片表配置 (仅 groupshard): 广播表占比 / 分片键覆盖"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", ""),
+            item_title=ctx.item.get("title", ""),
+            detection_method="tdsql_shardkey",
+        )
+        try:
+            log, data = TDSQLDetector._latest_snapshot(ctx.db_config)
+            if log is None:
+                result.status = "skip"
+                result.summary = "无采集快照"
+                return result
+            if data.get('tdsql_mode') != 'groupshard':
+                result.status = "skip"
+                result.summary = "非分布式(groupshard)实例, 跳过"
+                return result
+            tables = data.get('tdsql_shard_tables') or []
+            if not tables:
+                result.status = "warning"
+                result.severity = "warning"
+                result.summary = "未获取到分片表配置 (show shardkey 无数据)"
+                return result
+            sharded = [t for t in tables if t.get('table_type') == '分片表']
+            broadcast = [t for t in tables if t.get('table_type') == '广播表']
+            result.metrics["table_count"] = len(tables)
+            result.metrics["sharded_count"] = len(sharded)
+            result.metrics["broadcast_count"] = len(broadcast)
+            broadcast_pct = round(len(broadcast) / len(tables) * 100, 1)
+            result.metrics["broadcast_pct"] = broadcast_pct
+            # 广播表全量存在于每个 set, 占比过高说明分片设计可能有问题
+            if broadcast_pct >= 50 and len(tables) >= 5:
+                result.status = "warning"
+                result.severity = "warning"
+                result.findings.append({
+                    "type": "broadcast_heavy",
+                    "message": f"广播表占比 {broadcast_pct}% 偏高, "
+                               f"数据会在每个 set 全量冗余",
+                })
+            result.summary = (
+                f"共 {len(tables)} 张表: 分片表 {len(sharded)}, "
+                f"广播表 {len(broadcast)} ({broadcast_pct}%)"
+            )
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+
+# ============================================================================
 # 检测方法注册表
 # ============================================================================
 
@@ -1303,6 +1484,10 @@ DETECTOR_REGISTRY: Dict[str, Callable] = {
     "I109": GenericDetector.detect_high_concurrency_tables,
     "I110": GenericDetector.detect_sequence_usage,
     "I111": GenericDetector.detect_awr_config,
+    # TDSQL 专项 (基于真实 proxy + set 架构)
+    "INS-TDSQL-SHARD": TDSQLDetector.detect_tdsql_set_health,
+    "INS-TDSQL-PROXY": TDSQLDetector.detect_tdsql_proxy,
+    "INS-TDSQL-SHARDKEY": TDSQLDetector.detect_tdsql_shardkey,
 }
 
 

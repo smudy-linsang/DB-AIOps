@@ -89,7 +89,18 @@ class Command(BaseCommand):
     if DamengChecker is not None:
         CHECKER_MAP['dm'] = DamengChecker
 
+    def add_arguments(self, parser):
+        parser.add_argument(
+            '--once', action='store_true',
+            help='只执行一轮采集后退出（调试/手动触发用）',
+        )
+
     def handle(self, *args, **options):
+        if options.get('once'):
+            print(f"[{datetime.datetime.now()}] 单轮采集模式 (--once)")
+            self.monitor_job()
+            return
+
         print(f"[{datetime.datetime.now()}] 全栈监控守护进程 v3.0 (Phase 2 智能增强版 + 模块化Checkers) 已启动")
         print(f">> 支持的数据库：Oracle, MySQL, PostgreSQL, 达梦, Gbase8a, TDSQL")
         print(f">> Phase 2 智能特性：168时间槽基线 | RCA根因分析 | 容量预测 | 健康评分")
@@ -337,16 +348,32 @@ class Command(BaseCommand):
                             "timestamp": datetime.datetime.now().isoformat(),
                         })
                 # 添加集群级指标
+                # ES 索引 value 字段是 float 映射，字符串健康状态需转数值评分，
+                # 原始文本保留在 value_text（数值语义: 越低越差, 便于 down 方向告警）
+                health_score_map = {
+                    'HEALTHY': 100, 'NORMAL': 100, 'OK': 100,
+                    'DEGRADED': 50, 'WARNING': 50,
+                    'UNHEALTHY': 25,
+                    'CRITICAL': 0, 'DOWN': 0,
+                    'UNKNOWN': -1, 'N/A': -1,
+                }
                 for key in ['dw_replication_health', 'dsc_cluster_health',
                             'gbase_cluster_health', 'tdsql_cluster_health']:
                     if key in data:
+                        raw = data[key]
+                        if isinstance(raw, (int, float)) and not isinstance(raw, bool):
+                            numeric = float(raw)
+                        else:
+                            numeric = float(health_score_map.get(
+                                str(raw).upper().strip(), -1))
                         es_docs.append({
                             "_index": get_metrics_index_name(),
                             "config_id": config.id,
                             "db_type": config.db_type,
                             "db_name": config.name,
                             "metric_name": key,
-                            "value": data[key],
+                            "value": numeric,
+                            "value_text": str(raw),
                             "status": current_status,
                             "timestamp": datetime.datetime.now().isoformat(),
                         })

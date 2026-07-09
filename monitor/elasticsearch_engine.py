@@ -392,16 +392,24 @@ def bulk_index_metrics(docs: List[Dict]) -> Dict[str, int]:
     
     actions = []
     for doc in docs:
-        collected_at = doc.get('collected_at', datetime.now())
+        # _index 属于 bulk 元数据, 决不能留在 _source 里 (ES 8 会整条拒绝)
+        doc = dict(doc)
+        explicit_index = doc.pop('_index', None)
+
+        # 兼容两种时间字段: collected_at (旧) / timestamp (start_monitor)
+        collected_at = doc.get('collected_at') or doc.get('timestamp') or datetime.now()
         if isinstance(collected_at, str):
             collected_at = datetime.fromisoformat(collected_at)
-        
-        index_name = get_metrics_index_name(collected_at)
+
+        index_name = explicit_index or get_metrics_index_name(collected_at)
         config_id = doc.get('config_id', 0)
-        
+        metric_name = doc.get('metric_name', '')
+
+        # _id 必须包含 metric_name, 否则同一轮采集的多条指标会互相覆盖
+        doc_id = f"{config_id}_{metric_name}_{collected_at.strftime('%Y%m%d%H%M%S')}"
         action = {
             '_index': index_name,
-            '_id': f"{config_id}_{collected_at.strftime('%Y%m%d%H%M%S')}",
+            '_id': doc_id,
             '_source': doc
         }
         actions.append(action)
