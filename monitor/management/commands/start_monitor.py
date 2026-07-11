@@ -126,17 +126,22 @@ class Command(BaseCommand):
         """在独立线程中执行单个数据库的采集，超时后自动记录 DOWN"""
         # 每个线程需要独立关闭复用的 Django DB 连接，避免跨线程复用问题
         connection.close_if_unusable_or_obsolete()
-        checker_class = self.CHECKER_MAP.get(config.db_type)
-        if checker_class:
-            checker = checker_class(self)
-            checker.check(config)
-        elif config.db_type == 'mongo':
-            print(f"  -- 跳过暂不支持的类型：{config.name} (MongoDB)")
-        else:
-            print(f"  -- 跳过未知类型：{config.name} ({config.db_type})")
-        # 采集完毕后主动释放本线程的数据库连接，防止连接池耗尽
-        from django.db import close_old_connections
-        close_old_connections()
+        try:
+            checker_class = self.CHECKER_MAP.get(config.db_type)
+            if checker_class:
+                checker = checker_class(self)
+                checker.check(config)
+            elif config.db_type == 'mongo':
+                print(f"  -- 跳过暂不支持的类型：{config.name} (MongoDB)")
+            else:
+                print(f"  -- 跳过未知类型：{config.name} ({config.db_type})")
+        finally:
+            # 强制关闭本 worker 线程的 Django 连接。
+            # ThreadPoolExecutor 每轮新建线程, close_old_connections() 只关超过
+            # CONN_MAX_AGE 的连接, 关不掉本轮刚建的; 线程随执行器销毁后连接残留,
+            # 逐轮累积会耗尽 PostgreSQL 连接 (too many clients)。connection 为
+            # 线程本地对象, close() 只影响当前线程, 不会误伤其他线程/主线程。
+            connection.close()
 
     def _celery_dispatch_job(self, configs):
         """使用 Celery 异步分发采集任务（v3.0 推荐模式）"""
