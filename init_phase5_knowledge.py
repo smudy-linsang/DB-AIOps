@@ -55,18 +55,19 @@ def init_all():
         synced = 0
         for it in ALL_ITEMS:
             obj, created = InspectionItem.objects.update_or_create(
-                item_code=it.get("item_id"),
+                item_id=it.get("item_id"),
                 defaults={
                     "title": it.get("title", ""),
                     "category": it.get("category", ""),
                     "level": it.get("level", "daily"),
-                    "severity": it.get("severity", "info"),
+                    "severity": it.get("severity", "warn"),
                     "applicable_db_types": it.get("applicable_db_types", []),
+                    "description": it.get("description", ""),
                     "detect_method": it.get("detect_method", ""),
                     "threshold": it.get("threshold", {}),
                     "recommendation": it.get("recommendation", ""),
                     "auto_fixable": it.get("auto_fixable", False),
-                    "auto_fix_method": it.get("auto_fix_method", ""),
+                    "auto_fix_sql": it.get("auto_fix_sql", ""),
                 },
             )
             synced += 1

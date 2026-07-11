@@ -1572,43 +1572,74 @@ class InspectionExecutor:
             self._logger.exception("巡检执行异常: %s", e)
 
         # 5) 写 Finding + 统计
-        crit = warn = ok = err = 0
+        # item_id -> 定义(dict) 与 -> ItemModel 实例, 用于补 category/recommendation/FK
+        item_def = {it.get("item_id"): it for it in items}
+        item_objs = {o.item_id: o for o in ItemModel.objects.filter(
+            item_id__in=list(item_def.keys()))}
+        # 单项风险权重: 严重 10 / 警告 3 / 错误 5
+        risk_weight = {"critical": 10.0, "warning": 3.0, "error": 5.0}
+
+        crit = warn = ok = err = skip = 0
+        total_risk = 0.0
         for r in results:
-            InspectionFinding.objects.create(
-                finding_id=f"FD-{run.run_id}-{r.item_id}",
-                run=run,
-                item_code=r.item_id,
-                item_title=r.item_title,
-                status=r.status,
-                severity=r.severity,
-                summary=r.summary,
-                details={
-                    "findings": r.findings,
-                    "metrics": r.metrics,
-                    "error": r.error,
-                },
-                detection_method=r.detection_method,
-                duration_ms=r.duration_ms,
-                confidence=r.confidence,
-            )
             if r.status == "critical":
                 crit += 1
             elif r.status == "warning":
                 warn += 1
             elif r.status == "ok":
                 ok += 1
+            elif r.status == "skip":
+                skip += 1
             else:
                 err += 1
 
+            # 跳过项不落库(没有实际执行)
+            if r.status == "skip":
+                continue
+
+            defn = item_def.get(r.item_id, {})
+            score = risk_weight.get(r.status, 0.0)
+            total_risk += score
+            InspectionFinding.objects.create(
+                run=run,
+                item=item_objs.get(r.item_id),
+                item_code=r.item_id,
+                title=r.item_title or defn.get("title", ""),
+                category=defn.get("category", ""),
+                severity=r.severity,
+                risk_score=score,
+                raw_data={
+                    "summary": r.summary,
+                    "findings": r.findings,
+                    "metrics": r.metrics,
+                    "error": r.error,
+                    "detection_method": r.detection_method,
+                    "duration_ms": r.duration_ms,
+                    "confidence": r.confidence,
+                },
+                recommendation=defn.get("recommendation", ""),
+                auto_fixable=r.auto_fixable,
+                status=r.status,
+            )
+
         # 6) 收尾 Run
+        executed = ok + warn + crit + err
         run.status = "completed"
-        run.completed_at = timezone.now()
+        run.finished_at = timezone.now()
+        run.executed_items = executed
+        run.passed_items = ok
+        run.failed_items = warn + crit
+        run.error_items = err
         run.critical_count = crit
-        run.warning_count = warn
-        run.ok_count = ok
+        run.warn_count = warn
         run.error_count = err
+        run.info_count = skip
+        run.total_risk_score = round(total_risk, 1)
         run.duration_sec = round(time.time() - start_ts, 1)
-        run.health_score = self._calc_health_score(ok, warn, crit, err)
+        run.summary = {
+            "health_score": self._calc_health_score(ok, warn, crit, err),
+            "skipped": skip,
+        }
         run.save()
 
         return run.run_id
@@ -1677,18 +1708,19 @@ class InspectionExecutor:
         from monitor.models import InspectionItem as ItemModel
         for it in items:
             obj, created = ItemModel.objects.update_or_create(
-                item_code=it.get("item_id"),
+                item_id=it.get("item_id"),
                 defaults={
                     "title": it.get("title", ""),
                     "category": it.get("category", ""),
                     "level": it.get("level", "daily"),
-                    "severity": it.get("severity", "info"),
+                    "severity": it.get("severity", "warn"),
                     "applicable_db_types": it.get("applicable_db_types", []),
+                    "description": it.get("description", ""),
                     "detect_method": it.get("detect_method", ""),
                     "threshold": it.get("threshold", {}),
                     "recommendation": it.get("recommendation", ""),
                     "auto_fixable": it.get("auto_fixable", False),
-                    "auto_fix_method": it.get("auto_fix_method", ""),
+                    "auto_fix_sql": it.get("auto_fix_sql", ""),
                 },
             )
 

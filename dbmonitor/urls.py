@@ -46,6 +46,15 @@ from monitor.api_views import (
     # RBAC v2.0 API
     RoleListView, RoleDetailView,
 )
+from monitor.api_views_phase5 import (
+    # Phase 5: 告警 RCA 2.0
+    AlertRCADetailView, AlertRCAQuickView,
+    # Phase 5: 智能巡检
+    InspectionRunListView, InspectionRunTriggerView, InspectionRunDetailView,
+    InspectionItemListView, InspectionIssuePatternListView,
+    # Phase 5: 告警案例库 + 统计
+    AlertCaseListView, AlertCaseSearchView, Phase5StatsView,
+)
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
@@ -189,6 +198,23 @@ urlpatterns = [
     # ========== RBAC v2.0: 角色管理 ==========
     path('api/v1/roles/', RoleListView.as_view()),
     path('api/v1/roles/<int:role_id>/', RoleDetailView.as_view()),
+
+    # ========== Phase 5: 告警 RCA 2.0 ==========
+    path('api/v1/alerts/<int:alert_id>/rca/', AlertRCADetailView.as_view()),
+    path('api/v1/alerts/quick-rca/', AlertRCAQuickView.as_view()),
+
+    # ========== Phase 5: 智能巡检 ==========
+    # 注意: /runs/trigger/ 必须在 /runs/<run_id>/ 之前，否则 trigger 会被当作 run_id
+    path('api/v1/inspection/runs/', InspectionRunListView.as_view()),
+    path('api/v1/inspection/runs/trigger/', InspectionRunTriggerView.as_view()),
+    path('api/v1/inspection/runs/<str:run_id>/', InspectionRunDetailView.as_view()),
+    path('api/v1/inspection/items/', InspectionItemListView.as_view()),
+    path('api/v1/inspection/patterns/', InspectionIssuePatternListView.as_view()),
+
+    # ========== Phase 5: 告警案例库 + 统计 ==========
+    path('api/v1/alert-cases/', AlertCaseListView.as_view()),
+    path('api/v1/alert-cases/search/', AlertCaseSearchView.as_view()),
+    path('api/v1/phase5/stats/', Phase5StatsView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

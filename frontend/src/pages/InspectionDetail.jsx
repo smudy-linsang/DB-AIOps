@@ -69,7 +69,7 @@ const InspectionDetail = () => {
 
   const findingColumns = [
     { title: '编号', dataIndex: 'item_code', key: 'item_code', width: 100 },
-    { title: '巡检项', dataIndex: 'item_title', key: 'item_title' },
+    { title: '巡检项', dataIndex: 'title', key: 'title' },
     {
       title: '状态', dataIndex: 'status', key: 'status', width: 100,
       render: (s) => {
@@ -92,12 +92,12 @@ const InspectionDetail = () => {
       },
     },
     {
-      title: '摘要', dataIndex: 'summary', key: 'summary',
-      ellipsis: true,
+      title: '摘要', key: 'summary', ellipsis: true,
+      render: (_, r) => r.raw_data?.summary || '-',
     },
     {
-      title: '耗时', dataIndex: 'duration_ms', key: 'duration',
-      width: 80, render: (d) => d ? `${d}ms` : '-',
+      title: '耗时', key: 'duration', width: 80,
+      render: (_, r) => r.raw_data?.duration_ms ? `${r.raw_data.duration_ms}ms` : '-',
     },
   ]
 
@@ -151,7 +151,7 @@ const InspectionDetail = () => {
       {/* 报告元信息 */}
       <Card style={{ marginBottom: 16 }}>
         <Descriptions title={`报告 ${run.run_id}`} column={3} bordered size="small">
-          <Descriptions.Item label="数据库">{run.db_config?.name} ({run.db_config?.db_type})</Descriptions.Item>
+          <Descriptions.Item label="数据库">{run.db_name || run.db_id}</Descriptions.Item>
           <Descriptions.Item label="巡检级别">
             <Tag color={{daily:'blue', weekly:'green', monthly:'purple'}[run.level]}>{run.level}</Tag>
           </Descriptions.Item>
@@ -159,7 +159,7 @@ const InspectionDetail = () => {
             <Tag color={run.status === 'completed' ? 'green' : 'orange'}>{run.status}</Tag>
           </Descriptions.Item>
           <Descriptions.Item label="开始时间">{run.started_at ? new Date(run.started_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
-          <Descriptions.Item label="完成时间">{run.completed_at ? new Date(run.completed_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
+          <Descriptions.Item label="完成时间">{run.finished_at ? new Date(run.finished_at).toLocaleString('zh-CN') : '-'}</Descriptions.Item>
           <Descriptions.Item label="耗时">{run.duration_sec}s</Descriptions.Item>
         </Descriptions>
       </Card>
@@ -178,12 +178,12 @@ const InspectionDetail = () => {
         </Col>
         <Col span={6}>
           <Card>
-            <Statistic title="问题项" value={(run.critical_count || 0) + (run.warning_count || 0)}
+            <Statistic title="问题项" value={(run.critical_count || 0) + (run.warn_count || 0)}
                        valueStyle={{ color: '#cf1322' }} />
           </Card>
         </Col>
         <Col span={6}>
-          <Card><Statistic title="健康项" value={run.ok_count || 0}
+          <Card><Statistic title="健康项" value={run.passed_items || 0}
                             valueStyle={{ color: '#3f8600' }} /></Card>
         </Col>
       </Row>
@@ -196,12 +196,12 @@ const InspectionDetail = () => {
                       strokeColor="#f5222d" format={() => `严重 ${run.critical_count || 0}`} />
           </Col>
           <Col span={6}>
-            <Progress percent={Math.round((run.warning_count || 0) / Math.max(run.total_items, 1) * 100)}
-                      strokeColor="#faad14" format={() => `警告 ${run.warning_count || 0}`} />
+            <Progress percent={Math.round((run.warn_count || 0) / Math.max(run.total_items, 1) * 100)}
+                      strokeColor="#faad14" format={() => `警告 ${run.warn_count || 0}`} />
           </Col>
           <Col span={6}>
-            <Progress percent={Math.round((run.ok_count || 0) / Math.max(run.total_items, 1) * 100)}
-                      strokeColor="#52c41a" format={() => `正常 ${run.ok_count || 0}`} />
+            <Progress percent={Math.round((run.passed_items || 0) / Math.max(run.total_items, 1) * 100)}
+                      strokeColor="#52c41a" format={() => `正常 ${run.passed_items || 0}`} />
           </Col>
           <Col span={6}>
             <Progress percent={Math.round((run.error_count || 0) / Math.max(run.total_items, 1) * 100)}

@@ -36,7 +36,8 @@ const InspectionCenter = () => {
     setRunsLoading(true)
     try {
       const data = await inspectionAPI.listRuns()
-      setRuns(data.results || data || [])
+      // 后端返回 {total, runs}; 兼容 results/数组形态并强制兜底为数组
+      setRuns(Array.isArray(data) ? data : (data.runs || data.results || []))
     } catch (e) {
       message.error('加载巡检记录失败: ' + e.message)
     } finally {
@@ -49,7 +50,7 @@ const InspectionCenter = () => {
     setItemsLoading(true)
     try {
       const data = await inspectionAPI.listItems()
-      setItems(data.results || data || [])
+      setItems(Array.isArray(data) ? data : (data.items || data.results || []))
     } catch (e) {
       message.error('加载巡检项失败: ' + e.message)
     } finally {
@@ -62,7 +63,7 @@ const InspectionCenter = () => {
     setPatternsLoading(true)
     try {
       const data = await inspectionAPI.listPatterns()
-      setPatterns(data.results || data || [])
+      setPatterns(Array.isArray(data) ? data : (data.patterns || data.results || []))
     } catch (e) {
       message.error('加载问题模式失败: ' + e.message)
     } finally {
@@ -107,13 +108,12 @@ const InspectionCenter = () => {
     },
     {
       title: '数据库',
-      dataIndex: ['db_config', 'name'],
+      dataIndex: 'db_name',
       key: 'db',
       render: (name, r) => (
         <Space>
           <DatabaseOutlined />
-          {name || r.db_config_id}
-          <Tag>{r.db_config?.db_type}</Tag>
+          {name || r.db_id}
         </Space>
       ),
     },
@@ -147,8 +147,8 @@ const InspectionCenter = () => {
       render: (_, r) => (
         <Space size="small">
           <Tag color="red">严重 {r.critical_count || 0}</Tag>
-          <Tag color="orange">警告 {r.warning_count || 0}</Tag>
-          <Tag color="green">正常 {r.ok_count || 0}</Tag>
+          <Tag color="orange">警告 {r.warn_count || 0}</Tag>
+          <Tag color="green">正常 {r.passed_items || 0}</Tag>
           {r.error_count > 0 && <Tag color="grey">错误 {r.error_count}</Tag>}
         </Space>
       ),

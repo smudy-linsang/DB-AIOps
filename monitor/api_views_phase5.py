@@ -178,9 +178,10 @@ class InspectionRunListView(_BaseView):
         status = request.GET.get('status')
         limit = int(request.GET.get('limit', 50))
 
-        qs = InspectionRun.objects.all().order_by('-started_at')
+        # InspectionRun 外键名为 db_config (列 db_config_id)
+        qs = InspectionRun.objects.select_related('db_config').order_by('-started_at')
         if config_id:
-            qs = qs.filter(config_id=config_id)
+            qs = qs.filter(db_config_id=config_id)
         if level:
             qs = qs.filter(level=level)
         if status:
@@ -189,14 +190,14 @@ class InspectionRunListView(_BaseView):
         # RBAC
         allowed = get_user_database_ids(request.user)
         if allowed is not None:
-            qs = qs.filter(config_id__in=allowed)
+            qs = qs.filter(db_config_id__in=allowed)
 
         runs = []
         for r in qs[:limit]:
             runs.append({
                 'run_id': r.run_id,
-                'db_id': r.config_id,
-                'db_name': r.db_config.name if hasattr(r, 'db_config') else '',
+                'db_id': r.db_config_id,
+                'db_name': r.db_config.name if r.db_config_id else '',
                 'level': r.level,
                 'status': r.status,
                 'started_at': r.started_at,
@@ -210,6 +211,7 @@ class InspectionRunListView(_BaseView):
                 'error_count': r.error_count,
                 'warn_count': r.warn_count,
                 'total_risk_score': r.total_risk_score,
+                'health_score': (r.summary or {}).get('health_score', 0),
             })
         return self.json_response({'total': len(runs), 'runs': runs})
 
@@ -319,7 +321,7 @@ class InspectionRunDetailView(_BaseView):
         return self.json_response({
             'run': {
                 'run_id': run.run_id,
-                'db_id': run.config_id,
+                'db_id': run.db_config_id,
                 'db_name': run.db_config.name,
                 'level': run.level,
                 'status': run.status,
@@ -334,6 +336,7 @@ class InspectionRunDetailView(_BaseView):
                 'error_count': run.error_count,
                 'warn_count': run.warn_count,
                 'total_risk_score': run.total_risk_score,
+                'health_score': (run.summary or {}).get('health_score', 0),
             },
             'findings': findings,
         })
