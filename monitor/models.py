@@ -1163,3 +1163,211 @@ class InspectionIssuePattern(models.Model):
         verbose_name = "巡检问题模式"
         verbose_name_plural = "巡检问题模式列表"
         ordering = ['-occurrence_count']
+
+
+# ==========================================================================
+# Phase 6A: 事件-事故-问题模型 (Event / Incident / Problem)
+# 详细设计: phase6/10_phase6A_discovery.md §1
+# ==========================================================================
+import uuid as _uuid
+
+
+def _uid(prefix: str) -> str:
+    return f"{prefix}-{_uuid.uuid4().hex[:12]}"
+
+
+class Event(models.Model):
+    """事件 - 机器视角, 高频, 允许风暴。检测层产出的原始信号。"""
+    SOURCE_CHOICES = (
+        ('sentinel', '哨兵'), ('collector', '采集器'), ('baseline', '基线'),
+        ('ml', '机器学习'), ('inspection', '巡检'),
+    )
+    SEVERITY_CHOICES = (
+        ('critical', '严重'), ('error', '错误'), ('warning', '警告'), ('info', '信息'),
+    )
+    event_uid = models.CharField(max_length=32, unique=True, db_index=True, verbose_name="事件UID")
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='events', verbose_name="数据库")
+    db_type = models.CharField(max_length=20, verbose_name="数据库类型")
+    source = models.CharField(max_length=20, choices=SOURCE_CHOICES, verbose_name="来源")
+    signal = models.CharField(max_length=40, db_index=True, verbose_name="信号")
+    metric_key = models.CharField(max_length=100, blank=True, default='', verbose_name="指标键")
+    value = models.FloatField(default=0.0, verbose_name="值")
+    threshold = models.FloatField(default=0.0, verbose_name="阈值")
+    severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, db_index=True, verbose_name="严重度")
+    dedup_key = models.CharField(max_length=120, db_index=True, verbose_name="去重键")
+    occurred_at = models.DateTimeField(db_index=True, verbose_name="发生时刻")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="入库时刻")
+    incident = models.ForeignKey('Incident', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='events', verbose_name="归属事故")
+    detail = models.JSONField(default=dict, verbose_name="证据")
+
+    class Meta:
+        verbose_name = "事件"
+        verbose_name_plural = "事件列表"
+        ordering = ['-occurred_at']
+        indexes = [
+            models.Index(fields=['config', 'signal', 'occurred_at']),
+            models.Index(fields=['dedup_key', 'occurred_at']),
+        ]
+
+    def __str__(self):
+        return f"{self.event_uid} {self.signal}({self.severity})"
+
+
+class Incident(models.Model):
+    """事故 - 运维视角, 聚合后的处理单元, 一等公民。"""
+    CATEGORY_CHOICES = (
+        ('availability', '可用性'), ('lock', '锁'), ('connection', '连接'),
+        ('capacity', '容量'), ('replication', '复制'), ('performance', '性能'),
+        ('config', '配置'), ('other', '其他'),
+    )
+    PRIORITY_CHOICES = (('P1', 'P1'), ('P2', 'P2'), ('P3', 'P3'), ('P4', 'P4'))
+    STATUS_CHOICES = (
+        ('open', '待处理'), ('diagnosing', '诊断中'), ('plan_ready', '方案就绪'),
+        ('executing', '执行中'), ('verifying', '验证中'), ('resolved', '已解决'),
+        ('closed', '已关闭'),
+    )
+    # 合法状态转移 (phase6/10 §4.2)
+    ALLOWED_TRANSITIONS = {
+        'open': {'diagnosing', 'resolved', 'closed'},
+        'diagnosing': {'plan_ready', 'resolved', 'closed'},
+        'plan_ready': {'executing', 'resolved', 'closed'},
+        'executing': {'verifying', 'resolved', 'closed', 'plan_ready'},
+        'verifying': {'resolved', 'plan_ready', 'closed'},
+        'resolved': {'open', 'closed'},
+        'closed': set(),
+    }
+
+    incident_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="事故ID")
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='incidents', verbose_name="数据库")
+    db_type = models.CharField(max_length=20, verbose_name="数据库类型")
+    category = models.CharField(max_length=20, choices=CATEGORY_CHOICES, db_index=True, verbose_name="类别")
+    title = models.CharField(max_length=200, verbose_name="标题")
+    priority = models.CharField(max_length=4, choices=PRIORITY_CHOICES, db_index=True, verbose_name="优先级")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True, default='open', verbose_name="状态")
+    dedup_key = models.CharField(max_length=120, db_index=True, verbose_name="聚合键")
+    event_count = models.IntegerField(default=1, verbose_name="事件数")
+    is_storm = models.BooleanField(default=False, verbose_name="事件风暴")
+    is_flapping = models.BooleanField(default=False, verbose_name="抖动")
+    occurred_at = models.DateTimeField(db_index=True, verbose_name="发生时刻")
+    detected_at = models.DateTimeField(null=True, blank=True, verbose_name="发现时刻")
+    plan_ready_at = models.DateTimeField(null=True, blank=True, verbose_name="方案就位时刻")
+    acked_at = models.DateTimeField(null=True, blank=True, verbose_name="确认时刻")
+    acked_by = models.CharField(max_length=50, default='', blank=True, verbose_name="确认人")
+    executing_at = models.DateTimeField(null=True, blank=True, verbose_name="执行时刻")
+    resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="解决时刻")
+    closed_at = models.DateTimeField(null=True, blank=True, verbose_name="关闭时刻")
+    rca_result = models.JSONField(default=dict, verbose_name="根因诊断")
+    impact = models.JSONField(default=dict, verbose_name="影响评估")
+    plans = models.JSONField(default=list, verbose_name="处置方案")
+    health_snapshot = models.FloatField(default=0.0, verbose_name="生成时健康分")
+    problem = models.ForeignKey('Problem', on_delete=models.SET_NULL,
+        null=True, blank=True, related_name='incidents', verbose_name="关联问题")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "事故"
+        verbose_name_plural = "事故列表"
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['status', 'priority']),
+            models.Index(fields=['config', 'category', 'status']),
+        ]
+
+    def __str__(self):
+        return f"{self.incident_id} [{self.priority}] {self.title}"
+
+    # ---- SLA 秒表 (phase6/README §3) ----
+    @staticmethod
+    def _delta(a, b):
+        if a and b:
+            return round((a - b).total_seconds(), 1)
+        return None
+
+    @property
+    def t_detect_sec(self):
+        return self._delta(self.detected_at, self.occurred_at)
+
+    @property
+    def t_plan_sec(self):
+        return self._delta(self.plan_ready_at, self.detected_at)
+
+    @property
+    def t_resolve_sec(self):
+        return self._delta(self.resolved_at, self.detected_at)
+
+    @property
+    def sla_detect_ok(self):
+        v = self.t_detect_sec
+        return v is not None and v <= 60
+
+    @property
+    def sla_plan_ok(self):
+        v = self.t_plan_sec
+        return v is not None and v <= 300
+
+    @property
+    def sla_resolve_ok(self):
+        v = self.t_resolve_sec
+        return v is not None and v <= 600
+
+    def transition(self, to_status: str, actor: str = 'system', reason: str = ''):
+        """状态机转移。非法转移抛 IncidentStateError。写时间戳 + AuditLog。"""
+        if to_status not in self.ALLOWED_TRANSITIONS.get(self.status, set()):
+            raise IncidentStateError(
+                f"非法状态转移: {self.status} -> {to_status} (事故 {self.incident_id})")
+        now = timezone.now()
+        stamp_map = {
+            'diagnosing': 'detected_at', 'plan_ready': 'plan_ready_at',
+            'executing': 'executing_at', 'resolved': 'resolved_at', 'closed': 'closed_at',
+        }
+        field = stamp_map.get(to_status)
+        if field and getattr(self, field) is None:
+            setattr(self, field, now)
+        old = self.status
+        self.status = to_status
+        self.save(update_fields=['status', field, 'updated_at'] if field else ['status', 'updated_at'])
+        try:
+            # AuditLog 字段: description/sql_command 必填(空串即可), executor 而非 operator
+            AuditLog.objects.create(
+                config=self.config,
+                action_type='incident_transition',
+                risk_level='low',
+                status='success',
+                description=f"事故 {self.incident_id}: {old} -> {to_status} by {actor}. {reason}".strip(),
+                sql_command='',
+                executor=actor,
+            )
+        except Exception:
+            pass  # 审计失败不阻断状态机
+        return self
+
+
+class IncidentStateError(Exception):
+    """事故状态机非法转移"""
+    pass
+
+
+class Problem(models.Model):
+    """问题 - 跨事故共性根因, 沉淀知识。"""
+    STATUS_CHOICES = (('active', '活跃'), ('mitigated', '已缓解'), ('archived', '已归档'))
+    problem_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="问题ID")
+    signature = models.CharField(max_length=200, db_index=True, verbose_name="归一签名")
+    title = models.CharField(max_length=200, verbose_name="标题")
+    incident_count = models.IntegerField(default=0, verbose_name="累计事故数")
+    first_seen_at = models.DateTimeField(null=True, blank=True, verbose_name="首次出现")
+    last_seen_at = models.DateTimeField(null=True, blank=True, verbose_name="最近出现")
+    kb_ref = models.CharField(max_length=64, default='', blank=True, verbose_name="知识库引用")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', verbose_name="状态")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "问题"
+        verbose_name_plural = "问题列表"
+        ordering = ['-last_seen_at']
+
+    def __str__(self):
+        return f"{self.problem_id} {self.title} (x{self.incident_count})"

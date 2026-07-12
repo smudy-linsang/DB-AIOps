@@ -148,6 +148,38 @@ class TimeseriesStorage:
             except Exception as e:
                 logger.info(f"[Timeseries] 压缩策略可能已存在: {e}")
 
+            # ---- Phase 6A: ASH-lite 会话采样超表 (phase6/10 §1.4) ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS session_sample (
+                    time          TIMESTAMPTZ    NOT NULL,
+                    db_config_id  INTEGER        NOT NULL,
+                    db_type       VARCHAR(20)    NOT NULL,
+                    session_id    VARCHAR(64),
+                    user_name     VARCHAR(100),
+                    client_host   VARCHAR(120),
+                    db_name       VARCHAR(100),
+                    command       VARCHAR(40),
+                    state         VARCHAR(120),
+                    wait_event    VARCHAR(120),
+                    active_secs   INTEGER,
+                    is_blocked    BOOLEAN DEFAULT FALSE,
+                    blocker_id    VARCHAR(64),
+                    sql_digest    VARCHAR(64),
+                    sql_text      TEXT
+                );
+            """)
+            try:
+                cur.execute("SELECT create_hypertable('session_sample', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);")
+            except Exception as e:
+                logger.info(f"[Timeseries] session_sample 超表可能已存在: {e}")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_session_sample_config_time ON session_sample (db_config_id, time DESC);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_session_sample_blocked ON session_sample (db_config_id, is_blocked, time DESC);")
+            ash_days = getattr(settings, 'ASH_RETENTION_DAYS', 7)
+            try:
+                cur.execute(f"SELECT add_retention_policy('session_sample', INTERVAL '{ash_days} days', if_not_exists => TRUE);")
+            except Exception as e:
+                logger.info(f"[Timeseries] session_sample 保留策略可能已存在: {e}")
+
             logger.info("[Timeseries] 超表初始化完成")
             return True
 
@@ -213,6 +245,71 @@ class TimeseriesStorage:
         except Exception as e:
             logger.error(f"[Timeseries] 快照写入失败: {e}")
             return False
+
+    # ---- Phase 6A: ASH-lite 会话样本 (phase6/10 §1.4/§2.2) ----
+    _SESSION_COLS = ('session_id', 'user_name', 'client_host', 'db_name', 'command',
+                     'state', 'wait_event', 'active_secs', 'is_blocked', 'blocker_id',
+                     'sql_digest', 'sql_text')
+
+    def write_session_samples(self, db_config_id: int, db_type: str, rows: list) -> bool:
+        """批量写会话样本。rows: list[dict]，键为 _SESSION_COLS 子集; time=now 统一。"""
+        conn = self._get_connection()
+        if not conn or not rows:
+            return False
+        try:
+            cur = conn.cursor()
+            now = timezone.now()
+            cols = "time, db_config_id, db_type, " + ", ".join(self._SESSION_COLS)
+            ph = "%s, %s, %s, " + ", ".join(["%s"] * len(self._SESSION_COLS))
+            sql = f"INSERT INTO session_sample ({cols}) VALUES ({ph})"
+            for r in rows:
+                vals = [now, db_config_id, db_type] + [r.get(c) for c in self._SESSION_COLS]
+                cur.execute(sql, vals)
+            cur.close()
+            return True
+        except Exception as e:
+            logger.error(f"[Timeseries] 会话样本写入失败: {e}")
+            return False
+
+    def query_session_samples(self, db_config_id: int, since, until=None) -> list:
+        """查会话样本时间窗 (供 6B ASH 时间线)。返回 list[dict]。"""
+        conn = self._get_connection()
+        if not conn:
+            return []
+        try:
+            cur = conn.cursor()
+            until = until or timezone.now()
+            cols = "time, " + ", ".join(self._SESSION_COLS)
+            cur.execute(
+                f"SELECT {cols} FROM session_sample WHERE db_config_id=%s AND time BETWEEN %s AND %s ORDER BY time",
+                (db_config_id, since, until))
+            names = ['time'] + list(self._SESSION_COLS)
+            out = [dict(zip(names, row)) for row in cur.fetchall()]
+            cur.close()
+            return out
+        except Exception as e:
+            logger.error(f"[Timeseries] 会话样本查询失败: {e}")
+            return []
+
+    def latest_blocked_count(self, db_config_id: int, within_sec: int = 30) -> int:
+        """最近 within_sec 内最新一次采样的阻塞会话数 (供 6C 验证回路 blocked_sessions 指标)。"""
+        conn = self._get_connection()
+        if not conn:
+            return 0
+        try:
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT COALESCE(SUM(CASE WHEN is_blocked THEN 1 ELSE 0 END),0) "
+                "FROM session_sample WHERE db_config_id=%s AND time = "
+                "(SELECT MAX(time) FROM session_sample WHERE db_config_id=%s "
+                " AND time > NOW() - (%s || ' seconds')::interval)",
+                (db_config_id, db_config_id, int(within_sec)))
+            row = cur.fetchone()
+            cur.close()
+            return int(row[0]) if row and row[0] is not None else 0
+        except Exception as e:
+            logger.error(f"[Timeseries] 阻塞计数查询失败: {e}")
+            return 0
 
     # SQL 查询模板（使用参数化占位符，表名通过白名单校验）
     _TABLE_WHITELIST = {

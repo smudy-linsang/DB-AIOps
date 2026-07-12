@@ -492,4 +492,14 @@ export const inspectionAPI = {
   listPatterns: (params = {}) => api.get('/inspection/patterns/', { params }),
 }
 
+// Phase 6A: 事故中心
+export const incidentAPI = {
+  list: (params = {}) => api.get('/incidents/', { params }),
+  detail: (id) => api.get(`/incidents/${id}/`),
+  timeline: (id) => api.get(`/incidents/${id}/timeline/`),
+  ack: (id) => api.post(`/incidents/${id}/ack/`, {}),
+  close: (id, reason) => api.post(`/incidents/${id}/close/`, { reason }),
+  events: (params = {}) => api.get('/events/', { params }),
+}
+
 export default api

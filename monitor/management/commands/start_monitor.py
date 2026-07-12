@@ -302,6 +302,13 @@ class Command(BaseCommand):
             message=json.dumps(data, ensure_ascii=False, default=str)
         )
 
+        # --- 3.2 Phase 6A: 采集尾部三层检测 → 发事件到 Stream ---
+        if current_status == 'UP':
+            try:
+                self._emit_phase6_events(config, data)
+            except Exception as e6:
+                print(f"  [6A] 事件检测失败: {e6}")
+
         # --- 3.5 SSE 实时推送指标更新 ---
         try:
             from monitor.sse_views import publish_metric_event
@@ -387,6 +394,67 @@ class Command(BaseCommand):
                     bulk_index_metrics(es_docs)
         except Exception as es_err:
             print(f"  [ES] 写入 Elasticsearch 失败: {es_err}")
+
+    def _emit_phase6_events(self, config, data):
+        """Phase 6A: 采集尾部跑 L1/L2/L3 检测, 命中即发事件到 Redis Stream。
+
+        L1 硬阈值(连接/空间/复制) + L2 自适应基线 + L3 复合规则(死锁增量在此算)。
+        锁阻塞由哨兵 ASH 负责, 此处不重复。
+        """
+        from monitor.detectors import detect_l1, detect_l2, detect_l3
+        from monitor.redis_bus import emit_event
+
+        # 死锁 5min 增量 (用进程内缓存上一轮值)
+        if not hasattr(self, '_deadlock_prev'):
+            self._deadlock_prev = {}
+        dl_now = data.get('innodb_deadlocks')
+        if isinstance(dl_now, (int, float)):
+            prev = self._deadlock_prev.get(config.id)
+            if prev is not None and dl_now >= prev:
+                data['_deadlock_delta_5min'] = dl_now - prev
+            self._deadlock_prev[config.id] = dl_now
+
+        events = []
+        try:
+            events += detect_l1(config, data)
+        except Exception as e:
+            print(f"  [6A-L1] {e}")
+        try:
+            events += detect_l2(config, data)
+        except Exception as e:
+            print(f"  [6A-L2] {e}")
+        try:
+            # 基线均值供 L3 (从 data 里取不到, 用简化: 传空, L3 里 mean 缺失则跳过突增规则)
+            events += detect_l3(config, data, baseline_means=self._collect_baseline_means(config, data))
+        except Exception as e:
+            print(f"  [6A-L3] {e}")
+
+        for e in events:
+            try:
+                emit_event(e)
+            except Exception as ee:
+                print(f"  [6A-emit] {ee}")
+        if events:
+            print(f"  [6A] {config.name}: 发出 {len(events)} 个事件 "
+                  f"({','.join(sorted({x['signal'] for x in events}))})")
+
+    def _collect_baseline_means(self, config, data):
+        """为 L3 提供关键指标基线均值 (轻量: 复用 BaselineEngine 单指标)。失败返回空。"""
+        means = {}
+        try:
+            from monitor.baseline_engine import BaselineEngine
+            eng = BaselineEngine(config)
+            for k in ('threads_connected', 'threads_running', 'slow_queries', 'active_connections'):
+                if k in data:
+                    try:
+                        b = eng.calculate_baseline(k) if hasattr(eng, 'calculate_baseline') else None
+                        if b and getattr(b, 'mean', None):
+                            means[k] = b.mean
+                    except Exception:
+                        pass
+        except Exception:
+            pass
+        return means
 
     def _run_phase2_analysis(self, config, data, am):
         """

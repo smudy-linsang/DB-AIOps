@@ -80,25 +80,33 @@ class DbConnector:
     
     @staticmethod
     def _connect_mysql(config) -> any:
-        """连接 MySQL 系列数据库 (MySQL/GBase/TDSQL)"""
+        """连接 MySQL 系列数据库 (MySQL/GBase/TDSQL)
+
+        6A-02: gbase/tdsql 走 pymysql; TDSQL 经 proxy 走广域网, 超时放宽;
+        service_name 复用为默认库名(TDSQL/gbase 可留空)。DictCursor 便于 ASH 按列名取值。
+        """
         try:
             import pymysql
-            
-            # 获取密码
+
+            db_type = (config.db_type.lower() if hasattr(config, 'db_type')
+                       else config.get('db_type', '').lower())
             password = config.get_password() if hasattr(config, 'get_password') else config.get('password', '')
-            
-            # 确定端口
             port = getattr(config, 'port', 3306) or 3306
-            
+            database = getattr(config, 'service_name', None) or None
+            connect_timeout = 15 if db_type == 'tdsql' else 10
+
             conn = pymysql.connect(
                 host=config.host,
                 port=int(port),
                 user=config.username,
                 password=password,
+                database=database,
                 charset='utf8mb4',
-                connect_timeout=10
+                connect_timeout=connect_timeout,
+                read_timeout=30,
+                cursorclass=pymysql.cursors.DictCursor,
             )
-            logger.info(f"MySQL 连接成功: {config.host}:{port}")
+            logger.info(f"{db_type or 'mysql'} 连接成功: {config.host}:{port}")
             return conn
         except ImportError:
             raise DbConnectionError("需要安装 pymysql 库: pip install pymysql")

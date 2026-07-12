@@ -340,6 +340,35 @@ CAPACITY_CHECK_INTERVAL_HOURS = int(os.environ.get('CAPACITY_CHECK_INTERVAL_HOUR
 HEALTH_CHECK_INTERVAL_HOURS = int(os.environ.get('HEALTH_CHECK_INTERVAL_HOURS', 1))
 
 # ==========================================
+# Phase 6 配置 (详细设计: phase6/README.md §4)
+# ==========================================
+def _envbool(k, d):
+    return os.environ.get(k, str(d)).lower() in ('true', '1', 'yes')
+
+# 支柱一: 哨兵 + ASH-lite
+SENTINEL_ENABLED = _envbool('SENTINEL_ENABLED', True)
+SENTINEL_INTERVAL_SEC = int(os.environ.get('SENTINEL_INTERVAL_SEC', 8))
+SENTINEL_FAIL_THRESHOLD = int(os.environ.get('SENTINEL_FAIL_THRESHOLD', 3))
+SENTINEL_CONNECT_TIMEOUT_SEC = int(os.environ.get('SENTINEL_CONNECT_TIMEOUT_SEC', 5))
+ASH_ENABLED = _envbool('ASH_ENABLED', True)
+ASH_INTERVAL_SEC = int(os.environ.get('ASH_INTERVAL_SEC', 15))
+ASH_RETENTION_DAYS = int(os.environ.get('ASH_RETENTION_DAYS', 7))
+# 支柱二/三: 管道 + 事故
+PIPELINE_ENABLED = _envbool('PIPELINE_ENABLED', True)
+PIPELINE_STREAM_MAXLEN = int(os.environ.get('PIPELINE_STREAM_MAXLEN', 100000))
+INCIDENT_STORM_THRESHOLD = int(os.environ.get('INCIDENT_STORM_THRESHOLD', 10))
+INCIDENT_FLAPPING_WINDOW_MIN = int(os.environ.get('INCIDENT_FLAPPING_WINDOW_MIN', 10))
+INCIDENT_FLAPPING_COUNT = int(os.environ.get('INCIDENT_FLAPPING_COUNT', 3))
+# 支柱四/五 (6B/6C 使用)
+DIAG_BUDGET_SEC = int(os.environ.get('DIAG_BUDGET_SEC', 60))
+DIAG_RCA_TOPN = int(os.environ.get('DIAG_RCA_TOPN', 3))
+PLAYBOOK_AUTO_LOW_RISK = _envbool('PLAYBOOK_AUTO_LOW_RISK', True)
+PLAYBOOK_VERIFY_WINDOW_SEC = int(os.environ.get('PLAYBOOK_VERIFY_WINDOW_SEC', 300))
+PLAYBOOK_AUTO_CIRCUIT_BREAK = int(os.environ.get('PLAYBOOK_AUTO_CIRCUIT_BREAK', 3))
+INCIDENT_P1_EXECUTE_FIRST = _envbool('INCIDENT_P1_EXECUTE_FIRST', True)
+ONCALL_ESCALATE_MIN = int(os.environ.get('ONCALL_ESCALATE_MIN', 15))
+
+# ==========================================
 # API 配置
 # ==========================================
 API_RATE_LIMIT = int(os.environ.get('API_RATE_LIMIT', 100))  # 每分钟请求数限制

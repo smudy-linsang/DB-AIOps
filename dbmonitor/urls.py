@@ -55,6 +55,10 @@ from monitor.api_views_phase5 import (
     # Phase 5: 告警案例库 + 统计
     AlertCaseListView, AlertCaseSearchView, Phase5StatsView,
 )
+from monitor.api_views_incident import (
+    IncidentListView, IncidentDetailView, IncidentTimelineView,
+    IncidentAckView, IncidentCloseView, EventListView,
+)
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
@@ -215,6 +219,14 @@ urlpatterns = [
     path('api/v1/alert-cases/', AlertCaseListView.as_view()),
     path('api/v1/alert-cases/search/', AlertCaseSearchView.as_view()),
     path('api/v1/phase5/stats/', Phase5StatsView.as_view()),
+
+    # ========== Phase 6A: 事故/事件 ==========
+    path('api/v1/incidents/', IncidentListView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/', IncidentDetailView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/timeline/', IncidentTimelineView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/ack/', IncidentAckView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/close/', IncidentCloseView.as_view()),
+    path('api/v1/events/', EventListView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

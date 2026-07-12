@@ -151,6 +151,7 @@ const EMLayout = ({ children }) => {
       { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', perm: Perm.SQL_MONITORING_VIEW },
       { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', perm: Perm.CAPACITY_VIEW },
       { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },
+      { key: '/incidents', icon: <ThunderboltOutlined />, label: '事故中心', perm: Perm.ALERTS_VIEW },
       { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },
       { type: 'divider' },
       { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },
