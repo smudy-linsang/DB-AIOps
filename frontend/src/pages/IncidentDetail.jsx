@@ -1,6 +1,6 @@
 import React, { useState, useEffect, useCallback } from 'react'
 import {
-  Card, Descriptions, Tag, Button, Space, Statistic, Row, Col, Timeline, Alert, message, Empty,
+  Card, Descriptions, Tag, Button, Space, Statistic, Row, Col, Timeline, Alert, message, Empty, Progress,
 } from 'antd'
 import { ArrowLeftOutlined, ReloadOutlined, CheckOutlined } from '@ant-design/icons'
 import { useParams, useNavigate } from 'react-router-dom'
@@ -54,6 +54,10 @@ export default function IncidentDetail() {
     try { await incidentAPI.close(incidentId, '手动关闭'); message.success('已关闭'); load() }
     catch (e) { message.error(e.message) }
   }
+  const doRediagnose = async () => {
+    try { await incidentAPI.rediagnose(incidentId); message.success('已触发重新诊断'); setTimeout(load, 2000) }
+    catch (e) { message.error(e.message) }
+  }
 
   if (!inc) return <div style={{ padding: 24 }}><Card loading={loading}>加载中...</Card></div>
 
@@ -73,6 +77,8 @@ export default function IncidentDetail() {
         </Space>
         <Space>
           {!inc.acked_by && <Button icon={<CheckOutlined />} onClick={doAck}>确认</Button>}
+          {['open', 'diagnosing', 'plan_ready'].includes(inc.status) &&
+            <Button onClick={doRediagnose}>重新诊断</Button>}
           {inc.status !== 'closed' && <Button danger onClick={doClose}>关闭</Button>}
           <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
         </Space>
@@ -122,20 +128,69 @@ export default function IncidentDetail() {
           <Card title="根因诊断" size="small" style={{ marginBottom: 16 }}>
             {(rca.root_causes && rca.root_causes.length > 0)
               ? rca.root_causes.map((rc, i) => (
-                <Alert key={i} type="info" showIcon style={{ marginBottom: 8 }}
-                  message={`${rc.name || rc.rule_id} (置信 ${Math.round((rc.confidence || 0) * 100)}%)`}
-                  description={rc.summary} />))
-              : <Alert type="warning" showIcon message="诊断中" description="6B 诊断管道就位后此处展示根因/证据链。" />}
+                <div key={i} style={{ marginBottom: 12, paddingBottom: 8, borderBottom: '1px dashed #eee' }}>
+                  <Space>
+                    <b>{rc.name || rc.rule_id}</b>
+                    <Tag color="blue">{rc.rule_id}</Tag>
+                    <span style={{ fontSize: 12 }}>置信度</span>
+                    <Progress percent={Math.round((rc.confidence || 0) * 100)} size="small" style={{ width: 120 }} />
+                  </Space>
+                  <div style={{ color: '#555', margin: '4px 0' }}>{rc.summary}</div>
+                  {(rc.evidence || []).length > 0 && (
+                    <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
+                      <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>证据链:</div>
+                      {rc.evidence.map((ev, j) => (
+                        <div key={j} style={{ fontSize: 12, marginBottom: 2 }}>
+                          <Tag>{ev.type}</Tag>{ev.label}
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                  {(rc.suggestions || []).length > 0 &&
+                    <ul style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }}>
+                      {rc.suggestions.map((s, k) => <li key={k}>{s}</li>)}
+                    </ul>}
+                </div>))
+              : <Alert type="warning" showIcon message="诊断中" description="诊断管道处理后此处展示根因/证据链。" />}
+            {(rca.similar_cases || []).length > 0 &&
+              <div style={{ marginTop: 8, fontSize: 12, color: '#888' }}>
+                相似历史案例 {rca.similar_cases.length} 条</div>}
           </Card>
           <Card title="影响评估" size="small" style={{ marginBottom: 16 }}>
             {impact.summary
-              ? <div>{impact.summary}</div>
-              : <Alert type="warning" showIcon message="诊断中" description="6B 就位后展示受影响会话/健康衰减/业务系统。" />}
+              ? <div>
+                <Space wrap>
+                  <Tag color={impact.impact_level === 'high' ? 'red' : impact.impact_level === 'medium' ? 'orange' : 'green'}>
+                    影响等级: {impact.impact_level}
+                  </Tag>
+                  <span>受影响会话: {impact.affected_sessions}</span>
+                  <span>健康度: {impact.health_before} → {impact.health_now}</span>
+                </Space>
+                <div style={{ marginTop: 6 }}>{impact.summary}</div>
+                {(impact.business_systems || []).map((b, i) =>
+                  <Tag key={i} color="purple" style={{ marginTop: 4 }}>{b.name}({b.importance})</Tag>)}
+              </div>
+              : <Alert type="warning" showIcon message="诊断中" />}
           </Card>
           <Card title="处置方案" size="small">
             {plans.length > 0
-              ? plans.map((p, i) => <Tag key={i} color="blue">{p.name || p.scenario}</Tag>)
-              : <Alert type="warning" showIcon message="方案生成中" description="6B/6C 就位后展示 2-3 套方案并可一键执行。" />}
+              ? plans.map((p, i) => (
+                <Card key={i} type="inner" size="small" style={{ marginBottom: 8 }}
+                  title={<Space><Tag color={p.risk_level === 'high' ? 'red' : p.risk_level === 'mid' ? 'orange' : 'green'}>{p.risk_level}</Tag>{p.name}</Space>}
+                  extra={<Button size="small" type="primary" disabled title="6C 执行引擎就位后可用">执行</Button>}>
+                  <div style={{ fontSize: 12, color: '#888' }}>
+                    预计 {p.est_minutes}min · {p.requires_approval ? '需审批' : '免审批'} · Playbook: {p.playbook_ref || '-'}
+                  </div>
+                  <ol style={{ margin: '6px 0 0', paddingLeft: 18, fontSize: 12 }}>
+                    {(p.steps || []).map((s, j) => (
+                      <li key={j}>{s.desc}{s.sql ? <code style={{ display: 'block', color: '#c41d7f', fontSize: 11 }}>{s.sql}</code> : null}</li>
+                    ))}
+                  </ol>
+                  {p.verify && p.verify.metric &&
+                    <div style={{ fontSize: 12, color: '#389e0d', marginTop: 4 }}>
+                      验证判据: {p.verify.metric} {p.verify.recover_expr} (观察{p.verify.window_sec}s)</div>}
+                </Card>))
+              : <Alert type="warning" showIcon message="方案生成中" />}
           </Card>
         </Col>
       </Row>

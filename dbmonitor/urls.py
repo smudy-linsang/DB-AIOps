@@ -57,7 +57,7 @@ from monitor.api_views_phase5 import (
 )
 from monitor.api_views_incident import (
     IncidentListView, IncidentDetailView, IncidentTimelineView,
-    IncidentAckView, IncidentCloseView, EventListView,
+    IncidentAckView, IncidentCloseView, IncidentRediagnoseView, EventListView,
 )
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
@@ -226,6 +226,7 @@ urlpatterns = [
     path('api/v1/incidents/<str:incident_id>/timeline/', IncidentTimelineView.as_view()),
     path('api/v1/incidents/<str:incident_id>/ack/', IncidentAckView.as_view()),
     path('api/v1/incidents/<str:incident_id>/close/', IncidentCloseView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/rediagnose/', IncidentRediagnoseView.as_view()),
     path('api/v1/events/', EventListView.as_view()),
 
     # ========== Observability ==========

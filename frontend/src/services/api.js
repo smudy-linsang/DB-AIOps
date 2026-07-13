@@ -499,6 +499,7 @@ export const incidentAPI = {
   timeline: (id) => api.get(`/incidents/${id}/timeline/`),
   ack: (id) => api.post(`/incidents/${id}/ack/`, {}),
   close: (id, reason) => api.post(`/incidents/${id}/close/`, { reason }),
+  rediagnose: (id) => api.post(`/incidents/${id}/rediagnose/`, {}),
   events: (params = {}) => api.get('/events/', { params }),
 }
 

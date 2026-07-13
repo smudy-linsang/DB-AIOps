@@ -185,6 +185,27 @@ class IncidentCloseView(_BaseView):
         return self.ok(status=inc.status, closed_at=inc.closed_at)
 
 
+class IncidentRediagnoseView(_BaseView):
+    """Phase 6B: 手动重新诊断 (phase6/20 §8.2)。"""
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def post(self, request, incident_id):
+        inc = Incident.objects.filter(incident_id=incident_id).first()
+        if not inc:
+            return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
+        if inc.status in ('resolved', 'closed'):
+            return self.err('CONFLICT', '事故已结束, 无法重诊断', 409)
+        try:
+            from monitor.redis_bus import emit_diagnosis
+            emit_diagnosis(inc.incident_id, inc.config_id, 'replan')
+        except Exception as e:
+            return self.err('INTERNAL', f'诊断入队失败: {e}', 500)
+        return self.ok(status=inc.status)
+
+
 class EventListView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
