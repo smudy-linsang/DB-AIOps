@@ -287,3 +287,112 @@ def aggregate_alert_context(alert_id: int) -> Dict[str, Any]:
         return {'error': f'alert {alert_id} not found'}
     aggregator = ContextAggregator(alert)
     return aggregator.aggregate()
+
+
+# ==========================================================================
+# Phase 6B: 事故上下文聚合 (吃 Incident, 不依赖 AlertLog)
+# 详细设计: phase6/20_phase6B_diagnosis.md §2
+# ==========================================================================
+def get_ash_timeline(config_id: int, window_min: int = 30) -> Dict[str, Any]:
+    """查 session_sample 事故窗口, 产出 ASH 时间线画像 (phase6/20 §2.1)。"""
+    import datetime as _dt
+    from collections import Counter
+    result = {
+        'window': [], 'active_session_trend': [], 'top_wait_events': [],
+        'blocking_chains': [], 'top_sql_by_samples': [],
+    }
+    try:
+        from monitor.timeseries import get_timeseries_storage
+        ts = get_timeseries_storage()
+        until = timezone.now()
+        since = until - _dt.timedelta(minutes=window_min)
+        rows = ts.query_session_samples(config_id, since, until)
+    except Exception as e:
+        logger.warning(f"[ASH] 查询失败: {e}")
+        return result
+    if not rows:
+        return result
+    result['window'] = [since.isoformat(), until.isoformat()]
+
+    # 按采样点(time)聚合 active/blocked
+    by_time = {}
+    wait_counter = Counter()
+    sql_counter = Counter()
+    sql_text_map = {}
+    total = len(rows)
+    for r in rows:
+        t = r.get('time')
+        key = t.isoformat() if hasattr(t, 'isoformat') else str(t)
+        slot = by_time.setdefault(key, {'t': key, 'active': 0, 'blocked': 0})
+        slot['active'] += 1
+        if r.get('is_blocked'):
+            slot['blocked'] += 1
+        we = r.get('wait_event') or r.get('state')
+        if we:
+            wait_counter[we] += 1
+        dig = r.get('sql_digest') or (r.get('sql_text') or '')[:80]
+        if dig:
+            sql_counter[dig] += 1
+            sql_text_map.setdefault(dig, (r.get('sql_text') or '')[:120])
+    result['active_session_trend'] = sorted(by_time.values(), key=lambda x: x['t'])
+    result['top_wait_events'] = [
+        {'wait_event': w, 'samples': c, 'pct': round(c / total * 100, 1)}
+        for w, c in wait_counter.most_common(8)]
+    result['top_sql_by_samples'] = [
+        {'sql_digest': d, 'sql_text': sql_text_map.get(d, ''), 'samples': c}
+        for d, c in sql_counter.most_common(10)]
+
+    # 阻塞链: 取每个采样点的阻塞关系
+    chains_by_time = {}
+    for r in rows:
+        if not r.get('is_blocked'):
+            continue
+        t = r.get('time')
+        key = t.isoformat() if hasattr(t, 'isoformat') else str(t)
+        c = chains_by_time.setdefault(key, {'t': key, 'blocker': r.get('blocker_id'),
+                                            'waiters': [], 'max_wait_sec': 0})
+        c['waiters'].append(r.get('session_id'))
+        c['max_wait_sec'] = max(c['max_wait_sec'], r.get('active_secs') or 0)
+    result['blocking_chains'] = sorted(chains_by_time.values(),
+                                       key=lambda x: -x['max_wait_sec'])[:10]
+    return result
+
+
+def _incident_recent_changes(config, hours: int = 72) -> List[Dict[str, Any]]:
+    """近期变更(复用 AuditLog), 供 config 类根因关联。"""
+    try:
+        from monitor.models import AuditLog
+        cutoff = timezone.now() - timedelta(hours=hours)
+        rows = AuditLog.objects.filter(config=config, create_time__gte=cutoff)\
+            .exclude(action_type='incident_transition').order_by('-create_time')[:30]
+        return [{'action_type': c.action_type, 'description': (c.description or '')[:200],
+                 'create_time': c.create_time.isoformat()} for c in rows]
+    except Exception:
+        return []
+
+
+def _incident_business_context(config) -> Dict[str, Any]:
+    try:
+        systems = list(config.business_systems.all())
+    except Exception:
+        systems = []
+    return {
+        'systems': [{'name': s.name, 'importance': s.importance,
+                     'owner': s.owner or '', 'contact': s.contact or ''} for s in systems],
+        'max_importance': max([s.importance for s in systems], default='normal') if systems else 'normal',
+    }
+
+
+def build_incident_context(incident) -> Dict[str, Any]:
+    """事故诊断上下文 (phase6/20 §2.3)。整合 ASH 时间线/变更/业务。"""
+    config = incident.config
+    return {
+        'incident_summary': {
+            'incident_id': incident.incident_id, 'category': incident.category,
+            'priority': incident.priority, 'title': incident.title,
+            'occurred_at': incident.occurred_at.isoformat() if incident.occurred_at else None,
+        },
+        'ash_timeline': get_ash_timeline(config.id, window_min=30),
+        'recent_changes': _incident_recent_changes(config),
+        'business_context': _incident_business_context(config),
+    }

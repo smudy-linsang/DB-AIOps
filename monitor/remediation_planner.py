@@ -472,3 +472,114 @@ def generate_plan(db_config, rca_diagnosis: Dict[str, Any]) -> Dict[str, Any]:
     planner = RemediationPlanner(db_config, rca_diagnosis)
     plan = planner.generate()
     return plan.to_dict()
+
+
+# ==========================================================================
+# Phase 6B: 事故方案生成 (引用 Playbook, phase6/20 §5)
+# ==========================================================================
+# rule_id/signal → 6C Playbook 引用 (6C 建全 Playbook 后生效; 现阶段作标记)
+RULE_PLAYBOOK_REF = {
+    'R021': 'PB-LOCK-KILL-BLOCKER', 'R024': 'PB-LOCK-KILL-BLOCKER',
+    'R001': 'PB-CONN-CLEAN-IDLE', 'R003': 'PB-CONN-CLEAN-IDLE',
+    'R031': 'PB-SPACE-EXTEND',
+    'R051': 'PB-REPL-RESTART', 'R052': 'PB-REPL-RESTART',
+    'R078': 'PB-CONFIG-ROLLBACK',
+    'R023': 'PB-DEADLOCK-ADVISE',
+}
+SIGNAL_PLAYBOOK_REF = {
+    'blocked_session': 'PB-LOCK-KILL-BLOCKER',
+    'conn_high': 'PB-CONN-CLEAN-IDLE', 'conn_storm': 'PB-CONN-CLEAN-IDLE',
+    'space_high': 'PB-SPACE-EXTEND',
+    'repl_broken': 'PB-REPL-RESTART',
+    'config_drift': 'PB-CONFIG-ROLLBACK',
+    'deadlock_surge': 'PB-DEADLOCK-ADVISE',
+}
+
+_SCENARIO_META = {
+    'conservative': {'name_prefix': '保守', 'risk_level': 'low'},
+    'standard': {'name_prefix': '标准', 'risk_level': 'mid'},
+    'aggressive': {'name_prefix': '激进', 'risk_level': 'high'},
+}
+
+
+def _resolve_step_sql(step: dict, db_type: str) -> str:
+    """从 step 的 sql/sql_<db>/sql_by_db 解析出适用 SQL。"""
+    key_map = {'pgsql': 'sql_pg', 'postgresql': 'sql_pg', 'mysql': 'sql_mysql',
+               'tdsql': 'sql_mysql', 'gbase': 'sql_mysql', 'oracle': 'sql_oracle', 'dm': 'sql_oracle'}
+    return step.get(key_map.get(db_type, '')) or step.get('sql') or ''
+
+
+def generate_incident_plans(incident, rca_diagnoses: list) -> list:
+    """产出 2-3 套方案(保守/标准/激进)。三路合并: RCA建议∪模板∪(案例由管道注入)。
+
+    每套: scenario/name/risk_level/playbook_ref/steps/rollback/verify/est_minutes/requires_approval。
+    kill 目标由事故阻塞链参数化。
+    """
+    db_type = incident.db_type
+    # 主根因(用于选模板/playbook)
+    top_rule = None
+    for d in (rca_diagnoses or []):
+        top_rule = d.get('rule_id') if isinstance(d, dict) else getattr(d, 'rule_id', None)
+        if top_rule:
+            break
+    signal = incident.events.first().signal if incident.events.exists() else ''
+    playbook_ref = (RULE_PLAYBOOK_REF.get(top_rule)
+                    or SIGNAL_PLAYBOOK_REF.get(signal))
+
+    # 阻塞链参数(kill 目标)
+    blocker_id = None
+    if incident.events.exists():
+        chains = (incident.events.first().detail or {}).get('chains', [])
+        if chains:
+            blocker_id = chains[0].get('blocker')
+
+    tmpl = PLAN_TEMPLATES.get(top_rule) or PLAN_TEMPLATES.get('_default', {})
+    scenarios = tmpl.get('scenarios', {})
+
+    # verify 判据按 signal
+    verify_map = {
+        'blocked_session': {'metric': 'blocked_sessions', 'recover_expr': '== 0', 'window_sec': 300},
+        'conn_high': {'metric': 'conn_usage_pct', 'recover_expr': '< 80', 'window_sec': 180},
+        'conn_storm': {'metric': 'conn_usage_pct', 'recover_expr': '< 80', 'window_sec': 180},
+        'space_high': {'metric': 'tablespace_used_pct', 'recover_expr': '< 90', 'window_sec': 120},
+        'repl_broken': {'metric': 'repl_running', 'recover_expr': '== 1', 'window_sec': 180},
+    }
+    verify = verify_map.get(signal, {'metric': '', 'recover_expr': '', 'window_sec': 300})
+
+    plans = []
+    for scen_key in ('conservative', 'standard', 'aggressive'):
+        scen = scenarios.get(scen_key)
+        if not scen:
+            continue
+        steps = []
+        for st in scen.get('steps', []):
+            sql = _resolve_step_sql(st, db_type)
+            if blocker_id and '{blocker_id}' in sql:
+                sql = sql.replace('{blocker_id}', str(blocker_id))
+            steps.append({
+                'seq': st.get('order', len(steps) + 1),
+                'action': st.get('action', 'execute'),
+                'desc': st.get('description', ''),
+                'sql': sql,
+                'expected': st.get('expected_outcome', 'ok'),
+            })
+        meta = _SCENARIO_META[scen_key]
+        plans.append({
+            'scenario': scen_key,
+            'name': f"[{meta['name_prefix']}] {scen.get('description', tmpl.get('title', '处置'))}",
+            'risk_level': scen.get('risk_level', meta['risk_level']),
+            'playbook_ref': playbook_ref,
+            'steps': steps,
+            'rollback': [s for s in (scen.get('rollback', []) or []) if s],
+            'verify': verify,
+            'est_minutes': _parse_minutes(scen.get('estimated_time', '5min')),
+            'requires_approval': scen.get('requires_approval', True),
+        })
+    return plans
+
+
+def _parse_minutes(s) -> int:
+    try:
+        return int(''.join(c for c in str(s) if c.isdigit()) or 5)
+    except Exception:
+        return 5

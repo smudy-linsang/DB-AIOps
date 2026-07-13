@@ -338,3 +338,76 @@ def assess_impact(alert, db_config) -> Dict[str, Any]:
     assessor = BusinessImpactAssessor(db_config, alert)
     result = assessor.assess()
     return result.to_dict()
+
+
+# ==========================================================================
+# Phase 6B: 事故影响量化 (ADDM 风格三维, phase6/20 §4)
+# ==========================================================================
+def assess_incident_impact(incident, context: dict = None) -> dict:
+    """受影响会话数(ASH) + 健康衰减 + 业务影响 → impact_level 加权分档。"""
+    context = context or {}
+    ash = context.get('ash_timeline', {}) or {}
+
+    # 1. 受影响会话数: 阻塞链峰值
+    chains = ash.get('blocking_chains', []) or []
+    affected = 0
+    peak = 0
+    for c in chains:
+        w = len(c.get('waiters', []) or [])
+        affected = max(affected, w)
+        peak = max(peak, w)
+    # 若无阻塞, 用事件 detail 的 waiters
+    if affected == 0 and incident.events.exists():
+        d = incident.events.first().detail or {}
+        affected = int(d.get('waiters', 0) or 0)
+        peak = affected
+
+    # 2. 健康衰减
+    health_before = float(incident.health_snapshot or 0)
+    health_now = health_before
+    try:
+        from monitor.health_engine import HealthEngine
+        he = HealthEngine(incident.config)
+        rep = he.calculate_health_score() if hasattr(he, 'calculate_health_score') else None
+        if isinstance(rep, dict):
+            health_now = float(rep.get('total_score', health_before))
+        elif rep is not None:
+            health_now = float(getattr(rep, 'total_score', health_before))
+    except Exception:
+        pass
+    health_drop = round(health_before - health_now, 1) if health_before else 0.0
+
+    # 3. 业务影响
+    biz = (context.get('business_context') or {}).get('systems', [])
+    max_imp = (context.get('business_context') or {}).get('max_importance', 'normal')
+
+    # impact_level 加权
+    imp_score_map = {'critical': 3, '核心': 3, 'important': 2, 'normal': 1}
+    biz_w = imp_score_map.get(max_imp, 1)
+    sess_w = min(affected / 5.0, 1.0)   # 归一化(5会话=满)
+    health_w = min(health_drop / 30.0, 1.0)  # 归一化(降30分=满)
+    weighted = biz_w * 0.5 + sess_w * 0.3 + health_w * 0.2
+    if weighted >= 2.3:
+        level = 'high'
+    elif weighted >= 1.5:
+        level = 'medium'
+    else:
+        level = 'low'
+
+    summary_parts = []
+    if biz:
+        summary_parts.append(f"影响{biz[0]['name']}等{len(biz)}个业务系统")
+    if affected:
+        summary_parts.append(f"{affected}个会话被阻塞")
+    if health_drop > 0:
+        summary_parts.append(f"健康度下降{health_drop}")
+    return {
+        'affected_sessions': affected,
+        'affected_sessions_peak': peak,
+        'health_before': health_before,
+        'health_now': round(health_now, 1),
+        'health_drop': health_drop,
+        'business_systems': biz,
+        'impact_level': level,
+        'summary': '，'.join(summary_parts) or '影响较小',
+    }
