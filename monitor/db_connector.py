@@ -87,31 +87,40 @@ class DbConnector:
         """
         try:
             import pymysql
-
-            db_type = (config.db_type.lower() if hasattr(config, 'db_type')
-                       else config.get('db_type', '').lower())
-            password = config.get_password() if hasattr(config, 'get_password') else config.get('password', '')
-            port = getattr(config, 'port', 3306) or 3306
-            database = getattr(config, 'service_name', None) or None
-            connect_timeout = 15 if db_type == 'tdsql' else 10
-
-            conn = pymysql.connect(
-                host=config.host,
-                port=int(port),
-                user=config.username,
-                password=password,
-                database=database,
-                charset='utf8mb4',
-                connect_timeout=connect_timeout,
-                read_timeout=30,
-                cursorclass=pymysql.cursors.DictCursor,
-            )
-            logger.info(f"{db_type or 'mysql'} 连接成功: {config.host}:{port}")
-            return conn
         except ImportError:
             raise DbConnectionError("需要安装 pymysql 库: pip install pymysql")
-        except Exception as e:
-            raise DbConnectionError(f"MySQL 连接失败: {str(e)}")
+
+        import time as _time
+        db_type = (config.db_type.lower() if hasattr(config, 'db_type')
+                   else config.get('db_type', '').lower())
+        password = config.get_password() if hasattr(config, 'get_password') else config.get('password', '')
+        port = getattr(config, 'port', 3306) or 3306
+        database = getattr(config, 'service_name', None) or None
+        connect_timeout = 15 if db_type == 'tdsql' else 10
+        # TDSQL 经互联网, SYN 偶发丢包, 重试; 本地库不重试
+        retries = 5 if db_type == 'tdsql' else 1
+
+        last_err = None
+        for attempt in range(retries):
+            try:
+                conn = pymysql.connect(
+                    host=config.host,
+                    port=int(port),
+                    user=config.username,
+                    password=password,
+                    database=database,
+                    charset='utf8mb4',
+                    connect_timeout=connect_timeout,
+                    read_timeout=30,
+                    cursorclass=pymysql.cursors.DictCursor,
+                )
+                logger.info(f"{db_type or 'mysql'} 连接成功: {config.host}:{port}")
+                return conn
+            except Exception as e:
+                last_err = e
+                if attempt < retries - 1:
+                    _time.sleep(2)
+        raise DbConnectionError(f"MySQL 连接失败: {str(last_err)}")
     
     @staticmethod
     def _connect_postgresql(config) -> any:

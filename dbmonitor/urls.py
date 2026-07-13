@@ -58,6 +58,8 @@ from monitor.api_views_phase5 import (
 from monitor.api_views_incident import (
     IncidentListView, IncidentDetailView, IncidentTimelineView,
     IncidentAckView, IncidentCloseView, IncidentRediagnoseView, EventListView,
+    IncidentExecuteView, PlaybookRunDetailView, PlaybookRunApproveView,
+    PlaybookRunRollbackView, PlaybookListView, SlaReportView, OnCallView,
 )
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
@@ -227,7 +229,16 @@ urlpatterns = [
     path('api/v1/incidents/<str:incident_id>/ack/', IncidentAckView.as_view()),
     path('api/v1/incidents/<str:incident_id>/close/', IncidentCloseView.as_view()),
     path('api/v1/incidents/<str:incident_id>/rediagnose/', IncidentRediagnoseView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/execute/', IncidentExecuteView.as_view()),
     path('api/v1/events/', EventListView.as_view()),
+
+    # ========== Phase 6C: Playbook 执行 ==========
+    path('api/v1/playbooks/', PlaybookListView.as_view()),
+    path('api/v1/playbook-runs/<str:run_id>/', PlaybookRunDetailView.as_view()),
+    path('api/v1/playbook-runs/<str:run_id>/approve/', PlaybookRunApproveView.as_view()),
+    path('api/v1/playbook-runs/<str:run_id>/rollback/', PlaybookRunRollbackView.as_view()),
+    path('api/v1/sla/report/', SlaReportView.as_view()),
+    path('api/v1/oncall/', OnCallView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

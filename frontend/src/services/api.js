@@ -501,6 +501,14 @@ export const incidentAPI = {
   close: (id, reason) => api.post(`/incidents/${id}/close/`, { reason }),
   rediagnose: (id) => api.post(`/incidents/${id}/rediagnose/`, {}),
   events: (params = {}) => api.get('/events/', { params }),
+  // Phase 6C: 执行/审批/回滚/剧本/SLA/值班
+  execute: (id, data) => api.post(`/incidents/${id}/execute/`, data),
+  runDetail: (runId) => api.get(`/playbook-runs/${runId}/`),
+  approveRun: (runId) => api.post(`/playbook-runs/${runId}/approve/`, {}),
+  rollbackRun: (runId) => api.post(`/playbook-runs/${runId}/rollback/`, {}),
+  playbooks: () => api.get('/playbooks/'),
+  slaReport: (params = {}) => api.get('/sla/report/', { params }),
+  oncall: () => api.get('/oncall/'),
 }
 
 export default api

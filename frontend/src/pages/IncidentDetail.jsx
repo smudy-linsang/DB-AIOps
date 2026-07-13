@@ -58,6 +58,13 @@ export default function IncidentDetail() {
     try { await incidentAPI.rediagnose(incidentId); message.success('已触发重新诊断'); setTimeout(load, 2000) }
     catch (e) { message.error(e.message) }
   }
+  const doExecute = async (scenario) => {
+    try {
+      const r = await incidentAPI.execute(incidentId, { scenario })
+      message.success(r.executing ? `执行中: ${r.reason}` : `已创建执行(待审批): ${r.reason}`)
+      setTimeout(load, 3000)
+    } catch (e) { message.error(e.message) }
+  }
 
   if (!inc) return <div style={{ padding: 24 }}><Card loading={loading}>加载中...</Card></div>
 
@@ -177,7 +184,9 @@ export default function IncidentDetail() {
               ? plans.map((p, i) => (
                 <Card key={i} type="inner" size="small" style={{ marginBottom: 8 }}
                   title={<Space><Tag color={p.risk_level === 'high' ? 'red' : p.risk_level === 'mid' ? 'orange' : 'green'}>{p.risk_level}</Tag>{p.name}</Space>}
-                  extra={<Button size="small" type="primary" disabled title="6C 执行引擎就位后可用">执行</Button>}>
+                  extra={<Button size="small" type="primary"
+                    disabled={!['plan_ready', 'executing'].includes(inc.status) || !p.playbook_ref}
+                    onClick={() => doExecute(p.scenario)}>执行</Button>}>
                   <div style={{ fontSize: 12, color: '#888' }}>
                     预计 {p.est_minutes}min · {p.requires_approval ? '需审批' : '免审批'} · Playbook: {p.playbook_ref || '-'}
                   </div>

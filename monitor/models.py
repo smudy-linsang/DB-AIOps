@@ -1371,3 +1371,86 @@ class Problem(models.Model):
 
     def __str__(self):
         return f"{self.problem_id} {self.title} (x{self.incident_count})"
+
+
+# ==========================================================================
+# Phase 6C: Playbook / PlaybookRun / OnCallSchedule (phase6/30 §1)
+# ==========================================================================
+class Playbook(models.Model):
+    """处置剧本 (对标 EM13c Corrective Actions)。"""
+    RISK_CHOICES = (('low', '低'), ('mid', '中'), ('high', '高'))
+    playbook_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="剧本ID")
+    name = models.CharField(max_length=200, verbose_name="名称")
+    category = models.CharField(max_length=20, choices=Incident.CATEGORY_CHOICES, db_index=True, verbose_name="类别")
+    signal = models.CharField(max_length=40, db_index=True, blank=True, default='', verbose_name="适用信号")
+    applicable_db_types = models.JSONField(default=list, verbose_name="适用数据库类型")
+    risk_level = models.CharField(max_length=10, choices=RISK_CHOICES, verbose_name="风险级")
+    precheck = models.JSONField(default=list, verbose_name="前置检查步骤")
+    steps = models.JSONField(default=list, verbose_name="执行步骤")
+    verify = models.JSONField(default=dict, verbose_name="验证判据")
+    rollback = models.JSONField(default=list, verbose_name="回滚步骤")
+    params_schema = models.JSONField(default=dict, verbose_name="参数定义")
+    est_minutes = models.IntegerField(default=5, verbose_name="预计耗时(分)")
+    enabled = models.BooleanField(default=True, verbose_name="启用")
+    auto_execute = models.BooleanField(default=False, verbose_name="允许自动执行")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "处置剧本"
+        verbose_name_plural = "处置剧本列表"
+
+    def __str__(self):
+        return f"{self.playbook_id} [{self.risk_level}] {self.name}"
+
+
+class PlaybookRun(models.Model):
+    """剧本执行实例。"""
+    STATUS_CHOICES = (
+        ('pending_approval', '待审批'), ('prechecking', '前置检查'), ('executing', '执行中'),
+        ('verifying', '验证中'), ('succeeded', '成功'), ('failed', '失败'),
+        ('rolled_back', '已回滚'), ('timeout', '验证超时'),
+    )
+    TRIGGER_CHOICES = (('auto', '自动'), ('one_click', '一键'), ('approved', '审批通过'))
+    run_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="执行ID")
+    playbook = models.ForeignKey(Playbook, on_delete=models.PROTECT, related_name='runs', verbose_name="剧本")
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='playbook_runs', verbose_name="事故")
+    params = models.JSONField(default=dict, verbose_name="实际参数")
+    status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True, default='pending_approval', verbose_name="状态")
+    trigger_mode = models.CharField(max_length=12, choices=TRIGGER_CHOICES, verbose_name="触发方式")
+    approved_by = models.CharField(max_length=50, default='', blank=True, verbose_name="审批人")
+    step_results = models.JSONField(default=list, verbose_name="步骤结果")
+    verify_result = models.JSONField(default=dict, verbose_name="验证结果")
+    error_message = models.TextField(blank=True, default='', verbose_name="错误信息")
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="开始时间")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="结束时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "剧本执行"
+        verbose_name_plural = "剧本执行列表"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"{self.run_id} {self.status}"
+
+
+class OnCallSchedule(models.Model):
+    """值班表 (支柱六)。"""
+    name = models.CharField(max_length=100, verbose_name="班次名")
+    user = models.CharField(max_length=50, verbose_name="值班人")
+    contact_dingtalk = models.CharField(max_length=120, default='', blank=True, verbose_name="钉钉")
+    contact_wecom = models.CharField(max_length=120, default='', blank=True, verbose_name="企微")
+    contact_phone = models.CharField(max_length=120, default='', blank=True, verbose_name="电话")
+    weekday_mask = models.IntegerField(default=127, verbose_name="值班星期位掩码", help_text="bit0=周一")
+    start_hour = models.IntegerField(default=0, verbose_name="值班开始小时")
+    end_hour = models.IntegerField(default=24, verbose_name="值班结束小时")
+    escalate_to = models.CharField(max_length=50, default='', blank=True, verbose_name="升级联系人")
+    enabled = models.BooleanField(default=True, verbose_name="启用")
+
+    class Meta:
+        verbose_name = "值班表"
+        verbose_name_plural = "值班表列表"
+
+    def __str__(self):
+        return f"{self.name}: {self.user}"
