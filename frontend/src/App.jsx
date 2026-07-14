@@ -9,6 +9,7 @@ import Dashboard from './pages/Dashboard';
 import DatabaseList from './pages/DatabaseList';
 import DatabaseDetail from './pages/DatabaseDetail';
 import DatabasePerformanceHub from './pages/DatabasePerformanceHub';
+import PerformanceCenter from './pages/PerformanceCenter';
 import AlertList from './pages/AlertList';
 import AlertConfig from './pages/AlertConfig';
 import CapacityPlanning from './pages/CapacityPlanning';
@@ -101,7 +102,8 @@ function LayoutRoutes() {
           <Route path="/" element={<PermissionRoute path="/"><Dashboard /></PermissionRoute>} />
           <Route path="/databases" element={<PermissionRoute path="/databases"><DatabaseList /></PermissionRoute>} />
           <Route path="/databases/:id" element={<PermissionRoute path="/databases/:id"><DatabaseDetail /></PermissionRoute>} />
-          <Route path="/databases/:id/performance" element={<PermissionRoute path="/databases/:id/performance"><DatabasePerformanceHub /></PermissionRoute>} />
+          <Route path="/databases/:id/performance" element={<PermissionRoute path="/databases/:id/performance"><PerformanceCenter /></PermissionRoute>} />
+          <Route path="/databases/:id/performance-legacy" element={<PermissionRoute path="/databases/:id/performance"><DatabasePerformanceHub /></PermissionRoute>} />
           <Route path="/alerts" element={<PermissionRoute path="/alerts"><AlertList /></PermissionRoute>} />
           <Route path="/alerts/:id" element={<PermissionRoute path="/alerts"><AlertDetail /></PermissionRoute>} />
           <Route path="/incidents" element={<PermissionRoute path="/alerts"><IncidentList /></PermissionRoute>} />

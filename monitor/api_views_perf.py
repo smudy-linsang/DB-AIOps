@@ -550,6 +550,17 @@ class RunningSqlView(PerfBaseView):
             "FROM information_schema.processlist p "
             "WHERE p.command='Query' AND p.id <> CONNECTION_ID() AND p.time >= 1")
         sessions = cur.fetchall()
+        # 原生 digest 优先 (与 ASH/sql_stat 指纹一致, 契约 phase7/10 §5)
+        native = {}
+        try:
+            cur.execute(
+                "SELECT t.PROCESSLIST_ID AS pid, sc.DIGEST AS digest "
+                "FROM performance_schema.events_statements_current sc "
+                "JOIN performance_schema.threads t ON t.THREAD_ID = sc.THREAD_ID "
+                "WHERE t.PROCESSLIST_ID IS NOT NULL AND sc.DIGEST IS NOT NULL")
+            native = {str(r['pid']): r['digest'] for r in cur.fetchall()}
+        except Exception:
+            pass
         prog = {}
         try:
             cur.execute(
@@ -568,7 +579,7 @@ class RunningSqlView(PerfBaseView):
             pct = round(done / total * 100, 1) if total else None
             out.append({
                 'session_id': pid,
-                'sql_id': unified_digest(db_type, None, r.get('info')),
+                'sql_id': unified_digest(db_type, native.get(pid), r.get('info')),
                 'sql_text': r.get('info'), 'user_name': r.get('user'),
                 'elapsed_sec': r.get('time') or 0,
                 'wait_class': classify(db_type, {'state': r.get('state'), 'command': 'Query'}),
@@ -580,22 +591,23 @@ class RunningSqlView(PerfBaseView):
 # 7B-05 SQL 详情 / 计划 / EXPLAIN
 # ============================================================
 def _raw_sql_text(config_id, digest):
+    """返回 (sql_text, db_name)。ASH 原文优先 (带字面量, 可 EXPLAIN)。"""
     cur = _ts_cursor()
     if not cur:
-        return None
+        return None, None
     try:
         cur.execute(
-            "SELECT sql_text FROM session_sample WHERE db_config_id=%s AND sql_digest=%s "
+            "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s AND sql_digest=%s "
             "AND sql_text IS NOT NULL AND sql_text <> '' ORDER BY time DESC LIMIT 1",
             (config_id, digest))
         row = cur.fetchone()
         if row:
-            return row[0]
+            return row[0], row[1]
         cur.execute(
-            "SELECT sql_text_sample FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
+            "SELECT sql_text_sample, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
             "AND sql_text_sample IS NOT NULL ORDER BY time DESC LIMIT 1", (config_id, digest))
         row = cur.fetchone()
-        return row[0] if row else None
+        return (row[0], row[1]) if row else (None, None)
     finally:
         cur.close()
 
@@ -641,7 +653,7 @@ class SqlDetailView(PerfBaseView):
             breakdown = {w: round(a / wc_total, 3) for w, a in wc_rows}
         finally:
             cur.close()
-        sql_text = _raw_sql_text(cfg.id, digest)
+        sql_text, _dbn = _raw_sql_text(cfg.id, digest)
         plans_qs = list(SqlPlan.objects.filter(config=cfg, sql_digest=digest)
                         .order_by('-captured_at')[:10])
         plans = [{'plan_hash': p.plan_hash, 'captured_at': p.captured_at,
@@ -699,11 +711,13 @@ class SqlExplainView(PerfBaseView):
             body = json.loads(request.body or '{}')
         except Exception:
             body = {}
-        sql_text = body.get('sql_text') or _raw_sql_text(cfg.id, digest)
+        raw_text, db_name = _raw_sql_text(cfg.id, digest)
+        sql_text = body.get('sql_text') or raw_text
         if cfg.db_type not in ('oracle', 'dm') and not sql_text:
             return self.err('40002', '无 SQL 原文样例, 无法 EXPLAIN')
         from monitor.plan_capture import capture
-        plan = capture(cfg, digest, sql_text=sql_text, source='manual')
+        plan = capture(cfg, digest, sql_text=sql_text, source='manual',
+                       db_name=body.get('db_name') or db_name)
         if not plan:
             return self.err('EXPLAIN_FAIL', '计划采集失败(语句不支持或目标库拒绝)', 502)
         return self.ok({'plan_hash': plan.plan_hash, 'plan_text': plan.plan_text,

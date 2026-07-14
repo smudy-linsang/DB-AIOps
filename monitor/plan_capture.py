@@ -111,8 +111,11 @@ def _capture_oracle(cur, sql_id):
     return {'nodes': nodes}, plan_text, float(cost) if cost is not None else None, plan_hash
 
 
-def capture(config, sql_digest, sql_text=None, source='auto', conn=None):
-    """采集一次计划并落库。返回 SqlPlan 或 None。conn 可复用外部连接。"""
+def capture(config, sql_digest, sql_text=None, source='auto', conn=None, db_name=None):
+    """采集一次计划并落库。返回 SqlPlan 或 None。conn 可复用外部连接。
+
+    db_name: MySQL 家族 EXPLAIN 需要默认库上下文 (ASH 原文表名通常不带 schema)。
+    """
     from monitor.db_connector import DbConnector
     from monitor.models import SqlPlan
 
@@ -129,6 +132,11 @@ def capture(config, sql_digest, sql_text=None, source='auto', conn=None):
             elif config.db_type in ('mysql', 'tdsql', 'gbase'):
                 if not _sql_allowed(sql_text or ''):
                     return None
+                if db_name:
+                    try:
+                        cur.execute(f"USE `{db_name}`")
+                    except Exception:
+                        pass
                 plan_json, plan_text, cost = _capture_mysql(cur, sql_text)
                 plan_hash = _structural_hash(plan_json)
             elif config.db_type in ('pgsql', 'postgresql'):

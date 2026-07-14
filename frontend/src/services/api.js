@@ -511,4 +511,19 @@ export const incidentAPI = {
   oncall: () => api.get('/oncall/'),
 }
 
+// Phase 7B: 性能中心 (契约 phase7/20)
+export const perfAPI = {
+  aas: (id, params = {}) => api.get(`/databases/${id}/perf/aas/`, { params }),
+  topActivity: (id, params = {}) => api.get(`/databases/${id}/perf/top-activity/`, { params }),
+  ashFacets: (id, params = {}) => api.get(`/databases/${id}/perf/ash-facets/`, { params }),
+  sessions: (id) => api.get(`/databases/${id}/perf/sessions/`),
+  blockingTree: (id, at = 'now') => api.get(`/databases/${id}/perf/blocking-tree/`, { params: { at } }),
+  runningSql: (id) => api.get(`/databases/${id}/perf/running-sql/`),
+  sqlDetail: (id, digest, params = {}) => api.get(`/databases/${id}/perf/sql/${digest}/`, { params }),
+  sqlPlan: (id, digest, planHash) => api.get(`/databases/${id}/perf/sql/${digest}/plan/${planHash}/`),
+  explain: (id, digest, sqlText) => api.post(`/databases/${id}/perf/sql/${digest}/explain/`, sqlText ? { sql_text: sqlText } : {}),
+  compare: (id, params) => api.get(`/databases/${id}/perf/compare/`, { params }),
+  killSession: (id, sessionId, reason) => api.post(`/databases/${id}/perf/sessions/${sessionId}/kill/`, { reason }),
+}
+
 export default api
