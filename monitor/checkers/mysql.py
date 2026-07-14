@@ -201,9 +201,19 @@ class MySQLChecker(BaseDBChecker):
             except Exception:
                 innodb_rows_deleted = 0
 
-            cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+            # Innodb_deadlocks 状态变量仅 MariaDB/Percona 有;
+            # 原生 MySQL 8 用 INNODB_METRICS lock_deadlocks (默认 enabled)
             try:
-                innodb_deadlocks = int(cursor.fetchone()['Value'])
+                cursor.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+                row = cursor.fetchone()
+                if row:
+                    innodb_deadlocks = int(row['Value'])
+                else:
+                    cursor.execute(
+                        "SELECT count AS cnt FROM information_schema.INNODB_METRICS "
+                        "WHERE name='lock_deadlocks'")
+                    row = cursor.fetchone()
+                    innodb_deadlocks = int(row['cnt']) if row else 0
             except Exception:
                 innodb_deadlocks = 0
 
@@ -456,45 +466,50 @@ class MySQLChecker(BaseDBChecker):
                 slave_compressed_protocol = 'N/A'
 
             # 主从复制状态详情
+            # 列名逐个 .get() 容错: Slave_Parallel_Workers/Last_HeartbeatTimestamp/
+            # Slave_Last_Batch_Timestamp 等列并非所有内核都有 (TXSQL 扩展列),
+            # 原生 MySQL 用 [] 取会 KeyError, 把真从库误判成单机
             cursor.execute("SHOW SLAVE STATUS")
             try:
                 slave_status = cursor.fetchone()
-                slave_io_running = slave_status['Slave_IO_Running'] if slave_status else 'NO'
-                slave_sql_running = slave_status['Slave_SQL_Running'] if slave_status else 'NO'
-                seconds_behind_master = int(slave_status['Seconds_Behind_Master']) if slave_status and slave_status['Seconds_Behind_Master'] is not None else -1
-                relay_log_space = int(slave_status['Relay_Log_Space']) if slave_status else 0
-                slave_last_error = slave_status['Last_Error'] if slave_status else 'N/A'
+                _sg = (lambda k, d: slave_status.get(k, d)) if slave_status else (lambda k, d: d)
+                slave_io_running = _sg('Slave_IO_Running', 'NO')
+                slave_sql_running = _sg('Slave_SQL_Running', 'NO')
+                _sbm = _sg('Seconds_Behind_Master', None)
+                seconds_behind_master = int(_sbm) if _sbm is not None else -1
+                relay_log_space = int(_sg('Relay_Log_Space', 0) or 0)
+                slave_last_error = _sg('Last_Error', 'N/A')
                 # 主从复制位置信息
-                master_log_file = slave_status['Master_Log_File'] if slave_status else 'N/A'
-                read_master_log_pos = slave_status['Read_Master_Log_Pos'] if slave_status else 0
+                master_log_file = _sg('Master_Log_File', 'N/A')
+                read_master_log_pos = _sg('Read_Master_Log_Pos', 0)
                 # 中继日志信息
-                relay_log_name = slave_status['Relay_Log_File'] if slave_status else 'N/A'
-                relay_log_pos = slave_status['Relay_Log_Pos'] if slave_status else 0
+                relay_log_name = _sg('Relay_Log_File', 'N/A')
+                relay_log_pos = _sg('Relay_Log_Pos', 0)
                 # 执行位置
-                exec_master_log_pos = slave_status['Exec_Master_Log_Pos'] if slave_status else 0
+                exec_master_log_pos = _sg('Exec_Master_Log_Pos', 0)
                 # SQL 线程最后错误
-                last_sql_errno = slave_status['Last_SQL_Errno'] if slave_status else 0
-                last_sql_error = slave_status['Last_SQL_Error'] if slave_status else 'N/A'
+                last_sql_errno = _sg('Last_SQL_Errno', 0)
+                last_sql_error = _sg('Last_SQL_Error', 'N/A')
                 # IO 线程最后错误
-                last_io_errno = slave_status['Last_IO_Errno'] if slave_status else 0
-                last_io_error = slave_status['Last_IO_Error'] if slave_status else 'N/A'
+                last_io_errno = _sg('Last_IO_Errno', 0)
+                last_io_error = _sg('Last_IO_Error', 'N/A')
                 # Master 信息
-                master_host = slave_status['Master_Host'] if slave_status else 'N/A'
-                master_port = slave_status['Master_Port'] if slave_status else 0
-                master_user = slave_status['Master_User'] if slave_status else 'N/A'
-                master_connect_retry = slave_status['Master_Connect_Retry'] if slave_status else 0
+                master_host = _sg('Master_Host', 'N/A')
+                master_port = _sg('Master_Port', 0)
+                master_user = _sg('Master_User', 'N/A')
+                master_connect_retry = _sg('Master_Connect_Retry', 0)
                 # GTID 相关
-                auto_position = slave_status['Auto_Position'] if slave_status else 0
-                master_uuid = slave_status['Master_UUID'] if slave_status else 'N/A'
-                master_server_id = slave_status['Master_Server_Id'] if slave_status else 0
+                auto_position = _sg('Auto_Position', 0)
+                master_uuid = _sg('Master_UUID', 'N/A')
+                master_server_id = _sg('Master_Server_Id', 0)
                 # 心跳信息
-                heartbeat_period = slave_status['Heartbeat_Period'] if slave_status else 0
-                last_heartbeat = slave_status['Last_HeartbeatTimestamp'] if slave_status else 'N/A'
+                heartbeat_period = _sg('Heartbeat_Period', 0)
+                last_heartbeat = _sg('Last_HeartbeatTimestamp', 'N/A')
                 # 复制通道
-                channel_name = slave_status['Channel_Name'] if slave_status else 'N/A'
+                channel_name = _sg('Channel_Name', 'N/A')
                 # 并行复制
-                slave_parallel_workers_active = slave_status['Slave_Parallel_Workers'] if slave_status else 0
-                slave_last_batch_timestamp = slave_status['Slave_Last_Batch_Timestamp'] if slave_status else 'N/A'
+                slave_parallel_workers_active = _sg('Slave_Parallel_Workers', 0)
+                slave_last_batch_timestamp = _sg('Slave_Last_Batch_Timestamp', 'N/A')
             except Exception:
                 slave_io_running = 'NO'
                 slave_sql_running = 'NO'

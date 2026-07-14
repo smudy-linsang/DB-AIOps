@@ -41,13 +41,13 @@ def detect_l3(config, metrics: dict, baseline_means: dict = None, blocked_info: 
                            T.CONN_SPIKE_RATIO * tc_mean, 'critical',
                            {'current': tc, 'baseline': tc_mean}))
 
-    # --- 慢查询突增 ---
-    slow = metrics.get('slow_queries') or metrics.get('slow_queries_total')
-    slow_mean = mean_of('slow_queries') or mean_of('slow_queries_total')
-    if isinstance(slow, (int, float)) and slow_mean and slow >= T.SLOW_SURGE_RATIO * slow_mean:
-        events.append(_evt(config, 'slow_surge', 'slow_queries', slow,
-                           T.SLOW_SURGE_RATIO * slow_mean, 'warning',
-                           {'current': slow, 'baseline': slow_mean}))
+    # --- 慢查询突增 (增量判定: slow_queries 是累计计数器, 绝对值对比基线会误报) ---
+    slow_delta = metrics.get('slow_queries_delta')
+    if isinstance(slow_delta, (int, float)) and slow_delta >= T.SLOW_SURGE_MIN_DELTA:
+        events.append(_evt(config, 'slow_surge', 'slow_queries_delta', slow_delta,
+                           T.SLOW_SURGE_MIN_DELTA, 'warning',
+                           {'delta': slow_delta,
+                            'total': metrics.get('slow_queries')}))
 
     # --- 死锁频发 (增量需外部提供; 这里用绝对增量近似: innodb_deadlocks 与上轮差在collector算) ---
     dl_delta = metrics.get('_deadlock_delta_5min')

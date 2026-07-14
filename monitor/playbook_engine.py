@@ -37,6 +37,8 @@ def _pick_sql(step: dict, db_type: str, params: dict) -> str:
 def _run_step(conn, db_type: str, step: dict, params: dict) -> dict:
     """执行单步, 返回 step_result dict。"""
     started = timezone.now()
+    if step.get('foreach_sql'):
+        return _run_foreach_step(conn, db_type, step, params, started)
     sql = _pick_sql(step, db_type, params)
     res = {'seq': step.get('seq'), 'action': step.get('action', 'execute'),
            'desc': step.get('desc', ''), 'sql': sql,
@@ -58,6 +60,59 @@ def _run_step(conn, db_type: str, step: dict, params: dict) -> dict:
                 pass
         finally:
             cur.close()
+    except Exception as e:
+        res['status'] = 'fail'
+        res['error'] = str(e)[:300]
+    res['finished_at'] = timezone.now().isoformat()
+    return res
+
+
+def _run_foreach_step(conn, db_type: str, step: dict, params: dict, started) -> dict:
+    """遍历型步骤: foreach_sql 查出目标列表(取每行第一列为 {item}), 逐个执行 sql。
+
+    典型用法: 批量 kill 空闲会话。单项失败不中断, 全部失败才算步骤失败。
+    """
+    by_db = step.get('foreach_sql_by_db') or {}
+    key = {'postgresql': 'pgsql'}.get(db_type, db_type)
+    fsql = _render(by_db.get(key) or step.get('foreach_sql') or '', params)
+    res = {'seq': step.get('seq'), 'action': step.get('action', 'execute'),
+           'desc': step.get('desc', ''), 'sql': fsql,
+           'started_at': started.isoformat(), 'status': 'ok',
+           'rows_affected': 0, 'output': '', 'error': ''}
+    try:
+        cur = conn.cursor()
+        try:
+            cur.execute(fsql)
+            rows = cur.fetchall()
+        finally:
+            cur.close()
+        items = []
+        for r in rows:
+            v = list(r.values())[0] if isinstance(r, dict) else r[0]
+            if v is not None:
+                items.append(v)
+        done, errs = 0, []
+        for item in items:
+            sql = _pick_sql(step, db_type, dict(params, item=item))
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute(sql)
+                finally:
+                    cur.close()
+                done += 1
+            except Exception as e:
+                errs.append(f"{item}: {str(e)[:80]}")
+        try:
+            conn.commit()
+        except Exception:
+            pass
+        res['rows_affected'] = done
+        res['output'] = f"目标 {len(items)} 个, 成功 {done} 个" + \
+                        (f"; 失败: {'; '.join(errs[:3])}" if errs else '')
+        if items and done == 0:
+            res['status'] = 'fail'
+            res['error'] = '; '.join(errs[:3])
     except Exception as e:
         res['status'] = 'fail'
         res['error'] = str(e)[:300]
@@ -106,7 +161,11 @@ def execute_run(run_id: str) -> dict:
     inc = run.incident
     config = inc.config
     db_type = config.db_type
-    params = run.params or {}
+    params = dict(run.params or {})
+    # params_schema 中的默认值兜底 (占位符缺失会让 SQL 渲染失败)
+    for k, spec in (pb.params_schema or {}).items():
+        if k not in params and isinstance(spec, dict) and 'default' in spec:
+            params[k] = spec['default']
 
     run.status = 'prechecking'
     run.started_at = timezone.now()
@@ -174,7 +233,7 @@ def execute_run(run_id: str) -> dict:
         except IncidentStateError:
             pass
 
-        _emit_verify(run, pb)
+        _emit_verify(run, pb, params)
         logger.info("[playbook] %s 执行完成, 进入验证", run_id)
         return {'status': 'verifying', 'steps': len(step_results)}
 
@@ -205,21 +264,26 @@ def _do_rollback(conn, db_type, pb, params, step_results):
         step_results.append(dict(r, phase='rollback'))
 
 
-def _emit_verify(run, pb):
-    """发 verify 消息给 cg_verify (6C-03)。"""
+def _emit_verify(run, pb, params=None):
+    """发 verify 消息给 cg_verify (6C-03)。metric/recover_expr 支持 {param} 占位符。"""
     from monitor.redis_bus import emit_verify
     v = pb.verify or {}
-    if not v.get('metric'):
+    params = params or {}
+    metric = _render(v.get('metric') or '', params)
+    if not metric:
         # 无验证判据(如纯建议类) → 直接标成功并解决事故
         _finish_no_verify(run)
         return
     emit_verify({
         'incident_id': run.incident.incident_id, 'playbook_run_id': run.run_id,
-        'verify_metric': v.get('metric'), 'recover_expr': v.get('recover_expr'),
+        'verify_metric': metric,
+        'recover_expr': _render(v.get('recover_expr') or '', params),
         'window_sec': v.get('window_sec', 300),
         'check_interval_sec': v.get('check_interval_sec', 15),
         'min_stable_checks': v.get('min_stable_checks', 3),
         'data_source': v.get('data_source', 'collector'),
+        # 对象级验证目标 (如表空间名)
+        'object': params.get('object') or params.get('tablespace') or '',
         'started_at': timezone.now().isoformat(),
     })
 

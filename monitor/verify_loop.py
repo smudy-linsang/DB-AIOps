@@ -15,27 +15,93 @@ from django.utils import timezone
 logger = logging.getLogger("monitor.verify_loop")
 
 
-def _get_metric_value(incident, metric: str, data_source: str):
-    """取验证指标当前值。data_source: ash|golden|collector。"""
+def _get_metric_value(incident, metric: str, data_source: str,
+                      obj: str = None, since=None):
+    """取验证指标当前值。data_source: ash|golden|collector|live_config。
+
+    obj: 对象级指标的对象名 (如表空间名)。
+    since: 只认该时刻之后的采集快照 (防止用处置前的旧数据误判恢复)。
+    """
     cid = incident.config_id
     try:
         if metric == 'blocked_sessions' or data_source == 'ash':
             from monitor.timeseries import get_timeseries_storage
             return get_timeseries_storage().latest_blocked_count(cid, within_sec=60)
+
+        if data_source == 'live_config':
+            # 实时读参数值 (metric 即参数名), 用于配置回滚验证
+            return _live_config_value(incident.config, metric)
+
         # golden / collector: 取最近 MonitorLog 快照的指标
         from monitor.models import MonitorLog
         import json
-        log = MonitorLog.objects.filter(config_id=cid).order_by('-create_time').first()
+        qs = MonitorLog.objects.filter(config_id=cid)
+        if since:
+            qs = qs.filter(create_time__gte=since)
+        log = qs.order_by('-create_time').first()
         if not log:
             return None
         d = json.loads(log.message) if isinstance(log.message, str) else log.message
-        if metric in ('repl_running', 'instance_up'):
-            # 派生: UP 即 1
+        if not isinstance(d, dict):
+            d = {}
+        if metric == 'instance_up':
             return 1 if log.status == 'UP' else 0
+        if metric == 'repl_running':
+            # 复制线程状态从快照字段判定 (实例 UP 不代表复制在跑)
+            io = str(d.get('slave_io_running', '')).lower()
+            sql = str(d.get('slave_sql_running', '')).lower()
+            if not io and not sql:
+                return None
+            return 1 if (io in ('yes', 'true', '1') and sql in ('yes', 'true', '1')) else 0
+        if metric == 'tablespace_used_pct':
+            # 对象级: 从 tablespaces 列表里找目标表空间
+            tbs = d.get('tablespaces') or []
+            pcts = {str(t.get('name', '')).upper(): t.get('used_pct')
+                    for t in tbs if isinstance(t, dict)}
+            if obj:
+                return pcts.get(str(obj).upper())
+            vals = [v for v in pcts.values() if isinstance(v, (int, float))]
+            return max(vals) if vals else None
         return d.get(metric)
     except Exception as e:
         logger.debug("[verify] 取指标 %s 失败: %s", metric, e)
         return None
+
+
+def _live_config_value(config, param: str):
+    """实时查询数据库参数当前值。"""
+    from monitor.db_connector import DbConnector
+    conn = None
+    try:
+        conn = DbConnector.get_connection(config)
+        cur = conn.cursor()
+        try:
+            if config.db_type in ('mysql', 'tdsql', 'gbase'):
+                cur.execute(f"SHOW VARIABLES LIKE '{param}'")
+                row = cur.fetchone()
+                if not row:
+                    return None
+                return row['Value'] if isinstance(row, dict) else row[1]
+            if config.db_type == 'pgsql':
+                cur.execute(f"SHOW {param}")
+                row = cur.fetchone()
+                return row[0] if row else None
+            if config.db_type in ('oracle', 'dm'):
+                cur.execute("SELECT value FROM v$parameter WHERE name = :1", [param.lower()])
+                row = cur.fetchone()
+                return row[0] if row else None
+            return None
+        finally:
+            cur.close()
+    except Exception as e:
+        logger.debug("[verify] 实时读参数 %s 失败: %s", param, e)
+        return None
+    finally:
+        if conn:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
 
 def _eval_recover(expr: str, value) -> bool:
@@ -84,6 +150,15 @@ def _monitor_impl(payload: dict):
     interval = int(payload.get('check_interval_sec', 15))
     need_stable = int(payload.get('min_stable_checks', 3))
     source = payload.get('data_source', 'collector')
+    obj = payload.get('object') or None
+    # 只认处置动作之后的采集快照, 防止旧数据误判恢复
+    since = None
+    if payload.get('started_at'):
+        from django.utils.dateparse import parse_datetime
+        try:
+            since = parse_datetime(str(payload['started_at']))
+        except Exception:
+            since = None
 
     inc = Incident.objects.filter(incident_id=incident_id).select_related('config').first()
     run = PlaybookRun.objects.filter(run_id=run_id).first()
@@ -94,7 +169,7 @@ def _monitor_impl(payload: dict):
     deadline = time.time() + window
     stable = 0
     while time.time() < deadline:
-        val = _get_metric_value(inc, metric, source)
+        val = _get_metric_value(inc, metric, source, obj=obj, since=since)
         if _eval_recover(expr, val):
             stable += 1
             logger.debug("[verify] %s 满足 %d/%d (值=%s)", incident_id, stable, need_stable, val)

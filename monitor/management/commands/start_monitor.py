@@ -12,6 +12,7 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import datetime
 import json
+import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from django.conf import settings
@@ -198,6 +199,10 @@ class Command(BaseCommand):
 
     def process_result(self, config, current_status, data):
         """统一结果处理和告警逻辑（v3.0：Phase 2 智能引擎集成）"""
+
+        # 计数器型指标先算增量, 使其进入 MonitorLog 供检测/验证使用
+        if current_status == 'UP':
+            self._compute_counter_deltas(config, data)
 
         def notify(title, body):
             self.send_alert(config, title, body)
@@ -402,23 +407,18 @@ class Command(BaseCommand):
         锁阻塞由哨兵 ASH 负责, 此处不重复。
         """
         from monitor.detectors import detect_l1, detect_l2, detect_l3
+        from monitor.detectors.config_drift import detect_config_drift
         from monitor.redis_bus import emit_event
-
-        # 死锁 5min 增量 (用进程内缓存上一轮值)
-        if not hasattr(self, '_deadlock_prev'):
-            self._deadlock_prev = {}
-        dl_now = data.get('innodb_deadlocks')
-        if isinstance(dl_now, (int, float)):
-            prev = self._deadlock_prev.get(config.id)
-            if prev is not None and dl_now >= prev:
-                data['_deadlock_delta_5min'] = dl_now - prev
-            self._deadlock_prev[config.id] = dl_now
 
         events = []
         try:
             events += detect_l1(config, data)
         except Exception as e:
             print(f"  [6A-L1] {e}")
+        try:
+            events += detect_config_drift(config, data)
+        except Exception as e:
+            print(f"  [6A-drift] {e}")
         try:
             events += detect_l2(config, data)
         except Exception as e:
@@ -438,23 +438,50 @@ class Command(BaseCommand):
             print(f"  [6A] {config.name}: 发出 {len(events)} 个事件 "
                   f"({','.join(sorted({x['signal'] for x in events}))})")
 
+    def _compute_counter_deltas(self, config, data):
+        """计数器型指标算本轮增量 (进程内缓存上一轮值)。
+
+        slow_queries/innodb_deadlocks 是累计计数器, 绝对值无法判"突增";
+        增量进 MonitorLog 后供 L3 检测与验证回路使用。计数器回绕(重启)跳过一轮。
+        """
+        if not hasattr(self, '_counter_prev'):
+            self._counter_prev = {}
+        prev = self._counter_prev.setdefault(config.id, {})
+        for key, out_key in (('slow_queries', 'slow_queries_delta'),
+                             ('innodb_deadlocks', '_deadlock_delta_5min')):
+            cur = data.get(key)
+            if isinstance(cur, (int, float)):
+                p = prev.get(key)
+                if p is not None and cur >= p:
+                    data[out_key] = cur - p
+                prev[key] = cur
+
     def _collect_baseline_means(self, config, data):
-        """为 L3 提供关键指标基线均值 (轻量: 复用 BaselineEngine 单指标)。失败返回空。"""
-        means = {}
+        """为 L3 提供关键指标基线均值 (当前时间槽, 每实例每小时缓存一次)。失败返回空。"""
         try:
             from monitor.baseline_engine import BaselineEngine
-            eng = BaselineEngine(config)
-            for k in ('threads_connected', 'threads_running', 'slow_queries', 'active_connections'):
-                if k in data:
+            if not hasattr(self, '_baseline_mean_cache'):
+                self._baseline_mean_cache = {}
+            cache = self._baseline_mean_cache.setdefault(config.id, {'at': 0, 'means': {}})
+            if time.time() - cache['at'] > 3600:
+                eng = BaselineEngine(config)
+                slot = eng._get_current_time_slot()
+                means = {}
+                for k in ('threads_connected', 'threads_running', 'active_connections'):
+                    if k not in data:
+                        continue
                     try:
-                        b = eng.calculate_baseline(k) if hasattr(eng, 'calculate_baseline') else None
-                        if b and getattr(b, 'mean', None):
-                            means[k] = b.mean
+                        by_slot = eng.calculate_baseline_for_metric(k) or {}
+                        model = by_slot.get(slot)
+                        if model and getattr(model, 'mean', 0):
+                            means[k] = model.mean
                     except Exception:
                         pass
+                cache['means'] = means
+                cache['at'] = time.time()
+            return dict(cache['means'])
         except Exception:
-            pass
-        return means
+            return {}
 
     def _run_phase2_analysis(self, config, data, am):
         """

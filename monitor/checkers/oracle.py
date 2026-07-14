@@ -77,6 +77,8 @@ class OracleChecker(BaseDBChecker):
         # =============================================
         # 3. 空间使用 (space)
         # =============================================
+        # used_pct 按"可扩展上限"计算: autoextend 文件取 maxbytes,
+        # 否则 SYSTEM 等自动扩展表空间会以当前文件大小算出 98%+ 的假高水位
         tablespaces = []
         try:
             cursor.execute("""
@@ -84,10 +86,14 @@ class OracleChecker(BaseDBChecker):
                     a.tablespace_name,
                     ROUND(a.total_mb, 2) as total_mb,
                     ROUND(a.total_mb - NVL(b.free_mb, 0), 2) as used_mb,
-                    ROUND(NVL(b.free_mb, 0), 2) as free_mb,
-                    ROUND((a.total_mb - NVL(b.free_mb, 0)) / NULLIF(a.total_mb, 0) * 100, 2) as used_pct
+                    ROUND(NVL(b.free_mb, 0) + (a.max_mb - a.total_mb), 2) as free_mb,
+                    ROUND((a.total_mb - NVL(b.free_mb, 0)) / NULLIF(a.max_mb, 0) * 100, 2) as used_pct,
+                    ROUND(a.max_mb, 2) as max_mb
                 FROM
-                    (SELECT tablespace_name, SUM(bytes)/1024/1024 as total_mb
+                    (SELECT tablespace_name, SUM(bytes)/1024/1024 as total_mb,
+                            SUM(CASE WHEN autoextensible = 'YES'
+                                     THEN GREATEST(maxbytes, bytes)
+                                     ELSE bytes END)/1024/1024 as max_mb
                      FROM dba_data_files GROUP BY tablespace_name) a
                 LEFT JOIN
                     (SELECT tablespace_name, SUM(bytes)/1024/1024 as free_mb
@@ -101,7 +107,8 @@ class OracleChecker(BaseDBChecker):
                     "total_mb": float(row[1]),
                     "used_mb": float(row[2]),
                     "free_mb": float(row[3]),
-                    "used_pct": float(row[4])
+                    "used_pct": float(row[4]),
+                    "max_mb": float(row[5])
                 })
         except Exception:
             pass
