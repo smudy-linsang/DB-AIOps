@@ -180,6 +180,70 @@ class TimeseriesStorage:
             except Exception as e:
                 logger.info(f"[Timeseries] session_sample 保留策略可能已存在: {e}")
 
+            # ---- Phase 7A-01: session_sample v2 增列 (phase7/10 §1) ----
+            cur.execute("""
+                ALTER TABLE session_sample
+                  ADD COLUMN IF NOT EXISTS wait_class     VARCHAR(20),
+                  ADD COLUMN IF NOT EXISTS sql_id         VARCHAR(32),
+                  ADD COLUMN IF NOT EXISTS program        VARCHAR(120),
+                  ADD COLUMN IF NOT EXISTS module         VARCHAR(120),
+                  ADD COLUMN IF NOT EXISTS lock_type      VARCHAR(40),
+                  ADD COLUMN IF NOT EXISTS lock_mode      VARCHAR(40),
+                  ADD COLUMN IF NOT EXISTS lock_object    VARCHAR(200),
+                  ADD COLUMN IF NOT EXISTS sample_gap_sec SMALLINT;
+            """)
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ss_config_class_time ON session_sample (db_config_id, wait_class, time DESC);")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_ss_config_digest_time ON session_sample (db_config_id, sql_digest, time DESC);")
+
+            # ---- Phase 7A-06: session_ash_1m 连续聚合 (phase7/10 §7) ----
+            try:
+                cur.execute("""
+                    CREATE MATERIALIZED VIEW IF NOT EXISTS session_ash_1m
+                    WITH (timescaledb.continuous) AS
+                    SELECT time_bucket('1 minute', time) AS bucket, db_config_id,
+                           COALESCE(wait_class,'other') AS wait_class,
+                           COALESCE(sql_digest,'')      AS sql_digest,
+                           COALESCE(user_name,'')       AS user_name,
+                           COALESCE(db_name,'')         AS db_name,
+                           SUM(COALESCE(sample_gap_sec,15))::int AS active_sec,
+                           COUNT(*) AS samples,
+                           SUM(CASE WHEN is_blocked THEN COALESCE(sample_gap_sec,15) ELSE 0 END)::int AS blocked_sec
+                    FROM session_sample GROUP BY 1,2,3,4,5,6
+                    WITH NO DATA;
+                """)
+                cur.execute("""
+                    SELECT add_continuous_aggregate_policy('session_ash_1m',
+                      start_offset => INTERVAL '2 hours', end_offset => INTERVAL '1 minute',
+                      schedule_interval => INTERVAL '1 minute', if_not_exists => TRUE);
+                """)
+                cur.execute("SELECT add_retention_policy('session_ash_1m', INTERVAL '90 days', if_not_exists => TRUE);")
+            except Exception as e:
+                logger.info(f"[Timeseries] session_ash_1m 可能已存在: {e}")
+
+            # ---- Phase 7A-07: sql_stat 超表 (phase7/10 §8) ----
+            cur.execute("""
+                CREATE TABLE IF NOT EXISTS sql_stat (
+                    time             TIMESTAMPTZ  NOT NULL,
+                    db_config_id     INTEGER      NOT NULL,
+                    sql_digest       VARCHAR(32)  NOT NULL,
+                    db_name          VARCHAR(100),
+                    exec_delta       BIGINT DEFAULT 0,
+                    elapsed_ms_delta BIGINT DEFAULT 0,
+                    rows_delta       BIGINT DEFAULT 0,
+                    reads_delta      BIGINT DEFAULT 0,
+                    sql_text_sample  TEXT
+                );
+            """)
+            try:
+                cur.execute("SELECT create_hypertable('sql_stat', 'time', chunk_time_interval => INTERVAL '1 day', if_not_exists => TRUE);")
+            except Exception as e:
+                logger.info(f"[Timeseries] sql_stat 超表可能已存在: {e}")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sqlstat_config_digest_time ON sql_stat (db_config_id, sql_digest, time DESC);")
+            try:
+                cur.execute("SELECT add_retention_policy('sql_stat', INTERVAL '90 days', if_not_exists => TRUE);")
+            except Exception as e:
+                logger.info(f"[Timeseries] sql_stat 保留策略可能已存在: {e}")
+
             logger.info("[Timeseries] 超表初始化完成")
             return True
 
@@ -246,10 +310,12 @@ class TimeseriesStorage:
             logger.error(f"[Timeseries] 快照写入失败: {e}")
             return False
 
-    # ---- Phase 6A: ASH-lite 会话样本 (phase6/10 §1.4/§2.2) ----
+    # ---- Phase 6A: ASH-lite 会话样本 (phase6/10 §1.4/§2.2; v2 增列 phase7/10 §1) ----
     _SESSION_COLS = ('session_id', 'user_name', 'client_host', 'db_name', 'command',
                      'state', 'wait_event', 'active_secs', 'is_blocked', 'blocker_id',
-                     'sql_digest', 'sql_text')
+                     'sql_digest', 'sql_text',
+                     'wait_class', 'sql_id', 'program', 'module',
+                     'lock_type', 'lock_mode', 'lock_object', 'sample_gap_sec')
 
     def write_session_samples(self, db_config_id: int, db_type: str, rows: list) -> bool:
         """批量写会话样本。rows: list[dict]，键为 _SESSION_COLS 子集; time=now 统一。"""
@@ -269,6 +335,29 @@ class TimeseriesStorage:
             return True
         except Exception as e:
             logger.error(f"[Timeseries] 会话样本写入失败: {e}")
+            return False
+
+    # ---- Phase 7A-07: SQL digest 级增量统计 ----
+    _SQLSTAT_COLS = ('sql_digest', 'db_name', 'exec_delta', 'elapsed_ms_delta',
+                     'rows_delta', 'reads_delta', 'sql_text_sample')
+
+    def write_sql_stats(self, db_config_id: int, rows: list) -> bool:
+        """批量写 sql_stat 增量行。rows: list[dict], 键为 _SQLSTAT_COLS 子集。"""
+        conn = self._get_connection()
+        if not conn or not rows:
+            return False
+        try:
+            cur = conn.cursor()
+            now = timezone.now()
+            cols = "time, db_config_id, " + ", ".join(self._SQLSTAT_COLS)
+            ph = "%s, %s, " + ", ".join(["%s"] * len(self._SQLSTAT_COLS))
+            sql = f"INSERT INTO sql_stat ({cols}) VALUES ({ph})"
+            for r in rows:
+                cur.execute(sql, [now, db_config_id] + [r.get(c) for c in self._SQLSTAT_COLS])
+            cur.close()
+            return True
+        except Exception as e:
+            logger.error(f"[Timeseries] sql_stat 写入失败: {e}")
             return False
 
     def query_session_samples(self, db_config_id: int, since, until=None) -> list:

@@ -19,22 +19,53 @@ from django.utils import timezone
 logger = logging.getLogger("monitor.sentinel")
 
 
-# ---- 逐库 ASH 采样 SQL (phase6/10 §2.2) ----
-def _ash_mysql_family(cur):
-    """MySQL/TDSQL/GBase: processlist + 阻塞关系。cur 为 DictCursor。"""
+# ---- 逐库 ASH 采样 SQL v2 (phase7/10 §4): 等待类/指纹/锁明细/长事务 ----
+from monitor.detectors.wait_class import classify  # noqa: E402
+from monitor.sqlfingerprint import unified_digest  # noqa: E402
+
+
+def _ash_mysql_family(cur, db_type='mysql'):
+    """MySQL/TDSQL/GBase: processlist(∪空闲中事务) + digest + 阻塞边 + 锁明细。"""
+    # ① 会话主体 (排除采样连接自身, 避免 AAS 恒 +1); 空闲中事务归 application
     cur.execute(
-        "SELECT id AS session_id, user AS user_name, host AS client_host, db AS db_name, "
-        "command, state, time AS active_secs, LEFT(COALESCE(info,''),200) AS sql_text "
-        "FROM information_schema.processlist WHERE command NOT IN ('Sleep','Daemon')")
-    rows = {str(r['session_id']): {
-        'session_id': str(r['session_id']), 'user_name': r.get('user_name'),
-        'client_host': r.get('client_host'), 'db_name': r.get('db_name'),
-        'command': r.get('command'), 'state': r.get('state'),
-        'wait_event': r.get('state'), 'active_secs': r.get('active_secs') or 0,
-        'is_blocked': False, 'blocker_id': None, 'sql_digest': None,
-        'sql_text': r.get('sql_text'),
-    } for r in cur.fetchall()}
-    # 阻塞关系
+        "SELECT p.id AS session_id, p.user AS user_name, p.host AS client_host, "
+        "p.db AS db_name, p.command, p.state, p.time AS active_secs, "
+        "LEFT(COALESCE(p.info,''),500) AS sql_text "
+        "FROM information_schema.processlist p "
+        "WHERE p.command NOT IN ('Sleep','Daemon') AND p.id <> CONNECTION_ID() "
+        "UNION ALL "
+        "SELECT p.id, p.user, p.host, p.db, p.command, 'idle_in_trx', "
+        "TIMESTAMPDIFF(SECOND, t.trx_started, NOW()), LEFT(COALESCE(t.trx_query,''),500) "
+        "FROM information_schema.innodb_trx t "
+        "JOIN information_schema.processlist p ON p.id = t.trx_mysql_thread_id "
+        "WHERE p.command = 'Sleep'")
+    rows = {}
+    for r in cur.fetchall():
+        sid = str(r['session_id'])
+        rows[sid] = {
+            'session_id': sid, 'user_name': r.get('user_name'),
+            'client_host': r.get('client_host'), 'db_name': r.get('db_name'),
+            'command': r.get('command'), 'state': r.get('state'),
+            'wait_event': r.get('state'), 'active_secs': r.get('active_secs') or 0,
+            'is_blocked': False, 'blocker_id': None,
+            'sql_text': r.get('sql_text') or None,
+            'sql_id': None, 'program': None, 'module': None,
+            'lock_type': None, 'lock_mode': None, 'lock_object': None,
+        }
+    if not rows:
+        return []
+    # ② 原生 digest
+    native = {}
+    try:
+        cur.execute(
+            "SELECT t.PROCESSLIST_ID AS session_id, sc.DIGEST AS digest "
+            "FROM performance_schema.events_statements_current sc "
+            "JOIN performance_schema.threads t ON t.THREAD_ID = sc.THREAD_ID "
+            "WHERE t.PROCESSLIST_ID IS NOT NULL AND sc.DIGEST IS NOT NULL")
+        native = {str(r['session_id']): r['digest'] for r in cur.fetchall()}
+    except Exception:
+        pass
+    # ③ 阻塞边
     try:
         cur.execute(
             "SELECT r.trx_mysql_thread_id AS waiter, b.trx_mysql_thread_id AS blocker, "
@@ -50,63 +81,162 @@ def _ash_mysql_family(cur):
                 rows[waiter]['active_secs'] = max(rows[waiter]['active_secs'], r.get('wait_secs') or 0)
     except Exception:
         pass
-    return list(rows.values())
+    # ④ 锁明细 (被阻塞行)
+    try:
+        cur.execute(
+            "SELECT r.trx_mysql_thread_id AS waiter, l.LOCK_TYPE AS lock_type, "
+            "l.LOCK_MODE AS lock_mode, CONCAT(l.OBJECT_SCHEMA,'.',l.OBJECT_NAME) AS lock_object "
+            "FROM performance_schema.data_lock_waits w "
+            "JOIN performance_schema.data_locks l ON l.ENGINE_LOCK_ID = w.REQUESTING_ENGINE_LOCK_ID "
+            "JOIN information_schema.innodb_trx r ON w.REQUESTING_ENGINE_TRANSACTION_ID = r.trx_id")
+        for r in cur.fetchall():
+            waiter = str(r['waiter'])
+            if waiter in rows:
+                rows[waiter].update({'lock_type': r.get('lock_type'),
+                                     'lock_mode': r.get('lock_mode'),
+                                     'lock_object': r.get('lock_object')})
+    except Exception:
+        pass
+    out = []
+    for r in rows.values():
+        nd = native.get(r['session_id'])
+        r['sql_id'] = (nd or '')[:32] or None
+        r['sql_digest'] = unified_digest(db_type, nd, r['sql_text'])
+        r['wait_class'] = classify(db_type, r)
+        out.append(r)
+    return out
 
 
 def _ash_pg(cur):
     cur.execute(
-        "SELECT pid AS session_id, usename AS user_name, client_addr AS client_host, "
-        "datname AS db_name, state AS command, wait_event AS wait_event, "
-        "EXTRACT(EPOCH FROM (now()-query_start))::int AS active_secs, LEFT(query,200) AS sql_text, "
-        "(pg_blocking_pids(pid))[1] AS blocker_id, "
-        "cardinality(pg_blocking_pids(pid))>0 AS is_blocked "
-        "FROM pg_stat_activity WHERE state IS NOT NULL AND state<>'idle'")
+        "SELECT a.pid AS session_id, a.usename AS user_name, a.client_addr AS client_host, "
+        "a.datname AS db_name, a.state AS command, a.state, "
+        "a.wait_event_type, a.wait_event, a.application_name AS module, "
+        "a.backend_type AS program, a.query_id, "
+        "EXTRACT(EPOCH FROM (now()-a.query_start))::int AS active_secs, "
+        "LEFT(a.query,500) AS sql_text, "
+        "(pg_blocking_pids(a.pid))[1] AS blocker_id, "
+        "cardinality(pg_blocking_pids(a.pid))>0 AS is_blocked "
+        "FROM pg_stat_activity a "
+        "WHERE a.state IS NOT NULL AND a.state<>'idle' "
+        "AND a.backend_type='client backend' AND a.pid <> pg_backend_pid()")
     cols = [d[0] for d in cur.description]
+    raw_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    # 锁明细 (被阻塞行)
+    lock_detail = {}
+    if any(r.get('is_blocked') for r in raw_rows):
+        try:
+            cur.execute(
+                "SELECT l.pid, l.locktype AS lock_type, l.mode AS lock_mode, "
+                "COALESCE(n.nspname||'.'||c.relname, l.locktype) AS lock_object "
+                "FROM pg_locks l "
+                "LEFT JOIN pg_class c ON c.oid = l.relation "
+                "LEFT JOIN pg_namespace n ON n.oid = c.relnamespace "
+                "WHERE NOT l.granted")
+            for pid, lt, lm, lo in cur.fetchall():
+                lock_detail[str(pid)] = (lt, lm, lo)
+        except Exception:
+            pass
     out = []
-    for row in cur.fetchall():
-        r = dict(zip(cols, row))
-        out.append({
-            'session_id': str(r.get('session_id')), 'user_name': r.get('user_name'),
+    for r in raw_rows:
+        sid = str(r.get('session_id'))
+        qid = r.get('query_id')
+        lt, lm, lo = lock_detail.get(sid, (None, None, None))
+        row = {
+            'session_id': sid, 'user_name': r.get('user_name'),
             'client_host': str(r.get('client_host') or ''), 'db_name': r.get('db_name'),
-            'command': r.get('command'), 'state': r.get('command'),
+            'command': r.get('command'), 'state': r.get('state'),
+            'wait_event_type': r.get('wait_event_type'),
             'wait_event': r.get('wait_event'), 'active_secs': r.get('active_secs') or 0,
             'is_blocked': bool(r.get('is_blocked')),
             'blocker_id': str(r.get('blocker_id')) if r.get('blocker_id') else None,
-            'sql_digest': None, 'sql_text': r.get('sql_text'),
-        })
+            'sql_text': r.get('sql_text'),
+            'sql_id': str(qid) if qid not in (None, 0) else None,
+            'program': r.get('program'), 'module': r.get('module'),
+            'lock_type': lt, 'lock_mode': lm, 'lock_object': lo,
+        }
+        row['sql_digest'] = unified_digest('pgsql', row['sql_id'], row['sql_text'])
+        row['wait_class'] = classify('pgsql', row)
+        out.append(row)
     return out
 
 
-def _ash_oracle(cur):
+# Oracle row_wait 对象名缓存 (config 无关, object_id 全库唯一即可按连接域缓存)
+_ORA_OBJ_CACHE = {}
+_ORA_OBJ_CACHE_MAX = 512
+
+
+def _ash_oracle(cur, db_type='oracle'):
     cur.execute(
-        "SELECT s.sid||','||s.serial# AS session_id, s.username AS user_name, "
-        "s.machine AS client_host, s.status AS command, s.event AS wait_event, "
+        "SELECT s.sid||','||s.serial# AS session_id, s.sql_id, s.username AS user_name, "
+        "s.machine AS client_host, s.program, s.module, s.status AS command, "
+        "s.state, s.event AS wait_event, s.wait_class AS raw_wait_class, "
         "s.last_call_et AS active_secs, s.blocking_session AS blocker_id, "
-        "CASE WHEN s.blocking_session IS NOT NULL THEN 1 ELSE 0 END AS is_blocked "
-        "FROM v$session s WHERE s.type='USER' AND s.status='ACTIVE'")
+        "CASE WHEN s.blocking_session IS NOT NULL THEN 1 ELSE 0 END AS is_blocked, "
+        "s.row_wait_obj# AS wait_objno, s.sid AS sid_only "
+        "FROM v$session s WHERE s.type='USER' "
+        "AND (s.status='ACTIVE' OR s.blocking_session IS NOT NULL) "
+        "AND NOT (s.wait_class='Idle' AND s.blocking_session IS NULL) "
+        "AND s.sid <> SYS_CONTEXT('USERENV','SID')")
     cols = [d[0].lower() for d in cur.description]
+    raw_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+    # 对象名批量补查 + 缓存
+    need_obj = sorted({int(r['wait_objno']) for r in raw_rows
+                       if r.get('wait_objno') and int(r['wait_objno']) > 0
+                       and int(r['wait_objno']) not in _ORA_OBJ_CACHE})
+    if need_obj:
+        try:
+            in_list = ','.join(str(o) for o in need_obj[:50])
+            cur.execute(f"SELECT object_id, owner||'.'||object_name FROM dba_objects "
+                        f"WHERE object_id IN ({in_list})")
+            for oid, name in cur.fetchall():
+                if len(_ORA_OBJ_CACHE) >= _ORA_OBJ_CACHE_MAX:
+                    _ORA_OBJ_CACHE.clear()
+                _ORA_OBJ_CACHE[int(oid)] = name
+        except Exception:
+            pass
+    # 锁类型/模式补查 (被阻塞行)
+    lock_detail = {}
+    blocked_sids = [int(r['sid_only']) for r in raw_rows if r.get('is_blocked')]
+    if blocked_sids:
+        try:
+            in_list = ','.join(str(s) for s in blocked_sids[:50])
+            cur.execute(f"SELECT sid, type, request FROM v$lock "
+                        f"WHERE sid IN ({in_list}) AND request > 0")
+            for sid, ltype, req in cur.fetchall():
+                lock_detail[int(sid)] = (ltype, f"req:{req}")
+        except Exception:
+            pass
     out = []
-    for row in cur.fetchall():
-        r = dict(zip(cols, row))
-        out.append({
+    for r in raw_rows:
+        objno = int(r['wait_objno']) if r.get('wait_objno') else 0
+        lt, lm = lock_detail.get(int(r['sid_only']), (None, None))
+        row = {
             'session_id': str(r.get('session_id')), 'user_name': r.get('user_name'),
             'client_host': r.get('client_host'), 'db_name': None,
-            'command': r.get('command'), 'state': r.get('command'),
+            'command': r.get('command'), 'state': r.get('state'),
+            'raw_wait_class': r.get('raw_wait_class'),
             'wait_event': r.get('wait_event'), 'active_secs': r.get('active_secs') or 0,
             'is_blocked': bool(r.get('is_blocked')),
             'blocker_id': str(r.get('blocker_id')) if r.get('blocker_id') else None,
-            'sql_digest': None, 'sql_text': None,
-        })
+            'sql_text': None,
+            'sql_id': r.get('sql_id'), 'program': r.get('program'), 'module': r.get('module'),
+            'lock_type': lt, 'lock_mode': lm,
+            'lock_object': _ORA_OBJ_CACHE.get(objno) if objno > 0 else None,
+        }
+        row['sql_digest'] = unified_digest(db_type, row['sql_id'], None)
+        row['wait_class'] = classify(db_type, row)
+        out.append(row)
     return out
 
 
 def sample_sessions(cur, db_type: str) -> list:
     if db_type in ('mysql', 'tdsql', 'gbase'):
-        return _ash_mysql_family(cur)
+        return _ash_mysql_family(cur, db_type)
     if db_type in ('pgsql', 'postgresql'):
         return _ash_pg(cur)
     if db_type in ('oracle', 'dm'):
-        return _ash_oracle(cur)
+        return _ash_oracle(cur, db_type)
     return []
 
 
@@ -158,6 +288,11 @@ class InstanceSentinel:
         self.down_reported = False
         self.last_ash_at = 0.0
         self._stop = threading.Event()
+        # 7A-05: ASH 背压降频 (采样过慢时间隔翻倍, 恢复后逐步回落)
+        self.ash_interval_cfg = int(getattr(settings, 'ASH_INTERVAL_SEC', 5))
+        self.ash_interval_eff = self.ash_interval_cfg
+        self._ash_slow_streak = 0
+        self._ash_fast_streak = 0
 
     def stop(self):
         self._stop.set()
@@ -249,12 +384,40 @@ class InstanceSentinel:
             logger.debug("哨兵探活失败 %s (fail=%d): %s",
                          self.config.name, self.consecutive_fail, e)
 
+    def _ash_backpressure(self, elapsed: float):
+        """7A-05: 连续 2 次采样 >800ms → 间隔×2(上限30s); 恢复 10 次后逐步减半回落。"""
+        if elapsed > 0.8:
+            self._ash_slow_streak += 1
+            self._ash_fast_streak = 0
+            if self._ash_slow_streak >= 2 and self.ash_interval_eff < 30:
+                self.ash_interval_eff = min(self.ash_interval_eff * 2, 30)
+                self._ash_slow_streak = 0
+                logger.warning("[ASH背压] %s 采样慢(%.2fs), 间隔升至 %ds",
+                               self.config.name, elapsed, self.ash_interval_eff)
+                try:
+                    from monitor.timeseries import get_timeseries_storage
+                    get_timeseries_storage().write_metric(
+                        self.config.id, 'ash_backoff', self.ash_interval_eff)
+                except Exception:
+                    pass
+        else:
+            self._ash_slow_streak = 0
+            if self.ash_interval_eff > self.ash_interval_cfg:
+                self._ash_fast_streak += 1
+                if self._ash_fast_streak >= 10:
+                    self.ash_interval_eff = max(self.ash_interval_cfg,
+                                                self.ash_interval_eff // 2)
+                    self._ash_fast_streak = 0
+                    logger.info("[ASH背压] %s 恢复, 间隔回落至 %ds",
+                                self.config.name, self.ash_interval_eff)
+
     def ash_sample(self):
         """一次 ASH 采样 → 写 session_sample + 即时阻塞检测。"""
         if not getattr(settings, 'ASH_ENABLED', True):
             return
         if self.conn is None:
             return  # 连接不可用时跳过(探活会重建)
+        t0 = time.time()
         try:
             cur = self._cursor()
             rows = sample_sessions(cur, self.db_type)
@@ -262,8 +425,12 @@ class InstanceSentinel:
         except Exception as e:
             logger.debug("ASH 采样失败 %s: %s", self.config.name, e)
             return
+        self._ash_backpressure(time.time() - t0)
         if not rows:
             return
+        gap = int(self.ash_interval_eff)
+        for r in rows:
+            r['sample_gap_sec'] = gap
         # 写超表
         try:
             from monitor.timeseries import get_timeseries_storage
@@ -280,20 +447,23 @@ class InstanceSentinel:
             logger.debug("阻塞检测失败: %s", e)
 
     def run_loop(self):
-        interval = int(getattr(settings, 'SENTINEL_INTERVAL_SEC', 8))
-        ash_interval = int(getattr(settings, 'ASH_INTERVAL_SEC', 15))
+        probe_interval = int(getattr(settings, 'SENTINEL_INTERVAL_SEC', 8))
+        last_probe_at = 0.0
         while not self._stop.is_set():
             close_old_connections()
-            self.probe()
             now = time.time()
-            if now - self.last_ash_at >= ash_interval:
+            if now - last_probe_at >= probe_interval:
+                self.probe()
+                last_probe_at = now
+            if time.time() - self.last_ash_at >= self.ash_interval_eff:
                 self.ash_sample()
-                self.last_ash_at = now
+                self.last_ash_at = time.time()
             try:
                 dj_conn.close()
             except Exception:
                 pass
-            self._stop.wait(interval)
+            # 步进 = 两周期的较小者 (ASH 5s < 探活 8s 时以 ASH 为准)
+            self._stop.wait(max(1, min(probe_interval, self.ash_interval_eff)))
         try:
             if self.conn:
                 self.conn.close()

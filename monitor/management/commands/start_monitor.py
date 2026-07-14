@@ -314,6 +314,13 @@ class Command(BaseCommand):
             except Exception as e6:
                 print(f"  [6A] 事件检测失败: {e6}")
 
+        # --- 3.3 Phase 7A: sql_stat 快照增量 + cpu_cores + 计划采集 ---
+        if current_status == 'UP':
+            try:
+                self._collect_perf_extras(config)
+            except Exception as e7:
+                print(f"  [7A] 性能采集失败: {e7}")
+
         # --- 3.5 SSE 实时推送指标更新 ---
         try:
             from monitor.sse_views import publish_metric_event
@@ -455,6 +462,156 @@ class Command(BaseCommand):
                 if p is not None and cur >= p:
                     data[out_key] = cur - p
                 prev[key] = cur
+
+    # ================= Phase 7A-07/08: SQL 统计快照 + 计划采集 =================
+    _SQLSTAT_TOPN = 100
+
+    def _collect_perf_extras(self, config):
+        """sql_stat 快照增量 + cpu_cores 回填 + 每小时 Top SQL 计划采集 (phase7/10 §8/§9)。"""
+        if config.db_type not in ('mysql', 'tdsql', 'gbase', 'pgsql', 'oracle', 'dm'):
+            return
+        from monitor.db_connector import DbConnector
+        conn = None
+        try:
+            conn = DbConnector.get_connection(config)
+            cur = conn.cursor()
+            try:
+                rows = self._snapshot_sqlstat(config, cur)
+                if rows:
+                    from monitor.timeseries import get_timeseries_storage
+                    get_timeseries_storage().write_sql_stats(config.id, rows)
+                self._refresh_cpu_cores(config, cur)
+            finally:
+                cur.close()
+            self._hourly_plan_capture(config, conn)
+        finally:
+            if conn:
+                try:
+                    conn.close()
+                except Exception:
+                    pass
+
+    def _snapshot_sqlstat(self, config, cur):
+        """逐库拉 TopN digest 累计值 → 与上轮差分 → 返回增量行。回绕(重启)跳过该轮。"""
+        from monitor.sqlfingerprint import unified_digest
+        snap = {}  # digest -> (exec, elapsed_ms, rows, reads, text, db_name)
+        if config.db_type in ('mysql', 'tdsql', 'gbase'):
+            cur.execute(
+                "SELECT DIGEST, SCHEMA_NAME, COUNT_STAR, SUM_TIMER_WAIT, "
+                "SUM_ROWS_SENT, SUM_ROWS_EXAMINED, LEFT(DIGEST_TEXT,500) AS txt "
+                "FROM performance_schema.events_statements_summary_by_digest "
+                "WHERE DIGEST IS NOT NULL "
+                f"ORDER BY SUM_TIMER_WAIT DESC LIMIT {self._SQLSTAT_TOPN}")
+            for r in cur.fetchall():
+                d = unified_digest(config.db_type, r['DIGEST'], None)
+                snap[d] = (int(r['COUNT_STAR']), int(r['SUM_TIMER_WAIT']) // 10**9,
+                           int(r['SUM_ROWS_SENT']), int(r['SUM_ROWS_EXAMINED']),
+                           r['txt'], r['SCHEMA_NAME'])
+        elif config.db_type in ('pgsql', 'postgresql'):
+            try:
+                cur.execute(
+                    "SELECT queryid, calls, total_exec_time, rows, "
+                    "shared_blks_hit + shared_blks_read AS reads, LEFT(query,500) "
+                    "FROM pg_stat_statements WHERE queryid IS NOT NULL "
+                    f"ORDER BY total_exec_time DESC LIMIT {self._SQLSTAT_TOPN}")
+                for qid, calls, ms, rows_, reads, txt in cur.fetchall():
+                    d = unified_digest(config.db_type, str(qid), txt)
+                    snap[d] = (int(calls), int(ms), int(rows_), int(reads), txt, None)
+            except Exception:
+                # pg_stat_statements 未安装 (7D-04 环境准备) → 静默跳过
+                try:
+                    cur.connection.rollback()
+                except Exception:
+                    pass
+                return []
+        elif config.db_type in ('oracle', 'dm'):
+            cur.execute(
+                "SELECT sql_id, executions, elapsed_time, rows_processed, buffer_gets, "
+                "sql_text FROM v$sqlstats "
+                f"ORDER BY elapsed_time DESC FETCH FIRST {self._SQLSTAT_TOPN} ROWS ONLY")
+            for sql_id, execs, us, rows_, reads, txt in cur.fetchall():
+                snap[str(sql_id)] = (int(execs or 0), int(us or 0) // 1000,
+                                     int(rows_ or 0), int(reads or 0),
+                                     (txt or '')[:500], None)
+        if not snap:
+            return []
+
+        if not hasattr(self, '_sqlstat_prev'):
+            self._sqlstat_prev = {}
+        prev = self._sqlstat_prev.setdefault(config.id, {})
+        out = []
+        for digest, (execs, ms, rows_, reads, txt, dbn) in snap.items():
+            p = prev.get(digest)
+            if p is not None:
+                d_exec = execs - p[0]
+                if d_exec > 0 and ms >= p[1]:  # 回绕保护
+                    out.append({'sql_digest': digest, 'db_name': dbn,
+                                'exec_delta': d_exec, 'elapsed_ms_delta': ms - p[1],
+                                'rows_delta': max(rows_ - p[2], 0),
+                                'reads_delta': max(reads - p[3], 0),
+                                'sql_text_sample': txt})
+            prev[digest] = (execs, ms, rows_, reads)
+        if len(prev) > 2000:  # 缓存兜底
+            self._sqlstat_prev[config.id] = dict(list(prev.items())[-1000:])
+        return out
+
+    def _refresh_cpu_cores(self, config, cur):
+        """采集 CPU 核数并回填 config.cpu_cores (采集值优先, 手工值兜底)。"""
+        cores = None
+        try:
+            if config.db_type in ('oracle', 'dm'):
+                cur.execute("SELECT value FROM v$parameter WHERE name='cpu_count'")
+                row = cur.fetchone()
+                cores = int(row[0]) if row and row[0] else None
+        except Exception:
+            return
+        if cores and cores != config.cpu_cores:
+            config.cpu_cores = cores
+            config.save(update_fields=['cpu_cores'])
+
+    def _hourly_plan_capture(self, config, conn):
+        """每小时对该实例近 1h 耗时 Top10 digest 自动采集执行计划 (phase7/10 §9)。"""
+        import time as _t
+        if not hasattr(self, '_last_plan_at'):
+            self._last_plan_at = {}
+        if _t.time() - self._last_plan_at.get(config.id, 0) < 3600:
+            return
+        self._last_plan_at[config.id] = _t.time()
+        try:
+            from monitor.timeseries import get_timeseries_storage
+            ts_conn = get_timeseries_storage()._get_connection()
+            tcur = ts_conn.cursor()
+            tcur.execute(
+                "SELECT sql_digest FROM sql_stat WHERE db_config_id=%s "
+                "AND time > NOW() - interval '1 hour' "
+                "GROUP BY sql_digest ORDER BY SUM(elapsed_ms_delta) DESC LIMIT 10",
+                (config.id,))
+            digests = [r[0] for r in tcur.fetchall()]
+            tcur.close()
+        except Exception:
+            return
+        if not digests:
+            return
+        from monitor.plan_capture import capture
+        for d in digests:
+            capture(config, d, sql_text=self._raw_sql_for_digest(config.id, d),
+                    source='auto', conn=conn)
+
+    def _raw_sql_for_digest(self, config_id, digest):
+        """从 ASH 样本取该 digest 最近一条原文 (带字面量, EXPLAIN 用)。"""
+        try:
+            from monitor.timeseries import get_timeseries_storage
+            conn = get_timeseries_storage()._get_connection()
+            cur = conn.cursor()
+            cur.execute(
+                "SELECT sql_text FROM session_sample WHERE db_config_id=%s "
+                "AND sql_digest=%s AND sql_text IS NOT NULL AND sql_text <> '' "
+                "ORDER BY time DESC LIMIT 1", (config_id, digest))
+            row = cur.fetchone()
+            cur.close()
+            return row[0] if row else None
+        except Exception:
+            return None
 
     def _collect_baseline_means(self, config, data):
         """为 L3 提供关键指标基线均值 (当前时间槽, 每实例每小时缓存一次)。失败返回空。"""

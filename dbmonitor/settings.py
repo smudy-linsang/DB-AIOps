@@ -351,7 +351,7 @@ SENTINEL_INTERVAL_SEC = int(os.environ.get('SENTINEL_INTERVAL_SEC', 8))
 SENTINEL_FAIL_THRESHOLD = int(os.environ.get('SENTINEL_FAIL_THRESHOLD', 3))
 SENTINEL_CONNECT_TIMEOUT_SEC = int(os.environ.get('SENTINEL_CONNECT_TIMEOUT_SEC', 5))
 ASH_ENABLED = _envbool('ASH_ENABLED', True)
-ASH_INTERVAL_SEC = int(os.environ.get('ASH_INTERVAL_SEC', 15))
+ASH_INTERVAL_SEC = int(os.environ.get('ASH_INTERVAL_SEC', 5))  # Phase7: 15→5s, 带背压降频
 ASH_RETENTION_DAYS = int(os.environ.get('ASH_RETENTION_DAYS', 7))
 # 支柱二/三: 管道 + 事故
 PIPELINE_ENABLED = _envbool('PIPELINE_ENABLED', True)

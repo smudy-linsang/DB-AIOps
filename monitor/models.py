@@ -40,6 +40,9 @@ class DatabaseConfig(models.Model):
     # 相当于: is_active BOOLEAN DEFAULT TRUE
     is_active = models.BooleanField(default=True, verbose_name="是否开启监控")
 
+    # Phase 7A-08: CPU 核数 (性能主页 Max CPU 线; 采集可得时以采集值优先, 此为手工兜底)
+    cpu_cores = models.IntegerField(null=True, blank=True, verbose_name="CPU核数")
+
     # 密码轮换相关字段（Phase 4 新增）
     password_changed_at = models.DateTimeField(null=True, blank=True, verbose_name="密码最后修改时间")
     password_expiry_days = models.IntegerField(default=90, verbose_name="密码过期天数", help_text="默认90天，0表示不过期")
@@ -1454,3 +1457,30 @@ class OnCallSchedule(models.Model):
 
     def __str__(self):
         return f"{self.name}: {self.user}"
+
+
+# ==========================================================================
+# Phase 7A-08: SQL 执行计划库 (phase7/10 §9)
+# ==========================================================================
+class SqlPlan(models.Model):
+    """SQL 执行计划快照。同一 digest 的最新计划 is_current=True (唯一)。"""
+    SOURCE_CHOICES = (('auto', '自动'), ('manual', '手动'), ('incident', '事故'))
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+        related_name='sql_plans', verbose_name="数据库")
+    sql_digest = models.CharField(max_length=32, db_index=True, verbose_name="SQL指纹")
+    plan_hash = models.CharField(max_length=32, verbose_name="计划指纹")
+    plan_json = models.JSONField(default=dict, verbose_name="计划(JSON)")
+    plan_text = models.TextField(blank=True, default='', verbose_name="计划(文本)")
+    cost_total = models.FloatField(null=True, blank=True, verbose_name="总代价")
+    source = models.CharField(max_length=12, choices=SOURCE_CHOICES, default='auto', verbose_name="来源")
+    captured_at = models.DateTimeField(auto_now_add=True, verbose_name="采集时间")
+    is_current = models.BooleanField(default=True, verbose_name="当前计划")
+
+    class Meta:
+        verbose_name = "SQL执行计划"
+        verbose_name_plural = "SQL执行计划列表"
+        ordering = ['-captured_at']
+        indexes = [models.Index(fields=['config', 'sql_digest', 'is_current'])]
+
+    def __str__(self):
+        return f"{self.sql_digest[:12]}@{self.plan_hash[:8]}"
