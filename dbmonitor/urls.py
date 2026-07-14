@@ -61,6 +61,11 @@ from monitor.api_views_incident import (
     IncidentExecuteView, PlaybookRunDetailView, PlaybookRunApproveView,
     PlaybookRunRollbackView, PlaybookListView, SlaReportView, OnCallView,
 )
+from monitor.api_views_perf import (
+    AasView, TopActivityView, AshFacetsView, SessionsLiveView, BlockingTreeView,
+    RunningSqlView, SqlDetailView, SqlPlanDetailView, SqlExplainView,
+    CompareView, SessionKillView,
+)
 from monitor.sse_views import SSEView
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
@@ -223,6 +228,19 @@ urlpatterns = [
     path('api/v1/phase5/stats/', Phase5StatsView.as_view()),
 
     # ========== Phase 6A: 事故/事件 ==========
+    # Phase 7B: 性能中心 (phase7/20)
+    path('api/v1/databases/<int:config_id>/perf/aas/', AasView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/top-activity/', TopActivityView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/ash-facets/', AshFacetsView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sessions/', SessionsLiveView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/blocking-tree/', BlockingTreeView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/running-sql/', RunningSqlView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/', SqlDetailView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/plan/<str:plan_hash>/', SqlPlanDetailView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/explain/', SqlExplainView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/compare/', CompareView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sessions/<str:session_id>/kill/', SessionKillView.as_view()),
+
     path('api/v1/incidents/', IncidentListView.as_view()),
     path('api/v1/incidents/<str:incident_id>/', IncidentDetailView.as_view()),
     path('api/v1/incidents/<str:incident_id>/timeline/', IncidentTimelineView.as_view()),

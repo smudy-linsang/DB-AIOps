@@ -219,6 +219,11 @@ class TimeseriesStorage:
                 cur.execute("SELECT add_retention_policy('session_ash_1m', INTERVAL '90 days', if_not_exists => TRUE);")
             except Exception as e:
                 logger.info(f"[Timeseries] session_ash_1m 可能已存在: {e}")
+            try:
+                # 实时聚合: 查询时合并未物化的最新数据 (性能中心近实时曲线依赖)
+                cur.execute("ALTER MATERIALIZED VIEW session_ash_1m SET (timescaledb.materialized_only = false);")
+            except Exception as e:
+                logger.info(f"[Timeseries] session_ash_1m 实时模式设置: {e}")
 
             # ---- Phase 7A-07: sql_stat 超表 (phase7/10 §8) ----
             cur.execute("""
