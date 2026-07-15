@@ -153,6 +153,9 @@ def capture(config, sql_digest, sql_text=None, source='auto', conn=None, db_name
                                       is_current=True).first()
         if prev and prev.plan_hash == plan_hash:
             return prev  # 计划未变, 不重复落库
+        # 原文随计划留存 (详情页/优化建议在 ASH 无样本时兜底读取)
+        if sql_text and isinstance(plan_json, dict):
+            plan_json = dict(plan_json, _sql_text=sql_text[:1000])
         plan = SqlPlan.objects.create(
             config=config, sql_digest=sql_digest, plan_hash=plan_hash,
             plan_json=plan_json, plan_text=plan_text or '',

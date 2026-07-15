@@ -437,11 +437,14 @@ class InstanceSentinel:
             get_timeseries_storage().write_session_samples(self.config.id, self.db_type, rows)
         except Exception as e:
             logger.debug("session_sample 写入失败: %s", e)
-        # 即时阻塞检测
+        # 即时阻塞检测 + 长事务检测 (7D-02)
         try:
-            from monitor.detectors.l1_hard import detect_blocked_from_ash
+            from monitor.detectors.l1_hard import (detect_blocked_from_ash,
+                                                   detect_long_trx_from_ash)
             from monitor.redis_bus import emit_event
             for e in detect_blocked_from_ash(self.config, rows, timezone.now()):
+                emit_event(e)
+            for e in detect_long_trx_from_ash(self.config, rows):
                 emit_event(e)
         except Exception as e:
             logger.debug("阻塞检测失败: %s", e)

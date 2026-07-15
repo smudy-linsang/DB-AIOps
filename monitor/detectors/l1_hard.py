@@ -102,6 +102,32 @@ def detect_l1(config, metrics: dict) -> list:
     return events
 
 
+def detect_long_trx_from_ash(config, sample_rows: list) -> list:
+    """长事务检测 (phase7/40 §2)。ASH 样本中空闲中事务/超长事务 → long_transaction。
+
+    MySQL: state='idle_in_trx' 行 (active_secs=事务时长); PG: 'idle in transaction'。
+    每会话独立分键; >=LONG_TRX_CRIT_SEC 升 critical。
+    """
+    from django.conf import settings
+    warn = int(getattr(settings, 'LONG_TRX_WARN_SEC', 300))
+    crit = int(getattr(settings, 'LONG_TRX_CRIT_SEC', 1800))
+    events = []
+    for s in sample_rows or []:
+        state = str(s.get('state') or '').lower()
+        if state not in ('idle_in_trx', 'idle in transaction'):
+            continue
+        dur = s.get('active_secs') or 0
+        if dur < warn:
+            continue
+        sid = s.get('session_id')
+        events.append(_evt(
+            config, 'long_transaction', 'trx_duration_sec', dur, warn,
+            'critical' if dur >= crit else 'warning', sub=sid,
+            detail={'session_id': sid, 'user_name': s.get('user_name'),
+                    'duration_sec': dur, 'sql_text': s.get('sql_text')}))
+    return events
+
+
 def detect_blocked_from_ash(config, sample_rows: list, sample_time=None) -> list:
     """从 ASH 样本检测阻塞会话 (phase6/10 §5.2)。sentinel/ash 每次采样调用。"""
     if not sample_rows:

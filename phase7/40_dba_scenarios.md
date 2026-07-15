@@ -45,10 +45,10 @@ detail={'sql_digest':..., 'old_plan_hash':..., 'new_plan_hash':...,
 
 ## 3. 7D-03/7D-05 六场景终验（照此走查, 逐格打勾）
 
-统一注入前提: 五 Tab 已上线, 守护(P1/P2/P3)在跑。注入脚本放
-`phase6/drills/e2e_perf_scenario{1..6}.py`（复用 `_drill_common`, 只注入不断言,
-断言由人工走查表完成; 7D-03 交付脚本, 7D-05 交付贴图走查报告
-`phase7/ACCEPTANCE.md`）。
+统一注入前提: 五 Tab 已上线, 守护(P1/P2/P3)在跑。注入脚本为
+`phase6/drills/e2e_perf_scenarios.py <场景号1-6>`（单文件多场景, 复用
+`_drill_common`, 只注入不断言, 断言由走查表完成; 7D-03 交付脚本,
+7D-05 交付走查报告 `phase7/ACCEPTANCE.md`）。
 
 ### 场景 1: CPU 突高（业务风暴）
 | 步 | 动作/页面 | 预期证据 |

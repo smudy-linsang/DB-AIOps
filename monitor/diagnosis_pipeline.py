@@ -49,6 +49,16 @@ _SIGNAL_ROOT_CAUSE = {
     'config_drift': {
         'rule_id': 'R078', 'name': '参数偏离最佳实践', 'domain': 'config',
         'summary': '关键参数发生漂移', 'suggestions': ['回滚漂移参数', '核对变更单']},
+    'plan_change': {
+        'rule_id': 'R012', 'name': '执行计划劣化', 'domain': 'sql',
+        'summary': '执行计划发生突变且耗时显著上升',
+        'suggestions': ['对比新旧执行计划差异行', '检查统计信息是否过期',
+                        '评估绑定/固化旧计划', '检查索引是否失效或被删除']},
+    'long_transaction': {
+        'rule_id': 'R013', 'name': '长事务未提交', 'domain': 'sql',
+        'summary': '事务长时间未提交, 可能持锁并拖累回滚段/undo',
+        'suggestions': ['确认应用是否泄漏事务/忘记 commit', '评估终止该会话',
+                        '检查 undo/回滚段压力']},
     'instance_down': {
         'rule_id': 'R000', 'name': '实例不可连接', 'domain': 'availability',
         'summary': '实例连接失败', 'suggestions': ['检查实例进程/网络', '评估重启或切换']},

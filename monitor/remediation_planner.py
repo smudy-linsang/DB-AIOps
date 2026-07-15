@@ -493,6 +493,8 @@ SIGNAL_PLAYBOOK_REF = {
     'repl_broken': 'PB-REPL-RESTART',
     'config_drift': 'PB-CONFIG-ROLLBACK',
     'deadlock_surge': 'PB-DEADLOCK-ADVISE',
+    # Phase 7D: 长事务复用 kill 剧本 (params.blocker_id=长事务会话); 计划突变仅建议
+    'long_transaction': 'PB-LOCK-KILL-BLOCKER',
 }
 
 _SCENARIO_META = {

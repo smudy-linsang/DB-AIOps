@@ -77,6 +77,8 @@ def _incident_title(category: str, signal: str, evt: dict) -> str:
         'slow_surge': '慢查询突增',
         'deadlock_surge': '死锁频发',
         'config_drift': '配置漂移',
+        'plan_change': f"执行计划突变: {str(d.get('sql_digest', ''))[:16]}",
+        'long_transaction': f"长事务: 会话 {d.get('session_id', '')} 持续 {d.get('duration_sec', '')}s",
         'baseline_deviation': f"指标偏离基线: {evt.get('metric_key')}",
     }
     return titles.get(signal, f"{category} 异常: {signal}")

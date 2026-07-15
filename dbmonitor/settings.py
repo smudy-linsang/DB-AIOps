@@ -353,6 +353,9 @@ SENTINEL_CONNECT_TIMEOUT_SEC = int(os.environ.get('SENTINEL_CONNECT_TIMEOUT_SEC'
 ASH_ENABLED = _envbool('ASH_ENABLED', True)
 ASH_INTERVAL_SEC = int(os.environ.get('ASH_INTERVAL_SEC', 5))  # Phase7: 15→5s, 带背压降频
 ASH_RETENTION_DAYS = int(os.environ.get('ASH_RETENTION_DAYS', 7))
+# Phase 7D-02: 长事务阈值
+LONG_TRX_WARN_SEC = int(os.environ.get('LONG_TRX_WARN_SEC', 300))
+LONG_TRX_CRIT_SEC = int(os.environ.get('LONG_TRX_CRIT_SEC', 1800))
 # 支柱二/三: 管道 + 事故
 PIPELINE_ENABLED = _envbool('PIPELINE_ENABLED', True)
 PIPELINE_STREAM_MAXLEN = int(os.environ.get('PIPELINE_STREAM_MAXLEN', 100000))

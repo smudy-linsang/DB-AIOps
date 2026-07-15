@@ -607,7 +607,14 @@ def _raw_sql_text(config_id, digest):
             "SELECT sql_text_sample, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
             "AND sql_text_sample IS NOT NULL ORDER BY time DESC LIMIT 1", (config_id, digest))
         row = cur.fetchone()
-        return (row[0], row[1]) if row else (None, None)
+        if row:
+            return row[0], row[1]
+        # 兜底: 从已采集计划取随存的原文
+        plan = SqlPlan.objects.filter(config_id=config_id, sql_digest=digest)\
+            .order_by('-captured_at').first()
+        if plan and isinstance(plan.plan_json, dict) and plan.plan_json.get('_sql_text'):
+            return plan.plan_json['_sql_text'], None
+        return None, None
     finally:
         cur.close()
 
@@ -662,16 +669,23 @@ class SqlDetailView(PerfBaseView):
         plan_changed_at = plans_qs[0].captured_at if len(plans_qs) >= 2 else None
         # 优化建议 (规则式, 失败静默)
         suggestions = []
-        try:
-            from monitor.index_advisor import IndexAdvisor
-            import dataclasses
-            adv = IndexAdvisor()
-            for c in (adv.analyze_queries([{'sql_text': sql_text or '',
-                                            'db_type': cfg.db_type}]) or [])[:5]:
-                suggestions.append(dataclasses.asdict(c) if dataclasses.is_dataclass(c)
-                                   else str(c))
-        except Exception:
-            pass
+        if sql_text:
+            try:
+                from monitor.index_advisor import IndexAdvisor
+                from monitor.sqlfingerprint import normalize
+                import dataclasses
+                adv = IndexAdvisor()
+                # advisor 契约: query 需参数化 (col = ?); 归一化把字面量转 ?,
+                # 并去掉反引号/方括号 (digest 文本形如 `uid` = ?, \w+ 匹配不到)
+                norm = normalize(sql_text).replace('`', '').replace('[', '').replace(']', '')
+                for c in (adv.analyze_queries([{'query': norm, 'exec_count': 10}]) or [])[:5]:
+                    d = dataclasses.asdict(c) if dataclasses.is_dataclass(c) else None
+                    if d:
+                        d['columns'] = [col.get('name') if isinstance(col, dict) else col
+                                        for col in d.get('columns', [])]
+                    suggestions.append(d or str(c))
+            except Exception as e:
+                logger.debug("[perf] index advisor 失败: %s", e)
         related = []
         for inc in Incident.objects.filter(
                 config=cfg, category__in=('performance', 'lock'),

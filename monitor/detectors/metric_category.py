@@ -13,6 +13,8 @@ SIGNAL_CATEGORY = {
     'repl_lag': 'replication',
     'slow_surge': 'performance',
     'config_drift': 'config',
+    'plan_change': 'performance',       # Phase 7D-01: 执行计划突变
+    'long_transaction': 'performance',  # Phase 7D-02: 长事务
     'baseline_deviation': 'performance',  # 默认, 可被 metric 细化
 }
 
