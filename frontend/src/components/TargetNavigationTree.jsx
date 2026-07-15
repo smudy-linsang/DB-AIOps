@@ -11,7 +11,7 @@
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Tree, Spin, Badge, Tag, Typography, Input, Space,
-  Tooltip, Dropdown, message,
+  Tooltip, Menu, message,
 } from 'antd';
 import {
   DatabaseOutlined, WarningOutlined, SearchOutlined,
@@ -52,6 +52,8 @@ const TargetNavigationTree = () => {
 
   const [searchText, setSearchText] = useState('');
   const [expandedKeys, setExpandedKeys] = useState([]);
+  // 右键菜单: 受控单例, 避免内嵌 titleRender 时被树重渲染卸载
+  const [ctxMenu, setCtxMenu] = useState(null); // { db, x, y }
 
   // 加载数据库列表
   const loadDatabases = useCallback(async () => {
@@ -177,51 +179,32 @@ const TargetNavigationTree = () => {
     }
   };
 
-  // 右键菜单
-  const handleRightClick = ({ event, node }) => {
-    event.preventDefault();
-    // 右键菜单通过 dropdown 在节点上实现
+  // 右键菜单项 (静态; 点击分发放到受控 Dropdown 的 menu.onClick)
+  const CONTEXT_MENU_ITEMS = [
+    { key: 'detail', label: '查看详情', icon: <DashboardOutlined /> },
+    { key: 'performance', label: '性能中心', icon: <ThunderboltOutlined /> },
+    { key: 'alert-config', label: '告警配置', icon: <AlertOutlined /> },
+    { type: 'divider' },
+    { key: 'sql-monitoring', label: 'SQL 监控', icon: <SearchOutlined /> },
+  ];
+
+  const handleContextMenuClick = ({ key }) => {
+    const db = ctxMenu?.db;
+    setCtxMenu(null);
+    if (!db) return;
+    setSelectedDb(db.id, db.name, db.db_type);
+    if (key === 'detail') navigate(`/databases/${db.id}`);
+    else if (key === 'performance') navigate(`/databases/${db.id}/performance`);
+    else if (key === 'alert-config') navigate('/alert-config');
+    else if (key === 'sql-monitoring') navigate(`/sql-monitoring?db=${db.id}`);
   };
 
-  const getContextMenuItems = (db) => [
-    {
-      key: 'detail',
-      label: '查看详情',
-      icon: <DashboardOutlined />,
-      onClick: () => {
-        setSelectedDb(db.id, db.name, db.db_type);
-        navigate(`/databases/${db.id}`);
-      },
-    },
-    {
-      key: 'performance',
-      label: 'Performance Hub',
-      icon: <ThunderboltOutlined />,
-      onClick: () => {
-        setSelectedDb(db.id, db.name, db.db_type);
-        navigate(`/databases/${db.id}/performance`);
-      },
-    },
-    {
-      key: 'alert-config',
-      label: '告警配置',
-      icon: <AlertOutlined />,
-      onClick: () => {
-        setSelectedDb(db.id, db.name, db.db_type);
-        navigate('/alert-config');
-      },
-    },
-    { type: 'divider' },
-    {
-      key: 'sql-monitoring',
-      label: 'SQL 监控',
-      icon: <SearchOutlined />,
-      onClick: () => {
-        setSelectedDb(db.id, db.name, db.db_type);
-        navigate(`/sql-monitoring?db=${db.id}`);
-      },
-    },
-  ];
+  // Tree 右键: 仅对实例节点(带 data)弹菜单, 阻止默认浏览器菜单
+  const handleRightClick = ({ event, node }) => {
+    if (!node?.data) return;
+    event.preventDefault();
+    setCtxMenu({ db: node.data, x: event.clientX, y: event.clientY });
+  };
 
   return (
     <div style={{ padding: '4px 0' }}>
@@ -264,22 +247,31 @@ const TargetNavigationTree = () => {
           expandedKeys={expandedKeys}
           onExpand={(keys) => setExpandedKeys(keys)}
           onSelect={handleSelect}
+          onRightClick={handleRightClick}
           treeData={treeData}
           style={{ fontSize: 12 }}
-          titleRender={(node) => {
-            if (node.data) {
-              return (
-                <Dropdown
-                  menu={{ items: getContextMenuItems(node.data) }}
-                  trigger={['contextMenu']}
-                >
-                  <div style={{ width: '100%' }}>{node.title}</div>
-                </Dropdown>
-              );
-            }
-            return node.title;
-          }}
         />
+      )}
+
+      {/* 受控单例右键菜单: 直接在光标坐标渲染 Menu + 遮罩关闭。
+          不用 Dropdown 自动定位(其配 0×0 fixed 锚点会把菜单甩到屏外)。 */}
+      {ctxMenu && (
+        <>
+          <div
+            onClick={() => setCtxMenu(null)}
+            onContextMenu={(e) => { e.preventDefault(); setCtxMenu(null); }}
+            style={{ position: 'fixed', inset: 0, zIndex: 1050 }}
+          />
+          <Menu
+            items={CONTEXT_MENU_ITEMS}
+            onClick={handleContextMenuClick}
+            style={{
+              position: 'fixed', left: ctxMenu.x, top: ctxMenu.y, zIndex: 1051,
+              minWidth: 148, borderRadius: 6,
+              boxShadow: '0 3px 10px rgba(0,0,0,0.15)',
+            }}
+          />
+        </>
       )}
     </div>
   );
