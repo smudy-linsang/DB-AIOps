@@ -67,6 +67,12 @@ from monitor.api_views_perf import (
     CompareView, SessionKillView,
 )
 from monitor.sse_views import SSEView
+from monitor.api_views_phase8 import (
+    # Phase 8: AI 智能化
+    RcaFeedbackView, PlanFeedbackView, InvestigateView, AgentTraceListView,
+    ChangeCreateView, ChangeListView, AiOpsStatsView, LlmCallListView,
+    RuleStatListView, AutonomyView, CausalGraphView, LlmTestConnectionView,
+)
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
 
@@ -257,6 +263,20 @@ urlpatterns = [
     path('api/v1/playbook-runs/<str:run_id>/rollback/', PlaybookRunRollbackView.as_view()),
     path('api/v1/sla/report/', SlaReportView.as_view()),
     path('api/v1/oncall/', OnCallView.as_view()),
+
+    # ========== Phase 8: AI 智能化 ==========
+    path('api/v1/incidents/<str:incident_id>/rca-feedback/', RcaFeedbackView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/plan-feedback/', PlanFeedbackView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/investigate/', InvestigateView.as_view()),
+    path('api/v1/incidents/<str:incident_id>/agent-trace/', AgentTraceListView.as_view()),
+    path('api/v1/changes/', ChangeCreateView.as_view()),
+    path('api/v1/databases/<int:config_id>/changes/', ChangeListView.as_view()),
+    path('api/v1/ai-ops/stats/', AiOpsStatsView.as_view()),
+    path('api/v1/ai-ops/llm-calls/', LlmCallListView.as_view()),
+    path('api/v1/ai-ops/rule-stats/', RuleStatListView.as_view()),
+    path('api/v1/databases/<int:config_id>/autonomy/', AutonomyView.as_view()),
+    path('api/v1/databases/<int:config_id>/causal-graph/', CausalGraphView.as_view()),
+    path('api/v1/llm/test-connection/', LlmTestConnectionView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

@@ -61,6 +61,15 @@ def detect_config_drift(config, metrics: dict) -> list:
                 'category': category_for_signal('config_drift'),
                 'detail': {'param': k, 'old_value': old, 'new_value': str(v)},
             })
+            # Phase 8D: 同步登记变更事件流 (失败不影响事件发送)
+            try:
+                from monitor.change_stream import record_change
+                record_change(config, source='config_drift',
+                              title=f"参数变更 {k}: {old} → {v}",
+                              detail={'param': k, 'old': old, 'new': str(v)},
+                              change_type='param_change')
+            except Exception:
+                pass
     return events
 
 

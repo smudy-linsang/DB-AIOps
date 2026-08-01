@@ -509,6 +509,24 @@ export const incidentAPI = {
   playbooks: () => api.get('/playbooks/'),
   slaReport: (params = {}) => api.get('/sla/report/', { params }),
   oncall: () => api.get('/oncall/'),
+  // Phase 8: AI 智能化 (契约 phase8/30)
+  rcaFeedback: (id, data) => api.post(`/incidents/${id}/rca-feedback/`, data),
+  planFeedback: (id, data) => api.post(`/incidents/${id}/plan-feedback/`, data),
+  investigate: (id) => api.post(`/incidents/${id}/investigate/`, {}),
+  agentTrace: (id) => api.get(`/incidents/${id}/agent-trace/`),
+}
+
+// Phase 8: AI 运营 (契约 phase8/30 §3.6-3.9)
+export const aiOpsAPI = {
+  stats: (params = {}) => api.get('/ai-ops/stats/', { params }),
+  llmCalls: (params = {}) => api.get('/ai-ops/llm-calls/', { params }),
+  ruleStats: () => api.get('/ai-ops/rule-stats/'),
+  testLlm: () => api.post('/llm/test-connection/', {}),
+  createChange: (data) => api.post('/changes/', data),
+  changes: (configId, params = {}) => api.get(`/databases/${configId}/changes/`, { params }),
+  getAutonomy: (configId) => api.get(`/databases/${configId}/autonomy/`),
+  setAutonomy: (configId, level) => api.put(`/databases/${configId}/autonomy/`, { level }),
+  causalGraph: (configId) => api.get(`/databases/${configId}/causal-graph/`),
 }
 
 // Phase 7B: 性能中心 (契约 phase7/20)

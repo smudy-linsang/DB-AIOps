@@ -578,7 +578,12 @@ class RCAEngineV2:
         context: Dict[str, Any],
     ) -> float:
         """计算置信度"""
-        base = 0.6
+        # Phase 8B: 基础分由反馈校准 (无反馈样本时仍为 0.6)
+        try:
+            from monitor.rule_calibrator import get_calibrated_base
+            base = get_calibrated_base(rule['id'])
+        except Exception:
+            base = 0.6
         # 上下文相关告警越多,置信度越高
         related_alerts = context.get('related_alerts', [])
         if len(related_alerts) >= 3:
@@ -630,6 +635,20 @@ class RCAEngineV2:
                 'description': change.get('description'),
                 'time': change.get('create_time'),
             })
+
+        # Phase 8D: 加入挖掘出的因果边 (数据驱动佐证)
+        if context.get('config_id'):
+            try:
+                from monitor.causal_miner import get_mined_edges
+                for e in get_mined_edges(context['config_id'], limit=3):
+                    chain.append({
+                        'level': 4,
+                        'type': 'mined_causal',
+                        'description': f"{e['cause']} 领先 {e['effect']} "
+                                       f"约{e['lag_minutes']}分钟 (r={e['strength']})",
+                    })
+            except Exception:
+                pass
 
         return chain
 

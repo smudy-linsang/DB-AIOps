@@ -511,11 +511,13 @@ def _resolve_step_sql(step: dict, db_type: str) -> str:
     return step.get(key_map.get(db_type, '')) or step.get('sql') or ''
 
 
-def generate_incident_plans(incident, rca_diagnoses: list) -> list:
+def generate_incident_plans(incident, rca_diagnoses: list, plan_draft: dict = None) -> list:
     """产出 2-3 套方案(保守/标准/激进)。三路合并: RCA建议∪模板∪(案例由管道注入)。
 
     每套: scenario/name/risk_level/playbook_ref/steps/rollback/verify/est_minutes/requires_approval。
     kill 目标由事故阻塞链参数化。
+    Phase 8A: plan_draft (LLM 草拟) 非空时追加 llm_advisory 方案 ——
+    仅供 DBA 参考, executable=False, 永不进入自动/一键执行通道。
     """
     db_type = incident.db_type
     # 主根因(用于选模板/playbook)
@@ -576,6 +578,29 @@ def generate_incident_plans(incident, rca_diagnoses: list) -> list:
             'verify': verify,
             'est_minutes': _parse_minutes(scen.get('estimated_time', '5min')),
             'requires_approval': scen.get('requires_approval', True),
+        })
+
+    # Phase 8A: LLM 草拟方案 (纯建议, 不可执行; playbook 入口另有白名单拦截)
+    if plan_draft and plan_draft.get('steps'):
+        plans.append({
+            'scenario': 'llm_advisory',
+            'name': f"[AI参考] {plan_draft.get('title', 'LLM 处置思路')}",
+            'risk_level': 'advisory',
+            'playbook_ref': None,
+            'executable': False,
+            'steps': [{
+                'seq': i + 1, 'action': 'advise',
+                'desc': st.get('desc', ''),
+                'sql': '',  # 红线: AI 方案不携带可执行 SQL
+                'sql_hint': (st.get('sql_hint') or '')[:2000],
+                'risk': st.get('risk', 'mid'),
+                'expected': '人工研判',
+            } for i, st in enumerate(plan_draft.get('steps', [])[:10])],
+            'rollback': [],
+            'verify': {'metric': '', 'recover_expr': '', 'window_sec': 0},
+            'est_minutes': 0,
+            'requires_approval': True,
+            'caution': plan_draft.get('caution', ''),
         })
     return plans
 

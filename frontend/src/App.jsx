@@ -26,6 +26,7 @@ import InspectionDetail from './pages/InspectionDetail';
 import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
 import SlaReport from './pages/SlaReport';
+import AiOpsCenter from './pages/AiOpsCenter';
 import { canAccessRoute, getUserRole } from './utils/permission';
 import { authAPI, setUser as saveUserToStorage } from './services/api';
 
@@ -109,6 +110,7 @@ function LayoutRoutes() {
           <Route path="/incidents" element={<PermissionRoute path="/alerts"><IncidentList /></PermissionRoute>} />
           <Route path="/incidents/:incidentId" element={<PermissionRoute path="/alerts"><IncidentDetail /></PermissionRoute>} />
           <Route path="/sla-report" element={<PermissionRoute path="/alerts"><SlaReport /></PermissionRoute>} />
+          <Route path="/ai-ops" element={<PermissionRoute path="/ai-ops"><AiOpsCenter /></PermissionRoute>} />
           <Route path="/inspection" element={<PermissionRoute path="/inspection"><InspectionCenter /></PermissionRoute>} />
           <Route path="/inspection/runs/:runId" element={<PermissionRoute path="/inspection"><InspectionDetail /></PermissionRoute>} />
           <Route path="/alert-config" element={<PermissionRoute path="/alert-config"><AlertConfig /></PermissionRoute>} />

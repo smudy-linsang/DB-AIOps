@@ -359,16 +359,28 @@ def get_ash_timeline(config_id: int, window_min: int = 30) -> Dict[str, Any]:
 
 
 def _incident_recent_changes(config, hours: int = 72) -> List[Dict[str, Any]]:
-    """近期变更(复用 AuditLog), 供 config 类根因关联。"""
+    """近期变更(AuditLog + Phase8D ChangeEvent 合并), 供 config 类根因关联。"""
+    out: List[Dict[str, Any]] = []
     try:
         from monitor.models import AuditLog
         cutoff = timezone.now() - timedelta(hours=hours)
         rows = AuditLog.objects.filter(config=config, create_time__gte=cutoff)\
             .exclude(action_type='incident_transition').order_by('-create_time')[:30]
-        return [{'action_type': c.action_type, 'description': (c.description or '')[:200],
-                 'create_time': c.create_time.isoformat()} for c in rows]
+        out = [{'action_type': c.action_type, 'description': (c.description or '')[:200],
+                'create_time': c.create_time.isoformat()} for c in rows]
     except Exception:
-        return []
+        out = []
+    # Phase 8D: 变更事件流 (参数漂移/人工登记/审计提取)
+    try:
+        from monitor.change_stream import query_changes
+        for c in query_changes(config, hours=hours, limit=20):
+            out.append({'action_type': f"change:{c['source']}",
+                        'description': c['title'][:200],
+                        'create_time': c['occurred_at']})
+    except Exception:
+        pass
+    out.sort(key=lambda x: x.get('create_time') or '', reverse=True)
+    return out[:30]
 
 
 def _incident_business_context(config) -> Dict[str, Any]:
@@ -387,6 +399,7 @@ def build_incident_context(incident) -> Dict[str, Any]:
     """事故诊断上下文 (phase6/20 §2.3)。整合 ASH 时间线/变更/业务。"""
     config = incident.config
     return {
+        'config_id': config.id,
         'incident_summary': {
             'incident_id': incident.incident_id, 'category': incident.category,
             'priority': incident.priority, 'title': incident.title,

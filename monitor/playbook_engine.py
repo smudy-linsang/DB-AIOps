@@ -158,6 +158,11 @@ def execute_run(run_id: str) -> dict:
         return {'error': f'非法状态 {run.status}', 'code': 'CONFLICT'}
 
     pb = run.playbook
+    # Phase 8E 红线: LLM 建议型方案永不进入执行通道 (phase8/30 §7)
+    if (run.params or {}).get('scenario') == 'llm_advisory' \
+            or str(pb.playbook_id).startswith('LLM-'):
+        return {'error': 'llm_advisory 方案为建议型, 禁止执行', 'code': 'FORBIDDEN'}
+
     inc = run.incident
     config = inc.config
     db_type = config.db_type

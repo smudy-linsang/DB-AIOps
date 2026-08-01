@@ -204,6 +204,50 @@ ALERTS_MAPPING = {
     }
 }
 
+# Phase 8A: 案例向量索引 (phase8/40 §4)。PG(AlertCase) 为权威源, ES 为投影。
+CASES_INDEX = 'db_cases_v1'
+
+
+def _cases_mapping():
+    from django.conf import settings as dj_settings
+    dims = int(getattr(dj_settings, 'EMBED_DIM', 1024))
+    return {
+        "mappings": {
+            "properties": {
+                "case_id": {"type": "keyword"},
+                "title": {"type": "text"},
+                "db_type": {"type": "keyword"},
+                "tags": {"type": "keyword"},
+                "severity": {"type": "keyword"},
+                "source": {"type": "keyword"},
+                "symptom_text": {"type": "text"},
+                "root_cause": {"type": "text"},
+                "resolution": {"type": "text"},
+                "success_count": {"type": "integer"},
+                "confidence": {"type": "float"},
+                "updated_at": {"type": "date"},
+                "embedding": {"type": "dense_vector", "dims": dims,
+                               "index": True, "similarity": "cosine"},
+            }
+        },
+        "settings": {"number_of_shards": 1, "number_of_replicas": 0},
+    }
+
+
+def init_cases_index() -> bool:
+    """创建案例向量索引 (幂等)。"""
+    client = get_es_client()
+    if not client:
+        return False
+    try:
+        if not client.indices.exists(index=CASES_INDEX):
+            client.indices.create(index=CASES_INDEX, body=_cases_mapping())
+            logger.info(f"创建案例向量索引: {CASES_INDEX}")
+        return True
+    except Exception as e:
+        logger.error(f"创建案例向量索引失败: {e}")
+        return False
+
 
 # ============================================================
 # 索引管理
@@ -266,7 +310,10 @@ def init_indices():
                 }
             )
             logger.info(f"创建当月告警索引: {current_alerts_idx}")
-        
+
+        # Phase 8A: 案例向量索引
+        init_cases_index()
+
         return True
     except Exception as e:
         logger.error(f"初始化 ES 索引失败: {e}")

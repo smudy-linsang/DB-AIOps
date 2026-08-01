@@ -24,6 +24,15 @@ def decide_trigger(incident, playbook) -> dict:
         return {'mode': 'one_click', 'execute_now': False, 'need_approval': True,
                 'reason': '自动化熔断中(1小时内自动动作过多), 转人工审批'}
 
+    # Phase 8E: 自治分级闸门 (L0 转人工 / L2+ 中风险提权), 失败回退原逻辑
+    try:
+        from monitor.autonomy_policy import gate
+        override = gate(incident, playbook)
+        if override is not None:
+            return override
+    except Exception as e:
+        logger.debug("autonomy gate 异常, 回退默认策略: %s", e)
+
     if risk == 'low':
         if getattr(settings, 'PLAYBOOK_AUTO_LOW_RISK', True) and playbook.auto_execute:
             return {'mode': 'auto', 'execute_now': True, 'need_approval': False,

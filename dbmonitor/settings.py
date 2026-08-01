@@ -372,6 +372,46 @@ INCIDENT_P1_EXECUTE_FIRST = _envbool('INCIDENT_P1_EXECUTE_FIRST', True)
 ONCALL_ESCALATE_MIN = int(os.environ.get('ONCALL_ESCALATE_MIN', 15))
 
 # ==========================================
+# Phase 8 AI 智能诊断配置 (phase8/20 §1)
+# ==========================================
+# 8A: LLM 诊断大脑 (默认关闭; 关闭时行为等同 Phase 7)
+LLM_ENABLED = _envbool('LLM_ENABLED', False)
+LLM_PROVIDER = os.environ.get('LLM_PROVIDER', 'openai_compat')
+LLM_BASE_URL = os.environ.get('LLM_BASE_URL', 'http://localhost:11434/v1')
+LLM_API_KEY = os.environ.get('LLM_API_KEY', 'ollama')
+LLM_MODEL = os.environ.get('LLM_MODEL', 'qwen2.5:14b-instruct')
+LLM_TIMEOUT_SEC = int(os.environ.get('LLM_TIMEOUT_SEC', 25))
+LLM_MAX_TOKENS = int(os.environ.get('LLM_MAX_TOKENS', 2048))
+LLM_TEMPERATURE = float(os.environ.get('LLM_TEMPERATURE', 0.1))
+LLM_DIAG_BUDGET_SEC = int(os.environ.get('LLM_DIAG_BUDGET_SEC', 30))
+LLM_EVIDENCE_MAX_TOKENS = int(os.environ.get('LLM_EVIDENCE_MAX_TOKENS', 6000))
+LLM_LOG_RETENTION_DAYS = int(os.environ.get('LLM_LOG_RETENTION_DAYS', 90))
+# 8A: 向量 RAG (embedding 独立开关, 可只开 RAG 不开 LLM)
+EMBED_ENABLED = _envbool('EMBED_ENABLED', False)
+EMBED_BASE_URL = os.environ.get('EMBED_BASE_URL', LLM_BASE_URL)
+EMBED_API_KEY = os.environ.get('EMBED_API_KEY', LLM_API_KEY)
+EMBED_MODEL = os.environ.get('EMBED_MODEL', 'bge-m3')
+EMBED_DIM = int(os.environ.get('EMBED_DIM', 1024))
+RAG_KNN_WEIGHT = float(os.environ.get('RAG_KNN_WEIGHT', 0.7))
+RAG_TOPK = int(os.environ.get('RAG_TOPK', 5))
+# 8B: 学习闭环
+CASE_DISTILL_ENABLED = _envbool('CASE_DISTILL_ENABLED', True)
+RULE_CALIBRATION_ENABLED = _envbool('RULE_CALIBRATION_ENABLED', True)
+RULE_CALIBRATION_MIN_SAMPLES = int(os.environ.get('RULE_CALIBRATION_MIN_SAMPLES', 5))
+# 8C: Agentic 主动排查 (依赖 LLM_ENABLED)
+AGENT_ENABLED = _envbool('AGENT_ENABLED', False)
+AGENT_MAX_STEPS = int(os.environ.get('AGENT_MAX_STEPS', 6))
+AGENT_BUDGET_SEC = int(os.environ.get('AGENT_BUDGET_SEC', 120))
+AGENT_OBS_MAX_CHARS = int(os.environ.get('AGENT_OBS_MAX_CHARS', 4000))
+# 8D: 变更流与因果挖掘
+CHANGE_STREAM_ENABLED = _envbool('CHANGE_STREAM_ENABLED', True)
+CAUSAL_MINER_ENABLED = _envbool('CAUSAL_MINER_ENABLED', True)
+CAUSAL_MIN_STRENGTH = float(os.environ.get('CAUSAL_MIN_STRENGTH', 0.6))
+CAUSAL_LOOKBACK_DAYS = int(os.environ.get('CAUSAL_LOOKBACK_DAYS', 7))
+# 8E: 自主运维分级放权 (0=观察 1=半自动 2=低风险自动 3=扩展自动)
+AUTONOMY_DEFAULT_LEVEL = int(os.environ.get('AUTONOMY_DEFAULT_LEVEL', 1))
+
+# ==========================================
 # API 配置
 # ==========================================
 API_RATE_LIMIT = int(os.environ.get('API_RATE_LIMIT', 100))  # 每分钟请求数限制

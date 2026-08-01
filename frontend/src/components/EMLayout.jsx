@@ -20,7 +20,7 @@ import {
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
   BellFilled, ApartmentOutlined, FileTextOutlined,
-  TeamOutlined, CheckCircleOutlined,
+  TeamOutlined, CheckCircleOutlined, RobotOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, setUser } from '../services/api';
@@ -153,6 +153,7 @@ const EMLayout = ({ children }) => {
       { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },
       { key: '/incidents', icon: <ThunderboltOutlined />, label: '事故中心', perm: Perm.ALERTS_VIEW },
       { key: '/sla-report', icon: <DashboardOutlined />, label: 'SLA 报表', perm: Perm.ALERTS_VIEW },
+      { key: '/ai-ops', icon: <RobotOutlined />, label: 'AI 运营中心', perm: Perm.METRICS_VIEW },
       { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },
       { type: 'divider' },
       { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },

@@ -46,6 +46,9 @@ class DatabaseConfig(models.Model):
     # 密码轮换相关字段（Phase 4 新增）
     password_changed_at = models.DateTimeField(null=True, blank=True, verbose_name="密码最后修改时间")
     password_expiry_days = models.IntegerField(default=90, verbose_name="密码过期天数", help_text="默认90天，0表示不过期")
+    # Phase 8E: 自治等级 (null=跟随全局 AUTONOMY_DEFAULT_LEVEL; 0=观察 1=半自动 2=低风险自动 3=扩展自动)
+    autonomy_level = models.IntegerField(null=True, blank=True, verbose_name="自治等级",
+        help_text="留空表示跟随全局默认; 0-3 逐级放权")
 
     # 创建时间
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
@@ -888,6 +891,13 @@ class AlertCase(models.Model):
     confidence = models.FloatField(default=0.0, verbose_name="案例置信度",
         help_text="基于成功/失败比计算")
     references = models.JSONField(default=list, verbose_name="参考链接")
+    # Phase 8B: 案例来源与向量索引状态
+    source = models.CharField(max_length=12, default='manual', db_index=True, verbose_name="案例来源",
+        help_text="manual=人工录入 distilled=事故自动蒸馏 seed=初始化种子")
+    source_incident = models.CharField(max_length=48, default='', blank=True, db_index=True,
+        verbose_name="来源事故ID")
+    embedding_indexed = models.BooleanField(default=False, verbose_name="向量已索引",
+        help_text="True=已写入 ES db_cases 向量索引")
     created_by = models.CharField(max_length=100, blank=True, default='', verbose_name="创建人")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
@@ -1346,6 +1356,13 @@ class Incident(models.Model):
             )
         except Exception:
             pass  # 审计失败不阻断状态机
+        # Phase 8B: resolved 时异步蒸馏案例 (失败由每小时补偿扫描兜底)
+        if to_status in ('resolved', 'closed'):
+            try:
+                from monitor.tasks_phase8 import dispatch_distill_incident
+                dispatch_distill_incident(self.incident_id)
+            except Exception:
+                pass
         return self
 
 
@@ -1484,3 +1501,160 @@ class SqlPlan(models.Model):
 
     def __str__(self):
         return f"{self.sql_digest[:12]}@{self.plan_hash[:8]}"
+
+
+# ==========================================================================
+# Phase 8: AI 智能诊断 (phase8/40)
+# ==========================================================================
+class LLMCallLog(models.Model):
+    """LLM 调用留痕 (8A)。每次 chat/embed 调用一条, 用于审计/成本/质量分析。"""
+    SCENE_CHOICES = (
+        ('diagnosis', '事故诊断'), ('plan_draft', '方案草拟'), ('distill', '案例蒸馏'),
+        ('agent', '主动排查'), ('embed', '向量化'), ('test', '连通测试'),
+    )
+    STATUS_CHOICES = (
+        ('ok', '成功'), ('timeout', '超时'), ('unavailable', '不可用'),
+        ('bad_json', '输出不合法'), ('error', '其他错误'),
+    )
+    scene = models.CharField(max_length=12, choices=SCENE_CHOICES, db_index=True, verbose_name="场景")
+    incident_id = models.CharField(max_length=48, default='', blank=True, db_index=True, verbose_name="关联事故")
+    provider = models.CharField(max_length=20, default='', blank=True, verbose_name="Provider")
+    model = models.CharField(max_length=64, default='', blank=True, verbose_name="模型")
+    status = models.CharField(max_length=12, choices=STATUS_CHOICES, db_index=True, verbose_name="状态")
+    latency_ms = models.IntegerField(default=0, verbose_name="耗时(ms)")
+    prompt_tokens = models.IntegerField(default=0, verbose_name="提示词token")
+    completion_tokens = models.IntegerField(default=0, verbose_name="补全token")
+    prompt_chars = models.IntegerField(default=0, verbose_name="提示词字符数")
+    error_message = models.TextField(blank=True, default='', verbose_name="错误信息")
+    response_digest = models.CharField(max_length=32, default='', blank=True, verbose_name="响应摘要指纹")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "LLM调用日志"
+        verbose_name_plural = "LLM调用日志"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"[{self.scene}] {self.status} {self.latency_ms}ms"
+
+
+class RcaFeedback(models.Model):
+    """根因反馈 (8B)。DBA 对单条根因假设的确认/否定, 驱动规则校准与案例蒸馏。"""
+    VERDICT_CHOICES = (('correct', '准确'), ('wrong', '不准'), ('partial', '部分准确'))
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='rca_feedbacks', verbose_name="事故")
+    rule_id = models.CharField(max_length=24, db_index=True, verbose_name="规则/假设ID")
+    source = models.CharField(max_length=12, default='rules', verbose_name="根因来源", help_text="rules/llm/both")
+    verdict = models.CharField(max_length=12, choices=VERDICT_CHOICES, verbose_name="结论")
+    actual_cause = models.TextField(blank=True, default='', verbose_name="实际根因(否定时填)")
+    user = models.CharField(max_length=50, verbose_name="反馈人")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "根因反馈"
+        verbose_name_plural = "根因反馈列表"
+        constraints = [models.UniqueConstraint(fields=['incident', 'rule_id', 'user'], name='uniq_rcafb_inc_rule_user')]
+
+    def __str__(self):
+        return f"{self.incident_id}/{self.rule_id}: {self.verdict}"
+
+
+class PlanFeedback(models.Model):
+    """方案反馈 (8B)。方案是否被采纳/有效。"""
+    VERDICT_CHOICES = (('adopted', '采纳且有效'), ('adopted_failed', '采纳但无效'), ('rejected', '未采纳'))
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='plan_feedbacks', verbose_name="事故")
+    scenario = models.CharField(max_length=20, verbose_name="方案场景", help_text="conservative/standard/aggressive/llm_advisory")
+    verdict = models.CharField(max_length=16, choices=VERDICT_CHOICES, verbose_name="结论")
+    comment = models.TextField(blank=True, default='', verbose_name="备注")
+    user = models.CharField(max_length=50, verbose_name="反馈人")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "方案反馈"
+        verbose_name_plural = "方案反馈列表"
+        constraints = [models.UniqueConstraint(fields=['incident', 'scenario', 'user'], name='uniq_planfb_inc_scen_user')]
+
+    def __str__(self):
+        return f"{self.incident_id}/{self.scenario}: {self.verdict}"
+
+
+class RuleStat(models.Model):
+    """规则准确率统计 (8B)。rule_calibrator 每日重算, 供 RCA 置信度校准。"""
+    rule_id = models.CharField(max_length=24, primary_key=True, verbose_name="规则ID")
+    hit_count = models.IntegerField(default=0, verbose_name="命中次数")
+    correct_count = models.IntegerField(default=0, verbose_name="确认准确次数")
+    wrong_count = models.IntegerField(default=0, verbose_name="确认不准次数")
+    accuracy = models.FloatField(default=0.0, verbose_name="准确率")
+    calibrated_base = models.FloatField(default=0.6, verbose_name="校准后基础置信度")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "规则统计"
+        verbose_name_plural = "规则统计列表"
+
+    def __str__(self):
+        return f"{self.rule_id} acc={self.accuracy:.2f} base={self.calibrated_base:.2f}"
+
+
+class AgentTrace(models.Model):
+    """Agent 排查轨迹 (8C)。一次 investigate 一条, steps 存完整思考-行动-观察序列。"""
+    STATUS_CHOICES = (('running', '运行中'), ('done', '完成'), ('failed', '失败'), ('budget_exceeded', '预算耗尽'))
+    trace_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="轨迹ID")
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='agent_traces', verbose_name="事故")
+    status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='running', verbose_name="状态")
+    steps = models.JSONField(default=list, verbose_name="步骤序列",
+        help_text="[{step,thought,action,params,observation,elapsed_ms}]")
+    conclusion = models.JSONField(default=dict, verbose_name="最终结论")
+    triggered_by = models.CharField(max_length=50, default='system', verbose_name="触发人")
+    started_at = models.DateTimeField(auto_now_add=True, verbose_name="开始时间")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="结束时间")
+
+    class Meta:
+        verbose_name = "Agent排查轨迹"
+        verbose_name_plural = "Agent排查轨迹列表"
+        ordering = ['-started_at']
+
+    def __str__(self):
+        return f"{self.trace_id} {self.status} ({len(self.steps or [])} steps)"
+
+
+class ChangeEvent(models.Model):
+    """变更事件流 (8D)。统一汇聚参数漂移/DDL/人工登记三源, 供诊断关联。"""
+    SOURCE_CHOICES = (('config_drift', '参数漂移'), ('ddl', 'DDL变更'), ('manual', '人工登记'), ('audit', '审计提取'))
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, related_name='change_events', verbose_name="数据库")
+    source = models.CharField(max_length=16, choices=SOURCE_CHOICES, db_index=True, verbose_name="来源")
+    change_type = models.CharField(max_length=40, default='', blank=True, verbose_name="变更类型")
+    title = models.CharField(max_length=200, verbose_name="标题")
+    detail = models.JSONField(default=dict, verbose_name="详情", help_text="如 {param, old, new} 或 {ddl_text}")
+    operator = models.CharField(max_length=50, default='', blank=True, verbose_name="操作人")
+    dedup_key = models.CharField(max_length=64, unique=True, verbose_name="去重键")
+    occurred_at = models.DateTimeField(db_index=True, verbose_name="发生时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="入库时间")
+
+    class Meta:
+        verbose_name = "变更事件"
+        verbose_name_plural = "变更事件流"
+        ordering = ['-occurred_at']
+        indexes = [models.Index(fields=['config', 'occurred_at'])]
+
+    def __str__(self):
+        return f"[{self.source}] {self.title}"
+
+
+class CausalEdge(models.Model):
+    """挖掘出的因果边 (8D)。causal_miner 滞后互相关产出, 供 RCA 因果链增强。"""
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, related_name='causal_edges', verbose_name="数据库")
+    cause_metric = models.CharField(max_length=64, verbose_name="因指标")
+    effect_metric = models.CharField(max_length=64, verbose_name="果指标")
+    lag_minutes = models.IntegerField(default=5, verbose_name="滞后(分)")
+    strength = models.FloatField(default=0.0, verbose_name="强度(相关系数)")
+    sample_days = models.IntegerField(default=7, verbose_name="样本天数")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "因果边"
+        verbose_name_plural = "因果边列表"
+        constraints = [models.UniqueConstraint(fields=['config', 'cause_metric', 'effect_metric'], name='uniq_causal_cfg_cause_effect')]
+
+    def __str__(self):
+        return f"{self.cause_metric} --{self.lag_minutes}m--> {self.effect_metric} ({self.strength:.2f})"
+

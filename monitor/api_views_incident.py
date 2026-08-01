@@ -113,7 +113,24 @@ class IncidentDetailView(_BaseView):
         inc = Incident.objects.select_related('config').filter(incident_id=incident_id).first()
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
-        return self.ok(incident=_incident_full(inc))
+        d = _incident_full(inc)
+        d['my_feedback'] = _my_feedback(inc, request)
+        return self.ok(incident=d)
+
+
+def _my_feedback(inc, request) -> dict:
+    """Phase 8B: 当前用户已提交的反馈 (phase8/30 §3.3)。"""
+    try:
+        from monitor.models import PlanFeedback, RcaFeedback
+        user = getattr(request.user, 'username', '') or str(request.user)
+        return {
+            'rca': {f.rule_id: f.verdict
+                    for f in RcaFeedback.objects.filter(incident=inc, user=user)},
+            'plan': {f.scenario: f.verdict
+                     for f in PlanFeedback.objects.filter(incident=inc, user=user)},
+        }
+    except Exception:
+        return {'rca': {}, 'plan': {}}
 
 
 class IncidentTimelineView(_BaseView):

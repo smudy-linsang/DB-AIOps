@@ -185,9 +185,17 @@ def _run_rca(incident, features, context):
 
 def _search_cases(incident, features):
     try:
-        from monitor.case_rag import search_cases
         signal = incident.events.first().signal if incident.events.exists() else ''
         symptom = f"{incident.db_type} {incident.category} {signal} {incident.title}"
+        # Phase 8A: 优先混合检索 (向量+文本, 内部自行降级到词法)
+        try:
+            from monitor.case_rag_v2 import search_cases_v2
+            out = search_cases_v2(symptom, db_type=incident.db_type, top_k=5)
+            if out:
+                return out
+        except Exception as e:
+            logger.debug("[diag] 混合检索降级: %s", e)
+        from monitor.case_rag import search_cases
         res = search_cases(symptom, db_type=incident.db_type, top_k=5)
         matches = getattr(res, 'matches', None) or (res.get('matches') if isinstance(res, dict) else [])
         out = []
@@ -234,14 +242,35 @@ def run_diagnosis(incident_id: str) -> dict:
         if good:
             root_causes[0]['confidence'] = min(root_causes[0]['confidence'] + 0.1, 1.0)
 
+    # 阶段2.5: LLM 综合研判 (Phase 8A; 失败/关闭时无损降级为 Phase 7 行为)
+    llm_extra = {}
+    if getattr(settings, 'LLM_ENABLED', False):
+        try:
+            from monitor.llm.brain import diagnose_incident, merge_llm_with_rules
+            llm_result = diagnose_incident(inc, context, features, root_causes, similar_cases)
+            root_causes = merge_llm_with_rules(root_causes, llm_result)
+            llm_extra = {
+                'summary': llm_result.get('summary', ''),
+                'plan_draft': llm_result.get('plan_draft') or {},
+                'need_more_evidence': llm_result.get('need_more_evidence', []),
+                'meta': llm_result.get('_meta', {}),
+            }
+            logger.info("[diag] %s LLM 研判完成: %d 假设, %dms",
+                        incident_id, len(llm_result.get('hypotheses', [])),
+                        llm_result.get('_meta', {}).get('latency_ms', 0))
+        except Exception as e:
+            logger.warning("[diag] LLM 阶段异常降级: %s", e)
+
     rca_result = {
         'version': (inc.rca_result or {}).get('version', 0) + 1,
-        'engine': 'rca_v2+signal',
+        'engine': 'rca_v2+llm' if llm_extra else 'rca_v2+signal',
         'root_causes': root_causes,
         'similar_cases': similar_cases,
         'diagnosed_at': timezone.now().isoformat(),
         'budget_ms': int((time.time() - t0) * 1000),
     }
+    if llm_extra:
+        rca_result['llm'] = llm_extra
 
     # 阶段3: 影响量化
     from monitor.impact_engine import assess_incident_impact
@@ -252,9 +281,10 @@ def run_diagnosis(incident_id: str) -> dict:
         inc.save(update_fields=['priority'])
         impact['priority_adjusted'] = 'P2'
 
-    # 阶段4: 方案生成
+    # 阶段4: 方案生成 (Phase 8A: LLM plan_draft 作为 llm_advisory 方案并入)
     from monitor.remediation_planner import generate_incident_plans
-    plans = generate_incident_plans(inc, root_causes)
+    plans = generate_incident_plans(inc, root_causes,
+                                    plan_draft=llm_extra.get('plan_draft') or None)
 
     # 阶段5: 落库 + 状态转移 + 通知
     inc.rca_result = rca_result

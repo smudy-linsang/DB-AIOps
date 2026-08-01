@@ -76,6 +76,31 @@ app.conf.beat_schedule = {
         'task': 'monitor.tasks.update_platform_metrics',
         'schedule': 60.0,  # 1分钟
     },
+
+    # ---- Phase 8 ----
+    # 每小时: 蒸馏补偿扫描 + 向量索引补偿
+    'phase8-scan-distill': {
+        'task': 'monitor.tasks_phase8.scan_distill_task',
+        'schedule': crontab(minute=30),
+    },
+
+    # 每日凌晨4:00 规则置信度校准
+    'phase8-rule-calibration': {
+        'task': 'monitor.tasks_phase8.recompute_rule_stats_task',
+        'schedule': crontab(hour=4, minute=0),
+    },
+
+    # 每日凌晨4:30 因果边挖掘
+    'phase8-causal-mining': {
+        'task': 'monitor.tasks_phase8.mine_causal_task',
+        'schedule': crontab(hour=4, minute=30),
+    },
+
+    # 每日凌晨5:00 audit 变更流同步
+    'phase8-sync-audit-changes': {
+        'task': 'monitor.tasks_phase8.sync_audit_changes_task',
+        'schedule': crontab(hour=5, minute=0),
+    },
 }
 
 app.conf.timezone = 'Asia/Shanghai'

@@ -16,7 +16,9 @@
       "Bash(powershell.exe -Command \"& 'C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe' 'C:/Users/linsa/claude-memory-compiler/hooks/session-start.py' 2>&1\")",
       "Bash(powershell.exe -Command 'Get-Command uv -ErrorAction SilentlyContinue; [System.Environment]::GetEnvironmentVariable\\('\\\\''PATH'\\\\'','\\\\''User'\\\\''\\) -split '\\\\'';'\\\\'' | Where-Object { $_ -like '\\\\''*uv*'\\\\'' }')",
       "Bash(python -c \"import json,sys; d=json.load\\(sys.stdin\\); [print\\(k,'✓'\\) for k in d['hooks']]\")",
-      "Bash(python manage.py shell -c \"from monitor.models import DatabaseConfig; [print\\(f'{db.id}: {db.name} \\({db.db_type}\\) {db.host}:{db.port}'\\) for db in DatabaseConfig.objects.all\\(\\)]\")"
+      "Bash(python manage.py shell -c \"from monitor.models import DatabaseConfig; [print\\(f'{db.id}: {db.name} \\({db.db_type}\\) {db.host}:{db.port}'\\) for db in DatabaseConfig.objects.all\\(\\)]\")",
+      "Bash(git -C /Users/mac/DB_Monitor/db-aiops status --short)",
+      "Bash(git -C /Users/mac/DB_Monitor/db-aiops log --oneline -8)"
     ]
   }
 }
