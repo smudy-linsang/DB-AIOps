@@ -38,6 +38,31 @@ AUDIT_EXEMPT_PREFIXES = (
 AUDIT_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
 
 
+class SecurityHeadersMiddleware:
+    """
+    安全响应头中间件（BUG-019）
+
+    为响应补充 Content-Security-Policy 等安全头。CSP 策略通过
+    settings.CONTENT_SECURITY_POLICY（或环境变量 CONTENT_SECURITY_POLICY）配置，
+    未配置时不下发 CSP（避免默认策略误伤前端内联脚本/样式），由部署方按实际前端定制。
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        csp = getattr(settings, 'CONTENT_SECURITY_POLICY', '')
+        if csp and not response.has_header('Content-Security-Policy'):
+            response['Content-Security-Policy'] = csp
+        # 额外加固头（Django 默认已含 X-Frame-Options/X-Content-Type-Options，此处补充）
+        if not response.has_header('X-Content-Type-Options'):
+            response['X-Content-Type-Options'] = 'nosniff'
+        if not response.has_header('Referrer-Policy'):
+            response['Referrer-Policy'] = 'same-origin'
+        return response
+
+
 class AuditLogMiddleware:
     """
     操作审计中间件

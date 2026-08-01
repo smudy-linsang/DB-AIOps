@@ -67,17 +67,26 @@ class RateLimiter:
 class RateLimitMiddleware:
     """
     Django middleware for API rate limiting.
-    
+
+    仅对 /api/ 路径生效（静态资源、SSE、admin 等不计入），避免误伤长连接与页面资源。
+    可通过 settings.ENABLE_RATE_LIMIT（或环境变量 ENABLE_RATE_LIMIT）开关，默认关闭，
+    生产环境建议开启并配合 Redis 缓存。
+
     Configuration (in settings.py):
-        API_RATE_LIMIT = 100  # requests per window
+        API_RATE_LIMIT = 100   # requests per window
         API_RATE_WINDOW = 60   # window in seconds
+        ENABLE_RATE_LIMIT = False
     """
-    
+
+    # 内存中保留的最大客户端键数量，超过则清空重建，防止长期运行内存膨胀
+    MAX_TRACKED_KEYS = 10000
+
     def __init__(self, get_response):
         self.get_response = get_response
         self.limiter = None
-        self.exempt_paths = ['/admin/', '/health/', '/favicon.ico']
-    
+        self.enabled = False
+        self.exempt_paths = ['/admin/', '/health/', '/favicon.ico', '/static/', '/metrics']
+
     def __call__(self, request):
         # Lazy initialization to get settings
         if self.limiter is None:
@@ -85,20 +94,29 @@ class RateLimitMiddleware:
             rate = getattr(settings, 'API_RATE_LIMIT', 100)
             window = getattr(settings, 'API_RATE_WINDOW', 60)
             self.limiter = RateLimiter(rate=rate, per=window)
-            
+            self.enabled = getattr(settings, 'ENABLE_RATE_LIMIT', False)
+
             # Get exempt paths
-            self.exempt_paths = getattr(settings, 'API_RATE_EXEMPT_PATHS', 
-                                        ['/admin/', '/health/', '/favicon.ico'])
-        
-        # Check if path is exempt
+            self.exempt_paths = getattr(settings, 'API_RATE_EXEMPT_PATHS',
+                                        ['/admin/', '/health/', '/favicon.ico', '/static/', '/metrics'])
+
+        # 未启用或非 API 路径：直接放行
         path = request.path
+        if not self.enabled or not path.startswith('/api/'):
+            return self.get_response(request)
+
+        # Check if path is exempt
         for exempt in self.exempt_paths:
             if path.startswith(exempt):
                 return self.get_response(request)
-        
+
         # Get client identifier
         client_key = self._get_client_key(request)
-        
+
+        # 防止内存无限增长
+        if len(self.limiter.buckets) > self.MAX_TRACKED_KEYS:
+            self.limiter.buckets.clear()
+
         # Check rate limit
         if not self.limiter.allow_request(client_key):
             retry_after = self.limiter.get_retry_after(client_key)
@@ -106,14 +124,14 @@ class RateLimitMiddleware:
                 'error': 'Rate limit exceeded',
                 'retry_after': retry_after
             }, status=429)
-        
+
         response = self.get_response(request)
-        
+
         # Add rate limit headers
         remaining = self.limiter.buckets.get(client_key, (self.limiter.rate, time.time()))[0]
         response['X-RateLimit-Limit'] = str(self.limiter.rate)
         response['X-RateLimit-Remaining'] = str(int(remaining))
-        
+
         return response
     
     def _get_client_key(self, request) -> str:

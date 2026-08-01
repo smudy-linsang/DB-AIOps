@@ -11,6 +11,7 @@ Elasticsearch 存储引擎
 
 import logging
 import json
+import threading
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Any
 
@@ -37,36 +38,56 @@ BULK_FLUSH_INTERVAL = 30  # 秒
 
 # ES 全局单例客户端（连接池复用）
 _es_client = None
+_es_client_lock = threading.Lock()  # 并发重建保护（BUG-017）
 
 
 def get_es_client():
-    """获取 Elasticsearch 客户端（全局单例，复用连接池）"""
+    """获取 Elasticsearch 客户端（全局单例，复用连接池）
+
+    BUG-017 修复：加锁避免并发重复创建客户端；替换前显式关闭失效客户端释放连接池。
+    """
     global _es_client
+
+    # 快速路径：已有可用客户端时无锁返回
     if _es_client is not None:
         try:
-            # 验证现有连接是否仍然可用
             if _es_client.ping():
                 return _es_client
         except Exception:
-            _es_client = None  # 连接失效，重建
+            pass  # 落入加锁重建分支
 
-    try:
-        from elasticsearch import Elasticsearch
-        es_url = _get_es_url()
-        _es_client = Elasticsearch(
-            [es_url],
-            request_timeout=30,
-            retry_on_timeout=True,
-            max_retries=3,
-            http_compress=True,  # 启用压缩
-        )
-        return _es_client
-    except ImportError:
-        logger.error("elasticsearch 库未安装，请执行: pip install elasticsearch")
-        return None
-    except Exception as e:
-        logger.error(f"连接 Elasticsearch 失败: {e}")
-        return None
+    with _es_client_lock:
+        # 双重检查：进入锁后可能已被其他线程重建
+        if _es_client is not None:
+            try:
+                if _es_client.ping():
+                    return _es_client
+            except Exception:
+                pass
+            # 关闭失效客户端，释放连接池
+            try:
+                _es_client.close()
+            except Exception:
+                logger.debug("关闭失效 ES 客户端时出错", exc_info=True)
+            _es_client = None
+
+        try:
+            from elasticsearch import Elasticsearch
+            es_url = _get_es_url()
+            _es_client = Elasticsearch(
+                [es_url],
+                request_timeout=30,
+                retry_on_timeout=True,
+                max_retries=3,
+                http_compress=True,  # 启用压缩
+            )
+            return _es_client
+        except ImportError:
+            logger.error("elasticsearch 库未安装，请执行: pip install elasticsearch")
+            return None
+        except Exception as e:
+            logger.error(f"连接 Elasticsearch 失败: {e}")
+            return None
 
 
 def get_metrics_index_name(dt: datetime = None) -> str:

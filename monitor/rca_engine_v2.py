@@ -583,6 +583,8 @@ class RCAEngineV2:
             from monitor.rule_calibrator import get_calibrated_base
             base = get_calibrated_base(rule['id'])
         except Exception:
+            logger.debug("[rca] 规则 %s 校准读取失败, 回退基础置信度 0.6",
+                         rule.get('id'), exc_info=True)
             base = 0.6
         # 上下文相关告警越多,置信度越高
         related_alerts = context.get('related_alerts', [])
@@ -648,7 +650,8 @@ class RCAEngineV2:
                                        f"约{e['lag_minutes']}分钟 (r={e['strength']})",
                     })
             except Exception:
-                pass
+                logger.debug("[rca] 因果边增强失败 config_id=%s",
+                             context.get('config_id'), exc_info=True)
 
         return chain
 

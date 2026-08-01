@@ -80,7 +80,14 @@ FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
 def frontend_index(request, path=''):
     """Serve React frontend index.html"""
-    from django.http import FileResponse
+    from django.http import FileResponse, JsonResponse
+    # BUG-018: 未匹配的 /api/ 路径应返回 404 JSON，而非 SPA HTML，
+    # 否则会误导 API 消费方（把不存在的接口当成 200 成功）。
+    if request.path.startswith('/api/'):
+        return JsonResponse(
+            {'error': 'Not found', 'message': f'API 端点不存在: {request.path}'},
+            status=404
+        )
     index_path = os.path.join(FRONTEND_DIST, 'index.html')
     if os.path.exists(index_path):
         return FileResponse(open(index_path, 'rb'), content_type='text/html')

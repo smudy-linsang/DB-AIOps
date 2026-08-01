@@ -110,7 +110,7 @@ class SSEView(View):
                 )
             _active_connections += 1
 
-        # 简单的认证检查
+        # 认证检查（BUG-012）：Token 为空或无效一律拒绝，禁止匿名订阅事件流
         from .auth import TokenManager
         auth_header = request.headers.get('Authorization', '')
         if auth_header.startswith('Bearer '):
@@ -120,10 +120,16 @@ class SSEView(View):
         else:
             token = request.GET.get('token', '')
 
-        # Token 为空时仍允许连接（开发模式），但生产环境应强制认证
-        user_info = None
-        if token:
-            user_info = TokenManager.validate_token(token)
+        user_info = TokenManager.validate_token(token) if token else None
+        if not user_info:
+            with _connections_lock:
+                _active_connections -= 1
+            from django.http import JsonResponse
+            return JsonResponse(
+                {'error': 'Authentication required',
+                 'message': 'SSE 订阅需要有效的认证 Token'},
+                status=401
+            )
 
         response = StreamingHttpResponse(
             self._event_stream(request, user_info),

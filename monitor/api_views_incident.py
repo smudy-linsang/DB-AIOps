@@ -395,6 +395,7 @@ class PlaybookRunRollbackView(_BaseView):
             run.save(update_fields=['step_results', 'status'])
             return self.ok(run_id=run.run_id, status='rolled_back')
         except Exception as e:
+            logger.exception("[incident] 回滚失败 run_id=%s", run_id)
             return self.err('INTERNAL', f'回滚失败: {e}', 500)
         finally:
             if conn:

@@ -294,8 +294,8 @@ def run_diagnosis(incident_id: str) -> dict:
     try:
         if inc.status == 'diagnosing':
             inc.transition('plan_ready', 'system', '诊断完成')
-    except IncidentStateError:
-        pass
+    except IncidentStateError as e:
+        logger.warning("[diag] %s 状态转移 diagnosing->plan_ready 失败: %s", incident_id, e)
 
     elapsed = time.time() - t0
     if elapsed > budget:
@@ -303,7 +303,7 @@ def run_diagnosis(incident_id: str) -> dict:
     try:
         _write_diag_metric(inc, elapsed, 'timeout' if elapsed > budget else 'ok')
     except Exception:
-        pass
+        logger.warning("[diag] %s 诊断指标写入失败", incident_id, exc_info=True)
 
     # 通知 (6B-08)
     try:

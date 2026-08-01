@@ -125,12 +125,24 @@ class LoginView(JSONResponseMixin, View):
         if not username or not password:
             return self.error_response('Username and password are required', 400)
         
-        from .auth import login_user
+        from .auth import (
+            login_user, check_login_allowed, record_login_failure, record_login_success
+        )
+
+        # 登录爆破防护：锁定期间拒绝尝试
+        locked_remaining = check_login_allowed(request, username)
+        if locked_remaining is not None:
+            return self.error_response(
+                f'登录失败次数过多，账号已临时锁定，请 {locked_remaining} 秒后重试', 429
+            )
+
         result = login_user(username, password)
         
         if not result:
+            record_login_failure(request, username)
             return self.error_response('Invalid username or password', 401)
         
+        record_login_success(request, username)
         return self.json_response({
             'status': 'success',
             'message': 'Login successful',
@@ -300,6 +312,7 @@ class DatabaseTestConnectionView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission('databases.test_connection'))
     def post(self, request):
         """
         POST /api/v1/databases/test-connection/
@@ -405,6 +418,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
             'create_time': config.create_time.isoformat() if config.create_time else None
         })
 
+    @method_decorator(require_permission('databases.update'))
     def put(self, request, config_id: int):
         """
         PUT /api/v1/databases/<config_id>/
@@ -482,6 +496,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         except Exception as e:
             return self.error_response(f'Failed to update database config: {str(e)}', 500)
 
+    @method_decorator(require_permission('databases.delete'))
     def delete(self, request, config_id: int):
         """
         DELETE /api/v1/databases/<config_id>/
@@ -1304,7 +1319,7 @@ class AuditLogApproveView(JSONResponseMixin, View):
     
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_supervisor', 'admin']))
+    @method_decorator(require_role(['dba', 'super_admin']))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
@@ -1322,33 +1337,14 @@ class AuditLogApproveView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
-        
-        # 获取用户角色
-        role = get_user_role(request.user)
-        
-        # 更新审批状态
-        if role == 'dba_supervisor':
-            if not audit_log.approver_1:
-                audit_log.approver_1 = request.user.username
-                audit_log.approve_1_at = timezone.now()
-                # 如果是高风险工单，需要第二级审批
-                if audit_log.risk_level == 'high':
-                    audit_log.status = 'pending_approval_2'
-                else:
-                    audit_log.status = 'approved'
-            elif not audit_log.approver_2:
-                audit_log.approver_2 = request.user.username
-                audit_log.approve_2_at = timezone.now()
-                audit_log.status = 'approved'
-        elif role == 'admin':
-            # admin 可以直接审批
-            if not audit_log.approver_1:
-                audit_log.approver_1 = request.user.username
-                audit_log.approve_1_at = timezone.now()
-            audit_log.status = 'approved'
-        
-        audit_log.save()
-        
+
+        # 更新审批状态（BUG-007：AuditLog 为单级审批模型，使用 approver/approve_time，
+        # 原 approver_1/approver_2 多级字段在模型中不存在，会导致 AttributeError）
+        audit_log.approver = request.user.username
+        audit_log.approve_time = timezone.now()
+        audit_log.status = 'approved'
+        audit_log.save(update_fields=['approver', 'approve_time', 'status'])
+
         return self.json_response({
             'status': 'success',
             'message': 'Audit log approved',
@@ -1362,7 +1358,7 @@ class AuditLogRejectView(JSONResponseMixin, View):
     
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_supervisor', 'admin']))
+    @method_decorator(require_role(['dba', 'super_admin']))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
@@ -1396,7 +1392,7 @@ class AuditLogExecuteView(JSONResponseMixin, View):
     
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    @method_decorator(require_role(['dba', 'super_admin']))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
@@ -1495,7 +1491,7 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
     
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_role(['dba_operator', 'dba_supervisor', 'admin']))
+    @method_decorator(require_role(['dba', 'super_admin']))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
@@ -2686,6 +2682,7 @@ class DatabaseSlowQueriesView(JSONResponseMixin, View):
     """
 
     @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -2725,6 +2722,7 @@ class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
     """数据库慢查询分析 API — 模式识别 + 优化建议"""
 
     @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -2755,6 +2753,7 @@ class DatabaseSQLTextSearchView(JSONResponseMixin, View):
     """SQL 文本搜索 API — 搜索历史慢查询记录"""
 
     @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 

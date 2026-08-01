@@ -52,6 +52,11 @@ CSRF_TRUSTED_ORIGINS = [
     if o.strip()
 ]
 
+# Content-Security-Policy（BUG-019）：默认空=不下发，避免误伤前端内联脚本/样式；
+# 生产环境应按前端实际资源定制，例如:
+#   default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
+CONTENT_SECURITY_POLICY = os.environ.get('CONTENT_SECURITY_POLICY', '')
+
 # 安全中间件配置
 if not DEBUG:
     SECURE_SSL_REDIRECT = (ENVIRONMENT == 'prod')
@@ -77,6 +82,14 @@ ADMIN_IP_WHITELIST = [
 # 如果配置了白名单，则启用 IP 检查
 ADMIN_IP_WHITELIST_ENABLED = bool(ADMIN_IP_WHITELIST)
 
+# Prometheus 指标端点访问控制（BUG-013）：默认拒绝匿名，满足其一即可放行
+METRICS_ACCESS_TOKEN = os.environ.get('METRICS_ACCESS_TOKEN', '')
+METRICS_IP_WHITELIST = [
+    ip.strip()
+    for ip in os.environ.get('METRICS_IP_WHITELIST', '').split(',')
+    if ip.strip()
+]
+
 # 密码加密密钥（新增）
 DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
 if not DB_MONITOR_SECRET_KEY:
@@ -101,12 +114,16 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
+    # API 限流（仅 /api/ 路径，默认关闭，生产建议开启；BUG-006）
+    'monitor.rate_limit.RateLimitMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
     'django.contrib.messages.middleware.MessageMiddleware',
     'django.middleware.clickjacking.XFrameOptionsMiddleware',
+    # 安全响应头（CSP 等；BUG-019）
+    'monitor.middleware.SecurityHeadersMiddleware',
     # 统一异常处理：将未捕获异常转为 JSON 响应
     'monitor.middleware.ExceptionMiddleware',
     # 操作审计：拦截写操作并记录到 AuditLog
@@ -415,7 +432,15 @@ AUTONOMY_DEFAULT_LEVEL = int(os.environ.get('AUTONOMY_DEFAULT_LEVEL', 1))
 # API 配置
 # ==========================================
 API_RATE_LIMIT = int(os.environ.get('API_RATE_LIMIT', 100))  # 每分钟请求数限制
+API_RATE_WINDOW = int(os.environ.get('API_RATE_WINDOW', 60))  # 限流时间窗口（秒）
+# 全局 API 限流开关（仅作用于 /api/ 路径；生产环境建议 True；BUG-006）
+ENABLE_RATE_LIMIT = os.environ.get('ENABLE_RATE_LIMIT', 'False').lower() in ('true', '1', 'yes')
 API_TOKEN_EXPIRY_HOURS = int(os.environ.get('API_TOKEN_EXPIRY_HOURS', 24))  # Token 过期时间
+
+# 登录爆破防护（BUG-006）：窗口内连续失败达阈值后临时锁定
+LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', 5))
+LOGIN_FAIL_WINDOW_SEC = int(os.environ.get('LOGIN_FAIL_WINDOW_SEC', 600))
+LOGIN_LOCKOUT_SEC = int(os.environ.get('LOGIN_LOCKOUT_SEC', 900))
 
 # ============================================================================
 # 日志配置

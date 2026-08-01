@@ -196,6 +196,14 @@ class InvestigateView(_BaseView):
         if running:
             return self.err('8005', f'排查已在进行中 ({running.trace_id})', 409)
 
+        # 原子启动锁（BUG-010）：DB 检查与子线程创建轨迹之间存在竞态窗口，
+        # 用缓存 add() 的原子性抢占锁，防止并发请求重复发起排查。
+        # 锁覆盖至子线程创建轨迹之后；生产 Redis 缓存可跨 worker 生效。
+        from django.core.cache import cache
+        lock_key = f"agent_start_lock_{inc.id}"
+        if not cache.add(lock_key, 1, 30):
+            return self.err('8005', '排查已在进行中', 409)
+
         user = _username(request)
         t_start = timezone.now()
 
@@ -208,6 +216,7 @@ class InvestigateView(_BaseView):
             except Exception:
                 logger.exception("agent investigate 后台异常: %s", incident_id)
             finally:
+                cache.delete(lock_key)
                 close_old_connections()
 
         threading.Thread(target=_run, daemon=True, name=f"agent-{inc.id}").start()

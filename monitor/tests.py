@@ -1,4 +1,5 @@
 import json
+from contextlib import ExitStack
 from unittest import mock
 
 from django.test import TestCase
@@ -8,6 +9,28 @@ from monitor.crypto import decrypt_password, encrypt_password, is_encrypted
 from monitor.management.commands.start_monitor import Command
 from monitor.models import AlertLog, DatabaseConfig, MonitorLog
 from monitor.pg_capacity import postgresql_db_used_pct
+
+
+# BUG-008: AlertManager v3.0 改为"通知规则驱动"，fire()/resolve() 统一走
+# _send_to_channels() 调用真实渠道函数（email/dingtalk/wecom），注入的 notifier
+# 已弃用。因此测试需 mock 渠道函数而非 notifier。无匹配规则时默认三渠道全发。
+_CHANNEL_FUNCS = (
+    'monitor.notifications.send_email_alert',
+    'monitor.notifications.send_dingtalk_alert',
+    'monitor.notifications.send_wecom_alert',
+)
+
+
+def _patch_channels():
+    """同时 mock 三个通知渠道，返回 multi-exit-stack 与 mock 列表。"""
+    stack = ExitStack()
+    mocks = [stack.enter_context(mock.patch(func, return_value=True))
+             for func in _CHANNEL_FUNCS]
+    return stack, mocks
+
+
+def _total_channel_calls(mocks) -> int:
+    return sum(m.call_count for m in mocks)
 
 
 class CryptoTests(TestCase):
@@ -49,28 +72,32 @@ class AlertManagerTests(TestCase):
         )
 
     def test_fire_deduplicates_active_alert(self):
-        notifier = mock.Mock()
-        am = AlertManager(self.config, notifier)
+        am = AlertManager(self.config)
+        stack, mocks = _patch_channels()
+        with stack:
+            am.fire("down", "", "title1", "body1", severity="critical")
+            am.fire("down", "", "title2", "body2", severity="critical")
 
-        am.fire("down", "", "title1", "body1", severity="critical")
-        am.fire("down", "", "title2", "body2", severity="critical")
-
-        self.assertEqual(AlertLog.objects.filter(config=self.config, alert_type="down", status="active").count(), 1)
-        notifier.assert_called_once_with("title1", "body1")
+        # 去重：仅一条活跃告警
+        self.assertEqual(
+            AlertLog.objects.filter(config=self.config, alert_type="down", status="active").count(),
+            1,
+        )
+        # 首次触发推送一次（默认 3 渠道），第二次静默
+        self.assertEqual(_total_channel_calls(mocks), 3)
 
     def test_resolve_marks_alert_resolved_and_notifies(self):
-        notifier = mock.Mock()
-        am = AlertManager(self.config, notifier)
-        am.fire("down", "", "故障", "连接失败", severity="critical")
-
-        am.resolve("down", "", recovery_title="恢复", recovery_body="已恢复")
+        am = AlertManager(self.config)
+        stack, mocks = _patch_channels()
+        with stack:
+            am.fire("down", "", "故障", "连接失败", severity="critical")
+            am.resolve("down", "", recovery_title="恢复", recovery_body="已恢复")
 
         alert = AlertLog.objects.get(config=self.config, alert_type="down")
         self.assertEqual(alert.status, "resolved")
         self.assertIsNotNone(alert.resolved_at)
-        self.assertEqual(notifier.call_count, 2)
-        notifier.assert_any_call("故障", "连接失败")
-        notifier.assert_any_call("恢复", "已恢复")
+        # 触发推送 + 恢复推送 = 2 轮，每轮默认 3 渠道
+        self.assertEqual(_total_channel_calls(mocks), 6)
 
 
 class ProcessResultTests(TestCase):
@@ -87,7 +114,8 @@ class ProcessResultTests(TestCase):
         self.command = Command()
 
     def test_process_result_down_then_up_resolves_alert(self):
-        with mock.patch.object(self.command, "send_alert") as mocked_sender:
+        stack, mocks = _patch_channels()
+        with stack:
             self.command.process_result(self.config, "DOWN", {"error": "connect timeout"})
             self.command.process_result(self.config, "DOWN", {"error": "connect timeout"})
             self.command.process_result(
@@ -102,8 +130,8 @@ class ProcessResultTests(TestCase):
                 },
             )
 
-        # DOWN 告警只首次触发一次，恢复时再触发一次
-        self.assertEqual(mocked_sender.call_count, 2)
+        # DOWN 告警首次触发一轮通知，恢复时再触发一轮（去重：第二次 DOWN 静默）
+        self.assertEqual(_total_channel_calls(mocks), 6)
 
         down_alert = AlertLog.objects.filter(config=self.config, alert_type="down").order_by("-create_time").first()
         self.assertIsNotNone(down_alert)
@@ -114,7 +142,8 @@ class ProcessResultTests(TestCase):
 
     def test_process_result_writes_json_message(self):
         payload = {"conn_usage_pct": 1, "tablespaces": [], "locks": []}
-        with mock.patch.object(self.command, "send_alert"):
+        stack, _ = _patch_channels()
+        with stack:
             self.command.process_result(self.config, "UP", payload)
 
         log = MonitorLog.objects.filter(config=self.config).latest("create_time")

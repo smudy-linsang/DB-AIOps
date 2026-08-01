@@ -10,6 +10,7 @@
 
 import json
 import logging
+import threading
 import time
 from datetime import datetime, timedelta
 from typing import Dict, List
@@ -229,18 +230,58 @@ class HealthChecker:
 
 # 全局单例
 _prometheus_exporter = None
+_prometheus_exporter_lock = threading.Lock()  # 并发重建保护（BUG-017）
 
 
 def get_prometheus_exporter() -> PrometheusExporter:
-    """获取 Prometheus 导出器单例"""
+    """获取 Prometheus 导出器单例（双重检查锁，避免并发重复创建）"""
     global _prometheus_exporter
     if _prometheus_exporter is None:
-        _prometheus_exporter = PrometheusExporter()
+        with _prometheus_exporter_lock:
+            if _prometheus_exporter is None:
+                _prometheus_exporter = PrometheusExporter()
     return _prometheus_exporter
 
 
 def prometheus_metrics_view(request):
-    """Prometheus 指标端点视图"""
-    exporter = get_prometheus_exporter()
-    output = exporter.export()
-    return HttpResponse(output, content_type='text/plain; version=0.0.4; charset=utf-8')
+    """Prometheus 指标端点视图
+
+    访问控制（BUG-013）：端点暴露基础设施信息，默认拒绝匿名访问。
+    支持两种放行方式（满足其一即可）：
+    1. 配置 METRICS_ACCESS_TOKEN，请求携带匹配的 Bearer 头或 ?token= 参数；
+    2. 配置 METRICS_IP_WHITELIST，请求来源 IP 命中白名单。
+    两者均未配置时，出于安全默认拒绝（需显式配置后才可采集）。
+    """
+    from django.conf import settings
+    from django.http import JsonResponse
+
+    # 1. Token 校验
+    expected_token = getattr(settings, 'METRICS_ACCESS_TOKEN', '')
+    if expected_token:
+        auth_header = request.headers.get('Authorization', '')
+        provided = ''
+        if auth_header.startswith('Bearer '):
+            provided = auth_header[7:]
+        else:
+            provided = request.GET.get('token', '')
+        if provided and provided == expected_token:
+            exporter = get_prometheus_exporter()
+            return HttpResponse(exporter.export(),
+                                content_type='text/plain; version=0.0.4; charset=utf-8')
+
+    # 2. IP 白名单校验
+    whitelist = getattr(settings, 'METRICS_IP_WHITELIST', [])
+    if whitelist:
+        xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+        client_ip = xff.split(',')[0].strip() if xff else request.META.get('REMOTE_ADDR', '')
+        if client_ip in whitelist:
+            exporter = get_prometheus_exporter()
+            return HttpResponse(exporter.export(),
+                                content_type='text/plain; version=0.0.4; charset=utf-8')
+
+    # 3. 均未放行 → 拒绝
+    return JsonResponse(
+        {'error': 'Authentication required',
+         'message': '指标端点需配置 METRICS_ACCESS_TOKEN 或 METRICS_IP_WHITELIST 后访问'},
+        status=401
+    )

@@ -736,6 +736,67 @@ def logout_user(token: str) -> bool:
 
 
 # =============================================================================
+# 登录爆破防护（BUG-006）
+# =============================================================================
+# 基于缓存的失败计数与临时锁定：同一 (用户名, IP) 在窗口内连续失败达到阈值后，
+# 锁定一段时间，期间拒绝登录尝试。生产环境缓存为 Redis，可跨 worker 生效。
+
+LOGIN_MAX_ATTEMPTS = getattr(settings, 'LOGIN_MAX_ATTEMPTS', 5)
+LOGIN_FAIL_WINDOW_SEC = getattr(settings, 'LOGIN_FAIL_WINDOW_SEC', 600)   # 计数窗口 10 分钟
+LOGIN_LOCKOUT_SEC = getattr(settings, 'LOGIN_LOCKOUT_SEC', 900)           # 锁定 15 分钟
+
+
+def _login_lock_key(username: str, ip: str) -> str:
+    raw = f"{username.lower()}:{ip}"
+    return f"login_lock_{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+
+
+def _login_count_key(username: str, ip: str) -> str:
+    raw = f"{username.lower()}:{ip}"
+    return f"login_fail_{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+
+
+def _client_ip(request: HttpRequest) -> str:
+    xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
+    if xff:
+        return xff.split(',')[0].strip()
+    return request.META.get('REMOTE_ADDR', 'unknown')
+
+
+def check_login_allowed(request: HttpRequest, username: str) -> Optional[int]:
+    """
+    检查是否允许本次登录尝试。
+    返回 None 表示允许；返回整数表示已被锁定，值为剩余锁定秒数。
+    """
+    ip = _client_ip(request)
+    ttl = cache.get(_login_lock_key(username, ip))
+    if ttl:
+        return int(ttl)
+    return None
+
+
+def record_login_failure(request: HttpRequest, username: str) -> None:
+    """记录一次登录失败，达到阈值则触发锁定。"""
+    ip = _client_ip(request)
+    count_key = _login_count_key(username, ip)
+    try:
+        attempts = cache.incr(count_key)
+    except ValueError:
+        cache.set(count_key, 1, LOGIN_FAIL_WINDOW_SEC)
+        attempts = 1
+    if attempts >= LOGIN_MAX_ATTEMPTS:
+        cache.set(_login_lock_key(username, ip), LOGIN_LOCKOUT_SEC, LOGIN_LOCKOUT_SEC)
+        cache.delete(count_key)
+
+
+def record_login_success(request: HttpRequest, username: str) -> None:
+    """登录成功后清理失败计数。"""
+    ip = _client_ip(request)
+    cache.delete(_login_count_key(username, ip))
+    cache.delete(_login_lock_key(username, ip))
+
+
+# =============================================================================
 # API Key 认证（用于外部系统集成）
 # =============================================================================
 

@@ -190,6 +190,21 @@ class DbConnector:
                 logger.warning(f"关闭连接时出错: {str(e)}")
     
     @staticmethod
+    def _first_column(row):
+        """
+        从游标 fetchone() 结果中安全取出第一列值。
+
+        兼容两种游标：
+        - DictCursor（MySQL 系，见 _connect_mysql）返回 dict，如 {'VERSION()': '8.0.x'}
+        - 默认游标（Oracle/PG/DM）返回 tuple/list，如 ('8.0.x',)
+        """
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            return next(iter(row.values())) if row else None
+        return row[0]
+
+    @staticmethod
     def test_connection(config) -> dict:
         """
         测试数据库连接
@@ -217,17 +232,17 @@ class DbConnector:
                 cursor.execute("SELECT banner FROM v$version WHERE ROWNUM = 1")
                 result = cursor.fetchone()
                 if result:
-                    version = result[0]
+                    version = DbConnector._first_column(result)
             elif db_type in ['mysql', 'gbase', 'tdsql']:
                 cursor.execute("SELECT VERSION()")
                 result = cursor.fetchone()
                 if result:
-                    version = result[0]
+                    version = DbConnector._first_column(result)
             elif db_type in ['pgsql', 'postgresql']:
                 cursor.execute("SELECT version()")
                 result = cursor.fetchone()
                 if result:
-                    version = result[0]
+                    version = DbConnector._first_column(result)
             
             cursor.close()
             

@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react'
+import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Descriptions, Tag, Button, Space, Statistic, Row, Col, Timeline, Alert, message, Empty, Progress,
   Collapse, Tooltip,
@@ -45,6 +45,11 @@ export default function IncidentDetail() {
   const [traces, setTraces] = useState([])
   const [investigating, setInvestigating] = useState(false)
 
+  // 定时器引用：组件卸载时统一清理，防止内存/网络泄漏（BUG-011）
+  const pollRef = useRef(null)
+  const pollTimeoutRef = useRef(null)
+  const delayTimersRef = useRef([])
+
   const loadTraces = useCallback(async () => {
     try {
       const r = await incidentAPI.agentTrace(incidentId)
@@ -70,6 +75,22 @@ export default function IncidentDetail() {
 
   useEffect(() => { load() }, [load])
 
+  // 组件卸载时统一清理所有定时器（BUG-011）
+  useEffect(() => () => {
+    if (pollRef.current) clearInterval(pollRef.current)
+    if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current)
+    delayTimersRef.current.forEach((t) => clearTimeout(t))
+  }, [])
+
+  // 受管的延迟刷新定时器（卸载后不再触发请求）
+  const delayedLoad = useCallback((ms) => {
+    const t = setTimeout(() => {
+      delayTimersRef.current = delayTimersRef.current.filter((x) => x !== t)
+      load()
+    }, ms)
+    delayTimersRef.current.push(t)
+  }, [load])
+
   const doAck = async () => {
     try { await incidentAPI.ack(incidentId); message.success('已确认'); load() }
     catch (e) { message.error(e.message) }
@@ -79,14 +100,14 @@ export default function IncidentDetail() {
     catch (e) { message.error(e.message) }
   }
   const doRediagnose = async () => {
-    try { await incidentAPI.rediagnose(incidentId); message.success('已触发重新诊断'); setTimeout(load, 2000) }
+    try { await incidentAPI.rediagnose(incidentId); message.success('已触发重新诊断'); delayedLoad(2000) }
     catch (e) { message.error(e.message) }
   }
   const doExecute = async (scenario) => {
     try {
       const r = await incidentAPI.execute(incidentId, { scenario })
       message.success(r.executing ? `执行中: ${r.reason}` : `已创建执行(待审批): ${r.reason}`)
-      setTimeout(load, 3000)
+      delayedLoad(3000)
     } catch (e) { message.error(e.message) }
   }
 
@@ -112,15 +133,23 @@ export default function IncidentDetail() {
     try {
       await incidentAPI.investigate(incidentId)
       message.success('深度排查已启动')
-      const poll = setInterval(async () => {
+      // 清理可能残留的旧定时器
+      if (pollRef.current) clearInterval(pollRef.current)
+      if (pollTimeoutRef.current) clearTimeout(pollTimeoutRef.current)
+      pollRef.current = setInterval(async () => {
         const ts = await loadTraces()
         if (!ts.some((t) => t.status === 'running')) {
-          clearInterval(poll)
+          clearInterval(pollRef.current)
+          pollRef.current = null
           setInvestigating(false)
           load()
         }
       }, 5000)
-      setTimeout(() => { clearInterval(poll); setInvestigating(false) }, 180000)
+      pollTimeoutRef.current = setTimeout(() => {
+        if (pollRef.current) clearInterval(pollRef.current)
+        pollRef.current = null
+        setInvestigating(false)
+      }, 180000)
     } catch (e) {
       setInvestigating(false)
       message.error(e.message)

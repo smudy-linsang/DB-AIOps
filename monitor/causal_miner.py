@@ -34,6 +34,8 @@ def _candidate_metrics(config) -> list:
     try:
         d = json.loads(log.message) if isinstance(log.message, str) else (log.message or {})
     except Exception:
+        logger.debug("[causal] 候选指标解析失败 config=%s", getattr(config, 'id', '?'),
+                     exc_info=True)
         return []
     return [k for k, v in d.items()
             if isinstance(v, (int, float)) and not isinstance(v, bool)][:40]
@@ -155,6 +157,9 @@ def get_mined_edges(config_id: int, metric: str = None, limit: int = 5) -> list:
                 return [_edge_dict(e) for e in hit]
         return [_edge_dict(e) for e in qs.order_by('-strength')[:limit]]
     except Exception:
+        # 不可静默成"无边"：DB 故障会导致因果链增强长期失效而无人察觉（BUG-015）
+        logger.warning("[causal] 读取挖掘因果边失败 config_id=%s", config_id,
+                       exc_info=True)
         return []
 
 

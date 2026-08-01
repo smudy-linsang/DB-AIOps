@@ -39,7 +39,7 @@ def dispatch_distill_incident(incident_id: str):
             distill_incident_task.delay(incident_id)
             return
     except Exception:
-        pass  # Celery 不可用 → 线程兜底
+        logger.debug("[distill] %s Celery 分发失败, 回退线程兜底", incident_id, exc_info=True)
     try:
         t = threading.Thread(target=_run_distill, args=(incident_id,),
                              name=f"distill-{incident_id}", daemon=True)
@@ -73,7 +73,8 @@ def scan_distill_task():
                 if index_case_to_es(case):
                     indexed += 1
             except Exception:
-                pass
+                logger.warning("[distill] 案例 %s 向量索引补偿失败",
+                               getattr(case, 'case_id', '?'), exc_info=True)
     except Exception as e:
         logger.debug("[distill] 向量补偿跳过: %s", e)
     result['reindexed'] = indexed

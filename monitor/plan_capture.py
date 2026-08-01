@@ -20,6 +20,10 @@ logger = logging.getLogger("monitor.plan_capture")
 
 _ALLOWED_HEAD = re.compile(r'^\s*(select|insert|update|delete|replace|with|table)\b', re.I)
 
+# 合法数据库标识符（用于 USE `db_name` 防注入；BUG-009）：
+# 仅允许字母/数字/下划线/连字符/点/美元符，长度 1-64，禁止反引号/分号/空白等
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z0-9_.$-]{1,64}$')
+
 # 结构 hash 需剔除的易变键 (代价/行数/过滤率类)
 _VOLATILE_KEYS = {
     # mysql explain json
@@ -133,6 +137,10 @@ def capture(config, sql_digest, sql_text=None, source='auto', conn=None, db_name
                 if not _sql_allowed(sql_text or ''):
                     return None
                 if db_name:
+                    # 标识符白名单校验，防止 SQL 注入（BUG-009）
+                    if not _IDENTIFIER_RE.match(str(db_name)):
+                        logger.warning("[plan] 非法 db_name 已拒绝: %r", db_name)
+                        return None
                     try:
                         cur.execute(f"USE `{db_name}`")
                     except Exception:
