@@ -824,6 +824,15 @@ class Command(BaseCommand):
                     )
                     print(f"  [HEALTH] 评分={health_report['overall_score']} {health_report['grade']}级")
                 else:
+                    # BUG-020: 评分恢复至 C 级及以上时，解除历史健康告警
+                    am.resolve(
+                        'health', 'health_score',
+                        recovery_title='[RECOVERED] 数据库健康评分已恢复',
+                        recovery_body=(
+                            f"健康评分恢复至 {health_report['overall_score']} 分 "
+                            f"({health_report['grade']}级)，告警解除"
+                        ),
+                    )
                     print(f"  [HEALTH] 评分={health_report['overall_score']} {health_report['grade']}级 (正常)")
 
         except Exception as e:
@@ -928,6 +937,20 @@ class Command(BaseCommand):
                             description=body, severity='warning',
                         )
                         print(f"  [CONFIG] 发现 {len(critical_issues)} 个配置问题")
+                    else:
+                        # BUG-020: 无高优先级配置问题时，解除历史配置告警
+                        am.resolve(
+                            'config', 'config_check',
+                            recovery_title='[RECOVERED] 数据库配置检查已恢复',
+                            recovery_body='配置检查未发现高优先级问题，告警解除',
+                        )
+                else:
+                    # BUG-020: 检查通过（无结果）同样解除历史配置告警
+                    am.resolve(
+                        'config', 'config_check',
+                        recovery_title='[RECOVERED] 数据库配置检查已恢复',
+                        recovery_body='配置检查通过，告警解除',
+                    )
                 # 缓存24小时
                 cache.set(config_check_cache_key, True, 86400)
         except Exception as e:
