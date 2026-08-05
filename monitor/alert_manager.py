@@ -225,21 +225,22 @@ class AlertManager:
         5. 时间策略匹配（如果配置了 schedule）
         6. 按优先级降序排列
         """
+        # 4NF: alert_types/severities 已拆为子表，ORM JSON 查询改为 Python 端过滤
         rules = NotificationRule.objects.filter(
             is_enabled=True
         ).filter(
             # 全局规则或当前数据库的规则
             models.Q(db_config__isnull=True) | models.Q(db_config=self.config)
-        ).filter(
-            # 告警类型匹配（空列表表示匹配所有类型）
-            models.Q(alert_types__len=0) | models.Q(alert_types__contains=[alert_type])
-        ).filter(
-            # 严重程度匹配（空列表表示匹配所有程度）
-            models.Q(severities__len=0) | models.Q(severities__contains=[severity])
         ).order_by('-priority', 'name')
 
         matched = []
         for rule in rules:
+            # 告警类型匹配（空列表表示匹配所有类型）
+            if rule.alert_types and alert_type not in rule.alert_types:
+                continue
+            # 严重程度匹配（空列表表示匹配所有程度）
+            if rule.severities and severity not in rule.severities:
+                continue
             if self._check_schedule(rule):
                 matched.append(rule)
 

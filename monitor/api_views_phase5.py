@@ -361,7 +361,9 @@ class InspectionItemListView(_BaseView):
         if category:
             qs = qs.filter(category=category)
         if db_type:
-            qs = qs.filter(applicable_db_types__contains=db_type)
+            # 4NF: applicable_db_types 已拆为子表；空子表=适用全部
+            from django.db.models import Q
+            qs = qs.filter(Q(dbtype_set__value=db_type) | Q(dbtype_set__isnull=True)).distinct()
 
         items = []
         for it in qs[:200]:

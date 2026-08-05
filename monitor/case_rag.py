@@ -332,10 +332,11 @@ def auto_promote_to_case(alert, root_cause: str, resolution: str,
                 "root_cause": root_cause,
                 "resolution": resolution,
                 "sql_used": sql_used,
-                "tags": tags or [alert.metric_key or "", alert.db_type or ""],
                 "confidence": 0.6,
             },
         )
+        # 4NF: tags 多值经兼容属性写入子表
+        obj.tags = tags or [alert.metric_key or "", alert.db_type or ""]
         return obj.case_id if created else None
 
 

@@ -390,9 +390,9 @@ class PlaybookRunRollbackView(_BaseView):
             conn = DbConnector.get_connection(run.incident.config)
             sr = list(run.step_results or [])
             _do_rollback(conn, run.incident.db_type, run.playbook, run.params or {}, sr)
-            run.step_results = sr
+            run.step_results = sr  # 4NF: setter 已写入 PlaybookRunStepResult 子表
             run.status = 'rolled_back'
-            run.save(update_fields=['step_results', 'status'])
+            run.save(update_fields=['status'])
             return self.ok(run_id=run.run_id, status='rolled_back')
         except Exception as e:
             logger.exception("[incident] 回滚失败 run_id=%s", run_id)

@@ -230,8 +230,8 @@ def execute_run(run_id: str) -> dict:
 
         # 3. 成功 → verifying, 发 verify 消息
         run.status = 'verifying'
-        run.step_results = step_results
-        run.save(update_fields=['status', 'step_results'])
+        run.step_results = step_results  # 4NF: setter 已写入子表
+        run.save(update_fields=['status'])
         try:
             if inc.status == 'executing':
                 inc.transition('verifying', 'playbook', '进入验证')

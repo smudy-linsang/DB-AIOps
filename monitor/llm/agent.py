@@ -146,11 +146,11 @@ def investigate(incident, triggered_by: str = 'system'):
         status = 'failed'
         conclusion = {'error': str(e)}
 
-    trace.steps = steps
+    trace.steps = steps  # 4NF: setter 已写入 AgentTraceStep 子表
     trace.conclusion = conclusion
     trace.status = status
     trace.finished_at = timezone.now()
-    trace.save(update_fields=['steps', 'conclusion', 'status', 'finished_at'])
+    trace.save(update_fields=['conclusion', 'status', 'finished_at'])
 
     # 结论回写 rca_result (仅参考标记, 不覆盖既有诊断)
     if status == 'done' and conclusion:

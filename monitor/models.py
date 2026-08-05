@@ -13,6 +13,42 @@ DB_TYPES = (
     ('tdsql', 'TDSQL'),
 )
 
+
+# =============================================================================
+# 4NF 子表读写辅助函数
+# =============================================================================
+def _replace_scalar_children(parent, child_model, values, fk_field='rule'):
+    """整表替换标量多值子行（先删后批量插）。values 为标量列表。"""
+    if parent.pk is None:
+        parent.save()
+    child_model.objects.filter(**{fk_field: parent}).delete()
+    objs = [child_model(**{fk_field: parent, 'value': str(v)}) for v in (values or []) if v is not None and v != '']
+    child_model.objects.bulk_create(objs)
+
+
+def _replace_ordered_children(parent, child_model, payloads, fk_field, phase=None):
+    """整表替换有序/复合多值子行。payloads 为 dict/list 元素列表，seq 保序。"""
+    if parent.pk is None:
+        parent.save()
+    qs = child_model.objects.filter(**{fk_field: parent})
+    if phase is not None:
+        qs = qs.filter(phase=phase)
+        objs = [child_model(**{fk_field: parent, 'phase': phase, 'seq': i, 'payload': p})
+                for i, p in enumerate(payloads or [])]
+    else:
+        objs = [child_model(**{fk_field: parent, 'seq': i, 'payload': p})
+                for i, p in enumerate(payloads or [])]
+    qs.delete()
+    child_model.objects.bulk_create(objs)
+
+
+def _read_ordered_children(parent, manager_name, phase=None):
+    """按 seq 读出 payload 列表。"""
+    qs = getattr(parent, manager_name)
+    if phase is not None:
+        qs = qs.filter(phase=phase)
+    return [o.payload for o in qs.order_by('seq')]
+
 class DatabaseConfig(models.Model):
     # 相当于: name VARCHAR(100) NOT NULL COMMENT '连接别名'
     name = models.CharField(max_length=100, verbose_name="连接别名", help_text="例如: 核心交易库_主节点")
@@ -275,10 +311,21 @@ class UserProfile(models.Model):
 
     user = models.OneToOneField('auth.User', on_delete=models.CASCADE, related_name='profile', verbose_name="用户")
     role = models.ForeignKey(Role, on_delete=models.SET_NULL, null=True, blank=True, related_name='users', verbose_name="角色")
-    allowed_databases = models.JSONField(null=True, blank=True, verbose_name="可访问数据库列表", help_text="为空表示可访问所有数据库，列表形式指定可访问的数据库ID")
+    # 4NF: allowed_databases 多值已拆为 UserProfileDatabase 子表
 
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    @property
+    def allowed_databases(self):
+        return [o.config_id for o in self.alloweddatabase_set.order_by('id')]
+    @allowed_databases.setter
+    def allowed_databases(self, values):
+        if self.pk is None:
+            self.save()
+        UserProfileDatabase.objects.filter(profile=self).delete()
+        UserProfileDatabase.objects.bulk_create(
+            UserProfileDatabase(profile=self, config_id=int(v)) for v in (values or []) if v is not None)
 
     def __str__(self):
         role_name = self.role.name if self.role else '无角色'
@@ -287,6 +334,14 @@ class UserProfile(models.Model):
     class Meta:
         verbose_name = "用户配置"
         verbose_name_plural = "用户配置列表"
+
+
+class UserProfileDatabase(models.Model):
+    """4NF 子表：用户可访问数据库（多值拆分）"""
+    profile = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='alloweddatabase_set')
+    config_id = models.IntegerField(db_index=True)
+    class Meta:
+        unique_together = [('profile', 'config_id')]
 
 
 # ==========================================
@@ -336,8 +391,8 @@ class MetricDefinition(models.Model):
     metric_key = models.CharField(max_length=100, primary_key=True, verbose_name="指标键")
     display_name = models.CharField(max_length=100, verbose_name="显示名称")
     unit = models.CharField(max_length=20, blank=True, null=True, verbose_name="单位", help_text="count/pct/mb/qps/sec")
-    db_types = models.JSONField(null=True, blank=True, verbose_name="适用数据库类型", help_text="如 ['oracle','mysql']，为空表示全部")
-    alert_direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default='up', verbose_name="告警方向")
+    # 4NF: db_types 多值已拆为 MetricDefinitionDbType 子表
+    alert_direction = models.CharField(max_length=10, choices=DIRECTION_CHOICES, default="up", verbose_name="告警方向")
     sigma_k = models.FloatField(default=2.0, verbose_name="Sigma倍数", help_text="正常范围 = mean ± k*std")
     fixed_warn_val = models.FloatField(null=True, blank=True, verbose_name="固定阈值兜底", help_text="基线未就绪时使用")
     is_capacity = models.BooleanField(default=False, verbose_name="是否容量指标", help_text="是否参与容量预测")
@@ -345,12 +400,27 @@ class MetricDefinition(models.Model):
     
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     
+    @property
+    def db_types(self):
+        return [o.value for o in self.dbtype_set.order_by('id')]
+    @db_types.setter
+    def db_types(self, values):
+        _replace_scalar_children(self, MetricDefinitionDbType, values, fk_field='metric')
+
     def __str__(self):
         return f"{self.display_name} ({self.metric_key})"
-    
+
     class Meta:
         verbose_name = "指标定义"
         verbose_name_plural = "指标定义列表"
+
+
+class MetricDefinitionDbType(models.Model):
+    """4NF 子表：指标定义-适用数据库类型（多值拆分）"""
+    metric = models.ForeignKey(MetricDefinition, on_delete=models.CASCADE, related_name='dbtype_set')
+    value = models.CharField(max_length=20)
+    class Meta:
+        unique_together = [('metric', 'value')]
 
 
 # ==========================================
@@ -760,12 +830,8 @@ class NotificationRule(models.Model):
     """通知规则配置，定义告警路由策略"""
 
     name = models.CharField(max_length=100, verbose_name="规则名称")
-    alert_types = models.JSONField(default=list, verbose_name="告警类型",
-        help_text="匹配的告警类型列表，如 ['down','tablespace']，为空表示全部")
-    severities = models.JSONField(default=list, verbose_name="严重程度",
-        help_text="匹配的严重程度列表，如 ['critical','error']，为空表示全部")
-    channels = models.JSONField(default=list, verbose_name="通知渠道",
-        help_text="发送到哪些渠道，如 ['email','dingtalk','wecom']")
+    # 4NF: alert_types/severities/channels 三个独立多值集合已拆分为子表
+    # (NotificationRuleAlertType/Severity/Channel)，此处以兼容属性暴露
     db_config = models.ForeignKey(
         DatabaseConfig, on_delete=models.CASCADE,
         null=True, blank=True, verbose_name="数据库",
@@ -786,10 +852,54 @@ class NotificationRule(models.Model):
         scope = self.db_config.name if self.db_config else '全局'
         return f"[{scope}] {self.name}"
 
+    # ---- 4NF 兼容属性（读/写子表）----
+    @property
+    def alert_types(self):
+        return [o.value for o in self.alerttype_set.order_by('id')]
+    @alert_types.setter
+    def alert_types(self, values):
+        _replace_scalar_children(self, NotificationRuleAlertType, values)
+    @property
+    def severities(self):
+        return [o.value for o in self.severity_set.order_by('id')]
+    @severities.setter
+    def severities(self, values):
+        _replace_scalar_children(self, NotificationRuleSeverity, values)
+    @property
+    def channels(self):
+        return [o.value for o in self.channel_set.order_by('id')]
+    @channels.setter
+    def channels(self, values):
+        _replace_scalar_children(self, NotificationRuleChannel, values)
+
     class Meta:
         verbose_name = "通知规则"
         verbose_name_plural = "通知规则列表"
         ordering = ['-priority', 'name']
+
+
+class NotificationRuleAlertType(models.Model):
+    """4NF 子表：通知规则-告警类型（多值拆分）"""
+    rule = models.ForeignKey(NotificationRule, on_delete=models.CASCADE, related_name='alerttype_set')
+    value = models.CharField(max_length=50)
+    class Meta:
+        unique_together = [('rule', 'value')]
+
+
+class NotificationRuleSeverity(models.Model):
+    """4NF 子表：通知规则-严重程度（多值拆分）"""
+    rule = models.ForeignKey(NotificationRule, on_delete=models.CASCADE, related_name='severity_set')
+    value = models.CharField(max_length=20)
+    class Meta:
+        unique_together = [('rule', 'value')]
+
+
+class NotificationRuleChannel(models.Model):
+    """4NF 子表：通知规则-通知渠道（多值拆分）"""
+    rule = models.ForeignKey(NotificationRule, on_delete=models.CASCADE, related_name='channel_set')
+    value = models.CharField(max_length=20)
+    class Meta:
+        unique_together = [('rule', 'value')]
 
 
 # ==========================================
@@ -855,10 +965,17 @@ class ReportRecord(models.Model):
     file_path = models.CharField(max_length=500, blank=True, default='', verbose_name="文件路径")
     period_start = models.DateField(verbose_name="统计周期开始")
     period_end = models.DateField(verbose_name="统计周期结束")
-    recipients = models.JSONField(default=list, verbose_name="收件人列表")
+    # 4NF: recipients 多值已拆为 ReportRecordRecipient 子表
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='generated', verbose_name="状态")
 
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    @property
+    def recipients(self):
+        return [o.value for o in self.recipient_set.order_by('id')]
+    @recipients.setter
+    def recipients(self, values):
+        _replace_scalar_children(self, ReportRecordRecipient, values, fk_field='report')
 
     def __str__(self):
         return f"{self.title} ({self.get_report_type_display()})"
@@ -867,6 +984,14 @@ class ReportRecord(models.Model):
         verbose_name = "报表记录"
         verbose_name_plural = "报表记录列表"
         ordering = ['-created_at']
+
+
+class ReportRecordRecipient(models.Model):
+    """4NF 子表：报表记录-收件人（多值拆分）"""
+    report = models.ForeignKey(ReportRecord, on_delete=models.CASCADE, related_name='recipient_set')
+    value = models.CharField(max_length=200)
+    class Meta:
+        unique_together = [('report', 'value')]
 
 
 # ==========================================
@@ -882,15 +1007,12 @@ class AlertCase(models.Model):
     root_cause = models.TextField(verbose_name="根因描述")
     resolution = models.TextField(verbose_name="解决方案")
     sql_used = models.TextField(blank=True, default='', verbose_name="使用的SQL")
-    commands_used = models.JSONField(default=list, verbose_name="使用的命令列表")
-    tags = models.JSONField(default=list, verbose_name="标签",
-        help_text="如 ['oracle','tablespace','oltp']")
+    # 4NF: commands_used/tags/references 三个独立多值集合已拆为子表
     severity = models.CharField(max_length=20, default='warning', verbose_name="严重程度")
     success_count = models.IntegerField(default=0, verbose_name="成功引用次数")
     fail_count = models.IntegerField(default=0, verbose_name="失败引用次数")
     confidence = models.FloatField(default=0.0, verbose_name="案例置信度",
         help_text="基于成功/失败比计算")
-    references = models.JSONField(default=list, verbose_name="参考链接")
     # Phase 8B: 案例来源与向量索引状态
     source = models.CharField(max_length=12, default='manual', db_index=True, verbose_name="案例来源",
         help_text="manual=人工录入 distilled=事故自动蒸馏 seed=初始化种子")
@@ -903,6 +1025,25 @@ class AlertCase(models.Model):
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
     last_used_at = models.DateTimeField(null=True, blank=True, verbose_name="最后引用时间")
 
+    @property
+    def commands_used(self):
+        return [o.value for o in self.command_set.order_by('id')]
+    @commands_used.setter
+    def commands_used(self, values):
+        _replace_scalar_children(self, AlertCaseCommand, values, fk_field='case')
+    @property
+    def tags(self):
+        return [o.value for o in self.tag_set.order_by('id')]
+    @tags.setter
+    def tags(self, values):
+        _replace_scalar_children(self, AlertCaseTag, values, fk_field='case')
+    @property
+    def references(self):
+        return [o.value for o in self.reference_set.order_by('id')]
+    @references.setter
+    def references(self, values):
+        _replace_scalar_children(self, AlertCaseReference, values, fk_field='case')
+
     def __str__(self):
         return f"{self.case_id}: {self.title}"
 
@@ -913,6 +1054,30 @@ class AlertCase(models.Model):
         indexes = [
             models.Index(fields=['db_type', 'severity']),
         ]
+
+
+class AlertCaseCommand(models.Model):
+    """4NF 子表：案例-使用命令（多值拆分）"""
+    case = models.ForeignKey(AlertCase, on_delete=models.CASCADE, related_name='command_set')
+    value = models.TextField()
+    class Meta:
+        unique_together = [('case', 'value')]
+
+
+class AlertCaseTag(models.Model):
+    """4NF 子表：案例-标签（多值拆分）"""
+    case = models.ForeignKey(AlertCase, on_delete=models.CASCADE, related_name='tag_set')
+    value = models.CharField(max_length=50)
+    class Meta:
+        unique_together = [('case', 'value')]
+
+
+class AlertCaseReference(models.Model):
+    """4NF 子表：案例-参考链接（多值拆分）"""
+    case = models.ForeignKey(AlertCase, on_delete=models.CASCADE, related_name='reference_set')
+    value = models.TextField()
+    class Meta:
+        unique_together = [('case', 'value')]
 
 
 class RemediationPlan(models.Model):
@@ -948,7 +1113,7 @@ class RemediationPlan(models.Model):
     risk_level = models.CharField(max_length=20, choices=RISK_CHOICES, verbose_name="风险等级")
     title = models.CharField(max_length=200, verbose_name="方案标题")
     description = models.TextField(verbose_name="方案描述")
-    steps = models.JSONField(default=list, verbose_name="执行步骤")
+    # 4NF: steps 多值已拆为 RemediationPlanStep 子表
     rollback_plan = models.TextField(blank=True, default='', verbose_name="回滚方案")
     estimated_impact = models.TextField(blank=True, default='', verbose_name="预期影响")
     business_impact_summary = models.JSONField(default=dict, verbose_name="业务影响摘要")
@@ -962,6 +1127,13 @@ class RemediationPlan(models.Model):
     execution_result = models.TextField(blank=True, default='', verbose_name="执行结果")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    @property
+    def steps(self):
+        return _read_ordered_children(self, 'step_items')
+    @steps.setter
+    def steps(self, values):
+        _replace_ordered_children(self, RemediationPlanStep, values, fk_field='plan')
 
     def __str__(self):
         return f"{self.plan_id} [{self.scenario}|{self.risk_level}] {self.status}"
@@ -989,8 +1161,7 @@ class BusinessImpactAssessment(models.Model):
     overall_severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, verbose_name="综合严重度")
     health_score_before = models.FloatField(verbose_name="健康度评估前")
     health_score_after = models.FloatField(verbose_name="健康度评估后")
-    health_affected_dimensions = models.JSONField(default=list, verbose_name="受影响健康度维度")
-    affected_systems = models.JSONField(default=list, verbose_name="受影响业务系统清单")
+    # 4NF: health_affected_dimensions/affected_systems 两个独立多值集合已拆为子表
     critical_systems_affected = models.IntegerField(default=0, verbose_name="核心系统受影响数")
     estimated_loss_per_minute = models.FloatField(default=0.0, verbose_name="估算损失(元/分钟)")
     estimated_loss_per_hour = models.FloatField(default=0.0, verbose_name="估算损失(元/小时)")
@@ -1000,10 +1171,41 @@ class BusinessImpactAssessment(models.Model):
     detail = models.JSONField(default=dict, verbose_name="详细评估数据")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 
+    @property
+    def health_affected_dimensions(self):
+        return [o.value for o in self.dimension_set.order_by('id')]
+    @health_affected_dimensions.setter
+    def health_affected_dimensions(self, values):
+        _replace_scalar_children(self, BiaDimension, values, fk_field='assessment')
+    @property
+    def affected_systems(self):
+        return _read_ordered_children(self, 'system_set')
+    @affected_systems.setter
+    def affected_systems(self, values):
+        _replace_ordered_children(self, BiaSystem, values, fk_field='assessment')
+
     class Meta:
         verbose_name = "业务影响评估"
         verbose_name_plural = "业务影响评估列表"
         ordering = ['-create_time']
+
+
+class BiaDimension(models.Model):
+    """4NF 子表：业务影响评估-受影响健康度维度（多值拆分）"""
+    assessment = models.ForeignKey(BusinessImpactAssessment, on_delete=models.CASCADE, related_name='dimension_set')
+    value = models.CharField(max_length=50)
+    class Meta:
+        unique_together = [('assessment', 'value')]
+
+
+class BiaSystem(models.Model):
+    """4NF 子表：业务影响评估-受影响业务系统（有序多值拆分）"""
+    assessment = models.ForeignKey(BusinessImpactAssessment, on_delete=models.CASCADE, related_name='system_set')
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('assessment', 'seq')]
+        ordering = ['seq']
 
 
 # ==========================================
@@ -1044,7 +1246,7 @@ class InspectionItem(models.Model):
     category = models.CharField(max_length=30, choices=CATEGORY_CHOICES, verbose_name="分类")
     level = models.CharField(max_length=20, choices=LEVEL_CHOICES, verbose_name="巡检级别")
     severity = models.CharField(max_length=20, choices=SEVERITY_CHOICES, default='warn', verbose_name="默认严重度")
-    applicable_db_types = models.JSONField(default=list, verbose_name="适用数据库类型")
+    # 4NF: applicable_db_types/references 两个独立多值集合已拆为子表
     description = models.TextField(blank=True, default='', verbose_name="描述")
     detect_sql = models.TextField(blank=True, default='', verbose_name="检测SQL")
     detect_method = models.CharField(max_length=100, blank=True, default='', verbose_name="检测方法",
@@ -1054,11 +1256,23 @@ class InspectionItem(models.Model):
     recommendation = models.TextField(blank=True, default='', verbose_name="修复建议")
     auto_fixable = models.BooleanField(default=False, verbose_name="是否可自动修复")
     auto_fix_sql = models.TextField(blank=True, default='', verbose_name="自动修复SQL")
-    references = models.JSONField(default=list, verbose_name="参考链接")
     est_inspect_time_sec = models.IntegerField(default=10, verbose_name="预计耗时(秒)")
     is_enabled = models.BooleanField(default=True, verbose_name="是否启用")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    @property
+    def applicable_db_types(self):
+        return [o.value for o in self.dbtype_set.order_by('id')]
+    @applicable_db_types.setter
+    def applicable_db_types(self, values):
+        _replace_scalar_children(self, InspectionItemDbType, values, fk_field='item')
+    @property
+    def references(self):
+        return [o.value for o in self.reference_set.order_by('id')]
+    @references.setter
+    def references(self, values):
+        _replace_scalar_children(self, InspectionItemReference, values, fk_field='item')
 
     def __str__(self):
         return f"[{self.get_level_display()}] {self.item_id}: {self.title}"
@@ -1071,6 +1285,22 @@ class InspectionItem(models.Model):
             models.Index(fields=['level', 'is_enabled']),
             models.Index(fields=['category']),
         ]
+
+
+class InspectionItemDbType(models.Model):
+    """4NF 子表：巡检项-适用数据库类型（多值拆分）"""
+    item = models.ForeignKey(InspectionItem, on_delete=models.CASCADE, related_name='dbtype_set')
+    value = models.CharField(max_length=20)
+    class Meta:
+        unique_together = [('item', 'value')]
+
+
+class InspectionItemReference(models.Model):
+    """4NF 子表：巡检项-参考链接（多值拆分）"""
+    item = models.ForeignKey(InspectionItem, on_delete=models.CASCADE, related_name='reference_set')
+    value = models.TextField()
+    class Meta:
+        unique_together = [('item', 'value')]
 
 
 class InspectionRun(models.Model):
@@ -1274,7 +1504,7 @@ class Incident(models.Model):
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name="关闭时刻")
     rca_result = models.JSONField(default=dict, verbose_name="根因诊断")
     impact = models.JSONField(default=dict, verbose_name="影响评估")
-    plans = models.JSONField(default=list, verbose_name="处置方案")
+    # 4NF: plans 多值已拆为 IncidentPlan 子表（rca_result/impact 为 1:1 依赖文档，保留）
     health_snapshot = models.FloatField(default=0.0, verbose_name="生成时健康分")
     problem = models.ForeignKey('Problem', on_delete=models.SET_NULL,
         null=True, blank=True, related_name='incidents', verbose_name="关联问题")
@@ -1289,6 +1519,13 @@ class Incident(models.Model):
             models.Index(fields=['status', 'priority']),
             models.Index(fields=['config', 'category', 'status']),
         ]
+
+    @property
+    def plans(self):
+        return _read_ordered_children(self, 'plan_items')
+    @plans.setter
+    def plans(self, values):
+        _replace_ordered_children(self, IncidentPlan, values, fk_field='incident')
 
     def __str__(self):
         return f"{self.incident_id} [{self.priority}] {self.title}"
@@ -1403,18 +1640,41 @@ class Playbook(models.Model):
     name = models.CharField(max_length=200, verbose_name="名称")
     category = models.CharField(max_length=20, choices=Incident.CATEGORY_CHOICES, db_index=True, verbose_name="类别")
     signal = models.CharField(max_length=40, db_index=True, blank=True, default='', verbose_name="适用信号")
-    applicable_db_types = models.JSONField(default=list, verbose_name="适用数据库类型")
+    # 4NF: applicable_db_types/precheck/steps/rollback 多值已拆为子表
+    # (verify/params_schema 为 1:1 依赖文档，保留)
     risk_level = models.CharField(max_length=10, choices=RISK_CHOICES, verbose_name="风险级")
-    precheck = models.JSONField(default=list, verbose_name="前置检查步骤")
-    steps = models.JSONField(default=list, verbose_name="执行步骤")
     verify = models.JSONField(default=dict, verbose_name="验证判据")
-    rollback = models.JSONField(default=list, verbose_name="回滚步骤")
     params_schema = models.JSONField(default=dict, verbose_name="参数定义")
     est_minutes = models.IntegerField(default=5, verbose_name="预计耗时(分)")
     enabled = models.BooleanField(default=True, verbose_name="启用")
     auto_execute = models.BooleanField(default=False, verbose_name="允许自动执行")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
     updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    @property
+    def applicable_db_types(self):
+        return [o.value for o in self.dbtype_set.order_by('id')]
+    @applicable_db_types.setter
+    def applicable_db_types(self, values):
+        _replace_scalar_children(self, PlaybookDbType, values, fk_field='playbook')
+    @property
+    def precheck(self):
+        return _read_ordered_children(self, 'step_items', phase='precheck')
+    @precheck.setter
+    def precheck(self, values):
+        _replace_ordered_children(self, PlaybookStep, values, fk_field='playbook', phase='precheck')
+    @property
+    def steps(self):
+        return _read_ordered_children(self, 'step_items', phase='steps')
+    @steps.setter
+    def steps(self, values):
+        _replace_ordered_children(self, PlaybookStep, values, fk_field='playbook', phase='steps')
+    @property
+    def rollback(self):
+        return _read_ordered_children(self, 'step_items', phase='rollback')
+    @rollback.setter
+    def rollback(self, values):
+        _replace_ordered_children(self, PlaybookStep, values, fk_field='playbook', phase='rollback')
 
     class Meta:
         verbose_name = "处置剧本"
@@ -1439,12 +1699,19 @@ class PlaybookRun(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, db_index=True, default='pending_approval', verbose_name="状态")
     trigger_mode = models.CharField(max_length=12, choices=TRIGGER_CHOICES, verbose_name="触发方式")
     approved_by = models.CharField(max_length=50, default='', blank=True, verbose_name="审批人")
-    step_results = models.JSONField(default=list, verbose_name="步骤结果")
+    # 4NF: step_results 多值已拆为 PlaybookRunStepResult 子表（verify_result 为 1:1 文档，保留）
     verify_result = models.JSONField(default=dict, verbose_name="验证结果")
     error_message = models.TextField(blank=True, default='', verbose_name="错误信息")
     started_at = models.DateTimeField(null=True, blank=True, verbose_name="开始时间")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="结束时间")
     created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    @property
+    def step_results(self):
+        return _read_ordered_children(self, 'step_result_items')
+    @step_results.setter
+    def step_results(self, values):
+        _replace_ordered_children(self, PlaybookRunStepResult, values, fk_field='run')
 
     class Meta:
         verbose_name = "剧本执行"
@@ -1601,12 +1868,18 @@ class AgentTrace(models.Model):
     trace_id = models.CharField(max_length=48, unique=True, db_index=True, verbose_name="轨迹ID")
     incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='agent_traces', verbose_name="事故")
     status = models.CharField(max_length=16, choices=STATUS_CHOICES, default='running', verbose_name="状态")
-    steps = models.JSONField(default=list, verbose_name="步骤序列",
-        help_text="[{step,thought,action,params,observation,elapsed_ms}]")
+    # 4NF: steps 多值已拆为 AgentTraceStep 子表（conclusion 为 1:1 文档，保留）
     conclusion = models.JSONField(default=dict, verbose_name="最终结论")
     triggered_by = models.CharField(max_length=50, default='system', verbose_name="触发人")
     started_at = models.DateTimeField(auto_now_add=True, verbose_name="开始时间")
     finished_at = models.DateTimeField(null=True, blank=True, verbose_name="结束时间")
+
+    @property
+    def steps(self):
+        return _read_ordered_children(self, 'step_items')
+    @steps.setter
+    def steps(self, values):
+        _replace_ordered_children(self, AgentTraceStep, values, fk_field='trace')
 
     class Meta:
         verbose_name = "Agent排查轨迹"
@@ -1657,4 +1930,66 @@ class CausalEdge(models.Model):
 
     def __str__(self):
         return f"{self.cause_metric} --{self.lag_minutes}m--> {self.effect_metric} ({self.strength:.2f})"
+
+
+# ==========================================================================
+# 4NF 有序/复合多值子表（plans/steps/precheck/rollback/step_results 拆分）
+# ==========================================================================
+class IncidentPlan(models.Model):
+    """4NF 子表：事故-处置方案（有序多值拆分）"""
+    incident = models.ForeignKey(Incident, on_delete=models.CASCADE, related_name='plan_items')
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('incident', 'seq')]
+        ordering = ['seq']
+
+
+class PlaybookDbType(models.Model):
+    """4NF 子表：剧本-适用数据库类型（多值拆分）"""
+    playbook = models.ForeignKey(Playbook, on_delete=models.CASCADE, related_name='dbtype_set')
+    value = models.CharField(max_length=20)
+    class Meta:
+        unique_together = [('playbook', 'value')]
+
+
+class PlaybookStep(models.Model):
+    """4NF 子表：剧本-步骤（phase=precheck/steps/rollback，有序多值拆分）"""
+    playbook = models.ForeignKey(Playbook, on_delete=models.CASCADE, related_name='step_items')
+    phase = models.CharField(max_length=12)
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('playbook', 'phase', 'seq')]
+        ordering = ['phase', 'seq']
+
+
+class RemediationPlanStep(models.Model):
+    """4NF 子表：处置方案-执行步骤（有序多值拆分）"""
+    plan = models.ForeignKey(RemediationPlan, on_delete=models.CASCADE, related_name='step_items')
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('plan', 'seq')]
+        ordering = ['seq']
+
+
+class PlaybookRunStepResult(models.Model):
+    """4NF 子表：剧本执行-步骤结果（有序多值拆分）"""
+    run = models.ForeignKey(PlaybookRun, on_delete=models.CASCADE, related_name='step_result_items')
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('run', 'seq')]
+        ordering = ['seq']
+
+
+class AgentTraceStep(models.Model):
+    """4NF 子表：Agent轨迹-步骤（有序多值拆分）"""
+    trace = models.ForeignKey(AgentTrace, on_delete=models.CASCADE, related_name='step_items')
+    seq = models.IntegerField(default=0)
+    payload = models.JSONField(default=dict)
+    class Meta:
+        unique_together = [('trace', 'seq')]
+        ordering = ['seq']
 

@@ -1673,12 +1673,10 @@ class UserListView(JSONResponseMixin, View):
             email=email
         )
 
-        # 创建用户配置
-        UserProfile.objects.create(
-            user=user,
-            role=role_obj,
-            allowed_databases=allowed_databases
-        )
+        # 创建用户配置（4NF: allowed_databases 经兼容属性写入子表）
+        profile = UserProfile.objects.create(user=user, role=role_obj)
+        if allowed_databases is not None:
+            profile.allowed_databases = allowed_databases
 
         return self.json_response({
             'status': 'success',
@@ -3217,14 +3215,17 @@ class NotificationRuleListView(JSONResponseMixin, View):
             body = json.loads(request.body)
             config_id = body.get('db_config_id')
             config = DatabaseConfig.objects.get(id=config_id) if config_id else None
+            # 4NF: 多值字段(alert_types/severities/channels)经兼容属性写入子表
             r = NotificationRule.objects.create(
-                name=body['name'], alert_types=body.get('alert_types', []),
-                severities=body.get('severities', []), channels=body.get('channels', ['email']),
+                name=body['name'],
                 db_config=config, schedule=body.get('schedule'),
                 escalation_minutes=body.get('escalation_minutes', 0),
                 is_enabled=body.get('is_enabled', True),
                 priority=body.get('priority', 0),
             )
+            r.alert_types = body.get('alert_types', [])
+            r.severities = body.get('severities', [])
+            r.channels = body.get('channels', ['email'])
             return self.json_response({'id': r.id, 'message': '通知规则已创建'}, status=201)
         except Exception as e:
             return self.error_response(f'创建失败: {str(e)}', 400)
