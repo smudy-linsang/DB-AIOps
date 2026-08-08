@@ -555,6 +555,10 @@ const DatabaseDetail = () => {
             </Text>
           )}
         </Space>
+        {/* 性能中心主入口: 与导航树右键菜单等价, 不依赖右键操作 */}
+        <Link to={`/databases/${id}/performance`}>
+          <Button type="primary" icon={<ThunderboltOutlined />}>性能中心</Button>
+        </Link>
       </div>
 
       <Card title="基本信息" size="small" style={{ marginBottom: 16 }}>
