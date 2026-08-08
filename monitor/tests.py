@@ -149,3 +149,52 @@ class ProcessResultTests(TestCase):
         log = MonitorLog.objects.filter(config=self.config).latest("create_time")
         stored = json.loads(log.message)
         self.assertEqual(stored["conn_usage_pct"], 1)
+
+
+class AlertConsistencyTests(TestCase):
+    """告警模块 PG/ES 一致性与通知健壮性测试"""
+
+    def setUp(self):
+        self.config = DatabaseConfig.objects.create(
+            name="alert-cfg", db_type="mysql", host="127.0.0.1", port=3306,
+            username="root", password=encrypt_password("root123"), is_active=True,
+        )
+
+    def test_resolve_syncs_es(self):
+        """resolve 解除 PG 状态后应同步 ES, 避免列表显示陈旧 active"""
+        am = AlertManager(self.config)
+        with mock.patch("monitor.notifications.send_email_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_dingtalk_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_wecom_alert", return_value=True):
+            am.fire("down", "", "t", "b", severity="critical")
+        with mock.patch("monitor.elasticsearch_engine.sync_alert", return_value=True) as sync:
+            am.resolve("down", "", recovery_title="r", recovery_body="b")
+        self.assertTrue(sync.called)
+        self.assertEqual(
+            AlertLog.objects.filter(config=self.config, alert_type="down").first().status,
+            "resolved",
+        )
+
+    def test_acknowledge_syncs_es(self):
+        am = AlertManager(self.config)
+        with mock.patch("monitor.notifications.send_email_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_dingtalk_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_wecom_alert", return_value=True):
+            am.fire("down", "", "t", "b", severity="critical")
+        alert = AlertLog.objects.filter(config=self.config).first()
+        with mock.patch("monitor.elasticsearch_engine.sync_alert", return_value=True) as sync:
+            self.assertTrue(am.acknowledge(alert.id, "admin"))
+        self.assertTrue(sync.called)
+
+    def test_send_alert_notification_no_crash(self):
+        """severity 无 choices, send_alert_notification 不应抛 AttributeError"""
+        from monitor.notifications import send_alert_notification
+        alert = AlertLog.objects.create(
+            config=self.config, alert_type="down", severity="critical",
+            title="t", description="d", status="active",
+        )
+        with mock.patch("monitor.notifications.send_email_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_dingtalk_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_wecom_alert", return_value=True):
+            result = send_alert_notification(alert)
+        self.assertTrue(result["email"])

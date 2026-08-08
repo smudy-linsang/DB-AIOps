@@ -262,7 +262,11 @@ def send_alert_notification(alert) -> dict:
     Returns:
         dict: 包含各渠道发送结果的字典
     """
-    title = f"[{alert.get_severity_display()}] {alert.title}"
+    # AlertLog.severity 无 choices, 无 get_severity_display; 用安全映射兜底
+    sev_map = {'info': '提示', 'warning': '警告', 'error': '高危',
+               'critical': '严重', 'emergency': '紧急'}
+    sev_text = sev_map.get(getattr(alert, 'severity', ''), getattr(alert, 'severity', ''))
+    title = f"[{sev_text}] {alert.title}"
     body = alert.description
     
     results = {

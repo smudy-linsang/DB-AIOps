@@ -1200,7 +1200,14 @@ class AlertDeleteView(JSONResponseMixin, View):
         if allowed_db_ids is not None and alert.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
 
+        alert_id = alert.id
         alert.delete()
+        # 一致性: 同步删除 ES 文档, 避免告警"删不掉"
+        try:
+            from monitor.elasticsearch_engine import delete_alerts
+            delete_alerts([alert_id])
+        except Exception:
+            pass
         return self.json_response({'message': 'Alert deleted, metric can now re-trigger'})
 
 
@@ -1250,6 +1257,12 @@ class AlertBatchDeleteView(JSONResponseMixin, View):
         _total, per_model = qs.delete()
         deleted = per_model.get('monitor.AlertLog', 0)
         skipped = len(ids) - deleted
+        # 一致性: 同步删除 ES 文档, 避免告警"删不掉"
+        try:
+            from monitor.elasticsearch_engine import delete_alerts
+            delete_alerts(ids)
+        except Exception:
+            pass
         return self.json_response({
             'deleted': deleted,
             'skipped': skipped,

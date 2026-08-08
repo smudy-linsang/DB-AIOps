@@ -134,6 +134,13 @@ class AlertManager:
         existing.resolved_at = timezone.now()
         existing.save(update_fields=['status', 'resolved_at'])
 
+        # 4NF/一致性: 同步 ES 文档状态, 避免列表(优先读ES)显示陈旧 active
+        try:
+            from monitor.elasticsearch_engine import sync_alert
+            sync_alert(existing)
+        except Exception as e:
+            logger.warning("[AlertManager] 同步ES解除状态失败: %s", e)
+
         # 清理聚合缓冲区
         buffer_key = (alert_type, metric_key)
         self._aggregation_buffer.pop(buffer_key, None)
@@ -180,6 +187,12 @@ class AlertManager:
             alert.status = 'acknowledged'
             alert.last_notified_at = timezone.now()
             alert.save(update_fields=['status', 'last_notified_at'])
+            # 一致性: 同步 ES 文档状态
+            try:
+                from monitor.elasticsearch_engine import sync_alert
+                sync_alert(alert)
+            except Exception as e:
+                logger.warning("[AlertManager] 同步ES确认状态失败: %s", e)
             logger.info(f"[AlertManager] 告警已确认: {alert.title} by {acknowledged_by}")
             return True
         except AlertLog.DoesNotExist:

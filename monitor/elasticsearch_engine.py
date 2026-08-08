@@ -538,6 +538,49 @@ def index_alert(alert_id: int, config_id: int, db_name: str, db_type: str,
         return False
 
 
+def sync_alert(alert) -> bool:
+    """
+    将 PG 中的 AlertLog 当前状态全量回写 ES（同 _id 覆盖），
+    用于 resolve/acknowledge 后保持 PG/ES 一致。
+    """
+    return index_alert(
+        alert_id=alert.id,
+        config_id=alert.config_id,
+        db_name=alert.config.name if alert.config else str(alert.config_id),
+        db_type=alert.config.db_type if alert.config else '',
+        alert_type=alert.alert_type,
+        severity=alert.severity,
+        status=alert.status,
+        title=alert.title,
+        description=alert.description,
+        metric_key=alert.metric_key,
+        fired_at=alert.create_time,
+        resolved_at=alert.resolved_at,
+    )
+
+
+def delete_alerts(alert_ids) -> bool:
+    """
+    从 ES 告警索引中删除指定 alert_id 的文档（跨月度索引），
+    用于 PG 删除后保持 PG/ES 一致，避免告警"删不掉"。
+    """
+    client = get_es_client()
+    if not client or not alert_ids:
+        return False
+    try:
+        client.delete_by_query(
+            index='db_alerts_*',
+            body={'query': {'terms': {'alert_id': [int(i) for i in alert_ids]}}},
+            ignore_unavailable=True,
+            conflicts='proceed',
+            refresh=True,
+        )
+        return True
+    except Exception as e:
+        logger.error(f"删除 ES 告警失败 (ids={alert_ids}): {e}")
+        return False
+
+
 # ============================================================
 # 数据查询
 # ============================================================
