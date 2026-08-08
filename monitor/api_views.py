@@ -1074,10 +1074,18 @@ class AlertListView(JSONResponseMixin, View):
                     keyword_lower = keyword.lower()
                     es_alerts = [a for a in es_alerts
                                  if keyword_lower in (a.get('title', '') + a.get('description', '')).lower()]
-                
+
+                # 归一化：ES 文档字段(alert_id/fired_at) → 前端统一字段(id/create_time)
+                normalized = []
+                for a in es_alerts:
+                    a = dict(a)
+                    a.setdefault('id', a.get('alert_id'))
+                    a.setdefault('create_time', a.get('fired_at'))
+                    normalized.append(a)
+
                 return self.json_response({
-                    'total': len(es_alerts),
-                    'alerts': es_alerts,
+                    'total': len(normalized),
+                    'alerts': normalized,
                     'source': 'elasticsearch'
                 })
         except Exception as es_err:
@@ -1194,6 +1202,59 @@ class AlertDeleteView(JSONResponseMixin, View):
 
         alert.delete()
         return self.json_response({'message': 'Alert deleted, metric can now re-trigger'})
+
+
+class AlertBatchDeleteView(JSONResponseMixin, View):
+    """
+    POST /api/v1/alerts/batch-delete/
+    批量删除告警（管理员能力，权限 alerts.delete）。
+    请求体: {"ids": [1,2,3]}  响应: {"deleted": n, "skipped": m}
+    """
+    MAX_BATCH = 500  # 单次批量上限，防滥用/超长 SQL
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission('alerts.delete'))
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def post(self, request):
+        try:
+            body = json.loads(request.body or '{}')
+        except json.JSONDecodeError:
+            return self.error_response('Invalid JSON body', 400)
+
+        raw_ids = body.get('ids')
+        if not isinstance(raw_ids, list) or len(raw_ids) == 0:
+            return self.error_response('ids 必须为非空列表', 400)
+
+        # 归一化为 int 并去重
+        ids = []
+        for v in raw_ids:
+            try:
+                ids.append(int(v))
+            except (TypeError, ValueError):
+                return self.error_response(f'非法的告警ID: {v}', 400)
+        ids = sorted(set(ids))
+
+        if len(ids) > self.MAX_BATCH:
+            return self.error_response(f'单次最多删除 {self.MAX_BATCH} 条', 400)
+
+        qs = AlertLog.objects.filter(id__in=ids)
+        # 数据范围控制：受限用户仅能删除其可见库的告警
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None:
+            qs = qs.filter(config_id__in=allowed_db_ids)
+
+        # delete() 返回级联删除总数，需按模型取 AlertLog 实际删除数
+        _total, per_model = qs.delete()
+        deleted = per_model.get('monitor.AlertLog', 0)
+        skipped = len(ids) - deleted
+        return self.json_response({
+            'deleted': deleted,
+            'skipped': skipped,
+            'message': f'已删除 {deleted} 条告警' + (f'，跳过 {skipped} 条' if skipped else ''),
+        })
 
 
 class DatabaseAlertsView(JSONResponseMixin, View):

@@ -156,6 +156,9 @@ export const alertAPI = {
   // 彻底删除告警（删除后该指标可重新触发告警）
   delete: (id) => api.delete(`/alerts/${id}/`),
 
+  // 批量删除告警（管理员能力，权限 alerts.delete）
+  batchDelete: (ids) => api.post('/alerts/batch-delete/', { ids }),
+
   // 获取数据库关联告警
   getByDatabase: (dbId) => api.get(`/databases/${dbId}/alerts/`),
 }

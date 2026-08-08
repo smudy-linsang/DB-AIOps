@@ -95,7 +95,26 @@ function AlertDetailModal({ alert, onClose, onAck, onDelete }) {
 // ─────────────────────────────────────────────
 // 通用表格组件
 // ─────────────────────────────────────────────
-function AlertTable({ alerts, loading, showAck, onAck, onDelete, onView }) {
+function AlertTable({ alerts, loading, showAck, onAck, onDelete, onBatchDelete }) {
+  const [selectedKeys, setSelectedKeys] = useState([])
+
+  // 数据刷新/切换后，剔除已不存在于当前列表的选中项，避免误删不可见行
+  useEffect(() => {
+    setSelectedKeys(keys => keys.filter(id => alerts.some(a => a.id === id)))
+  }, [alerts])
+
+  const confirmBatchDelete = () => {
+    Modal.confirm({
+      title: `批量删除 ${selectedKeys.length} 条告警？`,
+      content: '删除后相关指标可重新触发告警，该操作不可恢复。',
+      okText: '确认删除', okType: 'danger', cancelText: '取消',
+      onOk: async () => {
+        await onBatchDelete(selectedKeys)
+        setSelectedKeys([])
+      },
+    })
+  }
+
   const columns = [
     {
       title: '级别', dataIndex: 'severity', width: 80,
@@ -153,16 +172,33 @@ function AlertTable({ alerts, loading, showAck, onAck, onDelete, onView }) {
   ]
 
   return (
-    <Table
-      rowKey="id"
-      size="small"
-      loading={loading}
-      dataSource={alerts}
-      columns={columns}
-      scroll={{ x: 900 }}
-      pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }}
-      rowClassName={r => r.status === 'active' ? 'alert-row-active' : ''}
-    />
+    <div>
+      {selectedKeys.length > 0 && (
+        <Space style={{ marginBottom: 8 }}>
+          <Text type="secondary">已选 {selectedKeys.length} 条</Text>
+          <PermissionGuard code={Perm.ALERTS_DELETE}>
+            <Button danger size="small" icon={<DeleteOutlined />} onClick={confirmBatchDelete}>
+              批量删除
+            </Button>
+          </PermissionGuard>
+          <Button size="small" onClick={() => setSelectedKeys([])}>取消选择</Button>
+        </Space>
+      )}
+      <Table
+        rowKey="id"
+        size="small"
+        loading={loading}
+        dataSource={alerts}
+        columns={columns}
+        scroll={{ x: 900 }}
+        rowSelection={{
+          selectedRowKeys: selectedKeys,
+          onChange: setSelectedKeys,
+        }}
+        pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }}
+        rowClassName={r => r.status === 'active' ? 'alert-row-active' : ''}
+      />
+    </div>
   )
 }
 
@@ -213,6 +249,16 @@ export default function AlertList() {
     }
   }
 
+  const handleBatchDelete = async (ids) => {
+    try {
+      const r = await alertAPI.batchDelete(ids)
+      message.success(r?.message || `已删除 ${r?.deleted ?? ids.length} 条告警`)
+      fetchAlerts()
+    } catch {
+      message.error('批量删除失败')
+    }
+  }
+
   // 按严重程度过滤
   const filtered = severityFilter === 'all'
     ? allAlerts
@@ -229,7 +275,7 @@ export default function AlertList() {
     acked:     allAlerts.filter(a => a.status === 'acknowledged').length,
   }
 
-  const tableProps = { loading, onAck: handleAck, onDelete: handleDelete, onView: setDetailAlert }
+  const tableProps = { loading, onAck: handleAck, onDelete: handleDelete, onBatchDelete: handleBatchDelete, onView: setDetailAlert }
 
   return (
     <div>
