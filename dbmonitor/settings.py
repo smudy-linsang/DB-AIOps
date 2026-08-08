@@ -16,6 +16,27 @@ import os
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
+
+def _load_dotenv():
+    """零依赖加载 .env（不覆盖已存在的真实环境变量），保证密钥等配置一致。"""
+    env_file = BASE_DIR / '.env'
+    if not env_file.exists():
+        return
+    try:
+        for line in env_file.read_text(encoding='utf-8').splitlines():
+            line = line.strip()
+            if not line or line.startswith('#') or '=' not in line:
+                continue
+            key, _, value = line.partition('=')
+            key, value = key.strip(), value.strip().strip('"').strip("'")
+            if key:
+                os.environ.setdefault(key, value)
+    except Exception:
+        pass
+
+
+_load_dotenv()
+
 # ============================================================================
 # 环境分层配置（新增）
 # ============================================================================
