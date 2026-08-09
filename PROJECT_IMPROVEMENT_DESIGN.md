@@ -356,27 +356,25 @@ jobs:
 | `pip-audit` 首期 `|| true` | 存量依赖必然有历史 CVE，一上来就阻断会让人直接关掉 CI。先出报告、定基线、再收紧 |
 | `concurrency.cancel-in-progress` | 连续推送时取消旧运行 |
 
-#### 2.1.2 分支保护配置（GitHub 仓库设置，手工一次）
+#### 2.1.2 分支保护配置（GitHub 仓库设置）
 
-> 📌 **最终决策（2026-08-09，仓库 Owner）**：采用**强门禁 PR 流程**。
+> 📌 **最终状态（2026-08-09，仓库 Owner）**：Owner 已**删除 ruleset**，恢复为
+> **允许直推 master**。多智能体并行开发的提交协调由 Owner 人工控制。
 >
-> 背景：Owner 最初允许直推，但智能体 A 复测实测发现「允许直推」与「必需状态检查」
-> 在 GitHub 上**互斥** —— 直推的 commit 从未跑过 CI，必需检查永远处于 expected 状态，
-> 推送被 GH013 拒绝（`4 of 4 required status checks are expected`）。
-> Owner 最终决定恢复强门禁：所有人（含 Owner）走分支 + PR，CI 门禁最有约束力。
+> 演进记录：最初允许直推 → 曾配置强门禁（Require PR + 4 项必需检查），
+> 但实测「允许直推」与「必需状态检查」在 GitHub 上**互斥**（直推的 commit 从未跑过 CI，
+> 必需检查永远处于 expected 状态，推送被 GH013 拒绝）→ Owner 最终删除策略回到直推。
 
-`Settings → Rules → Rulesets`（已配置）：
+当前约束力来源：
 
-| 配置项 | 值 | 说明 |
-|--------|----|------|
-| Require a pull request before merging | ✅ | 禁止直推 master |
-| Require status checks to pass | ✅ | `静态检查`、`单元测试（无外部依赖）`、`集成测试（PostgreSQL）`、`前端构建与测试` |
-| Do not allow bypassing | ✅ | 含管理员，否则门禁形同虚设 |
+| 层 | 机制 | 性质 |
+|----|------|------|
+| 提交前 | 本地 `scripts/validate.sh` + pre-commit 钩子（语法 + 密钥扫描） | 第一道闸 |
+| 推送后 | CI 6 job 自动运行（push/PR 均触发） | **事后信号，不拦截**，红色结果在 Actions 页面可见 |
+| 协调 | 多智能体提交由 Owner 人工控制 | 流程约定 |
 
-> ⚠️ 这一步是 W1 的**关键**。ci.yml 只是产生信号，分支保护才让信号有约束力。
-> 不做这步，等于装了报警器但不接电源。
-> 日常开发流程：`git checkout -b <分支>` → 开发 → `scripts/validate.sh` 本地预检 →
-> 推送分支 → 开 PR → CI 四项必需检查通过 → 合并。
+> 若未来需要恢复强约束，重新配置 ruleset 即可；注意直推与必需状态检查互斥，
+> 强门禁必须配合 PR 流程（参见演进记录）。
 
 #### 2.1.3 `scripts/check_deps.py`（新增）
 
@@ -1635,7 +1633,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | V1 | CI 在 PR 上运行 | 开一个改 1 行的 PR | 4 个必需 job 全部出现并通过 |
 | V2 | CI 能拦住坏代码 | PR 中引入语法错误 | `静态检查` 失败，合并按钮被禁用 |
 | V3 | 迁移漂移被拦 | 改模型但不生成 migration | `静态检查` 的迁移漂移步骤失败 |
-| V4 | 分支保护生效 | 尝试直推 master | 被拒绝（GH013） |
+| V4 | 直推流程生效 | 直推 master | 推送成功且触发 CI 运行（ruleset 已删除，CI 为事后信号） |
 | V5 | unit 层零依赖 | 停掉所有 Docker，`scripts/validate.sh unit` | 退出码 0，< 15s |
 | V6 | JSON 契约 | `scripts/validate.sh unit --json \| python -m json.tool` | 合法 JSON，含 exit_code/stages |
 | V7 | 依赖缺失被发现 | `pip uninstall jsonschema` 后跑 `check_deps.py` | 退出码 1，明确指出 jsonschema |
@@ -1650,7 +1648,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 
 ### 5.2 完成定义（DoD）
 
-**P1 完成**：V1–V4、V6 通过；`master` 分支保护已开启且含 4 项必需检查（强门禁 PR 流程）。
+**P1 完成**：V1–V4、V6 通过；CI 在每次推送后运行（ruleset 已删除，直推模式，提交协调由 Owner 人工控制）。
 **P2 完成**：V5、V7、V12、V13 通过；unit 层用例数 ≥ 60。
 **P3 完成**：V9、V10、V11 通过；`checkers/` 关键路径（连接、超时、只读、ASH 形状）有真库覆盖。
 **P4 完成**：V8、V14 通过；B1–B3 批次降级留痕改造完成。
