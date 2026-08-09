@@ -244,6 +244,12 @@ jobs:
       # 因为整个 job 是 continue-on-error，这里红了不阻断合并，只是把
       # "还没真正验证过" 这个事实明确地摆在 CI 面板上 —— 绿灯造成的虚假安心，
       # 正是 W1 建 CI 时要避免的东西。
+      # 断言"用例真的跑了"，但要分清 skip 的两种性质：
+      #   ① 环境级 skip（连不上 / 读不到数据字典）—— 等于根本没验证，必须报错；
+      #   ② 数据级 skip（采样窗口里没抓到目标会话）—— 用例自身设计问题，
+      #      现已改成造负载+重试后判失败，不该再出现，出现了同样要报错。
+      # 上一版把两者混为一谈（只看 skipped=N），导致我把"1 条数据级 skip"
+      # 误读成"用例全 skip、绿灯含金量为零"。断言下得太粗，会制造假情报。
       - name: 确认用例真的跑了（不是全 skip）
         if: always()
         run: |
@@ -253,8 +259,15 @@ jobs:
           if ! grep -qE '^Ran [1-9][0-9]* test' /tmp/oracle.log; then
             echo "::error::Oracle 方言用例一条都没执行"; exit 1
           fi
+          if grep -qE '无法连接 Oracle|读不到 v\$session' /tmp/oracle.log; then
+            echo "::error::环境级 skip：连不上库或没有数据字典权限，方言根本没验证"
+            grep -nE '无法连接 Oracle|读不到 v\$session' /tmp/oracle.log | head -5
+            exit 1
+          fi
           if grep -qE 'skipped=[1-9]' /tmp/oracle.log; then
-            echo "::error::存在 skip 的 Oracle 用例 —— 绿灯不代表方言已验证"; exit 1
+            echo "::error::仍有 skip 的用例（非环境原因），下面是 skip 明细"
+            grep -nE 'skipped|skip ' /tmp/oracle.log | head -10
+            exit 1
           fi
           echo "Oracle 方言用例全部实跑通过，可以考虑摘掉 continue-on-error"
       # 再传一份 artifact：Oracle 容器启动日志有几百行，teardown 时会灌进 job log，

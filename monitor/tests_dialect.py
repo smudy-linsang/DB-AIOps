@@ -497,22 +497,66 @@ class OracleDialectTests(TransactionTestCase):
     def test_ash_backfills_sql_text(self):
         """BUG-124 回归：Oracle 分支曾硬编码 sql_text=None，
         导致 SQL 详情页与索引建议在 Oracle 上整块失效。
-        这里制造一条正在执行的语句，验证能从 v$sqlstats 补到原文。"""
-        from monitor.sentinel import sample_sessions
-        worker = self._conn()
-        wcur = worker.cursor()
-        wcur.execute("SELECT COUNT(*) FROM all_objects")   # 产生一条有 sql_id 的会话
-        wcur.fetchall()
+        这里制造一条正在执行的语句，验证能从 v$sqlstats 补到原文。
 
-        probe = self._conn()
+        本用例原先是"跑一条 SELECT、然后采样、采不到就 skip"——
+        而 `execute` + `fetchall` 返回后那个会话立刻变回 INACTIVE、sql_id 被清掉，
+        于是**几乎必然采不到**，稳定 skip。CI 上因此长期显示 `skipped=1`，
+        看起来像"环境不支持"，实际是用例自己写坏了：它把自己的设计缺陷
+        伪装成了环境问题。这正是 W3 反对的那种"假装验证过了"。
+
+        改法：让负载**在采样期间持续处于执行中**（后台线程反复跑重查询），
+        并在若干秒内多次采样重试。采不到不再 skip，而是判失败 ——
+        因为负载是我们自己造的，采不到就是产品或用例的问题。
+        """
+        import threading
+        import time as _t
+        from monitor.sentinel import sample_sessions
+
+        worker = self._conn()
+        stop = threading.Event()
+
+        def spin():
+            cur = worker.cursor()
+            while not stop.is_set():
+                try:
+                    # 故意选一条要跑一会儿的语句，保证采样时它还在 ACTIVE
+                    cur.execute("SELECT COUNT(*) FROM all_objects a, all_objects b "
+                                "WHERE ROWNUM < 200000")
+                    cur.fetchall()
+                except Exception:
+                    # call_timeout 会掐断它，这是预期的，继续下一轮
+                    if stop.is_set():
+                        return
+                    _t.sleep(0.05)
+
+        t = threading.Thread(target=spin, daemon=True)
+        t.start()
         try:
-            rows = sample_sessions(probe.cursor(), 'oracle', config_id=self.cfg.id)
+            with_sql = []
+            deadline = _t.time() + 15
+            while _t.time() < deadline and not with_sql:
+                probe = self._conn()
+                try:
+                    rows = sample_sessions(probe.cursor(), 'oracle',
+                                           config_id=self.cfg.id)
+                finally:
+                    probe.close()
+                with_sql = [r for r in rows if r.get('sql_id')]
+                if not with_sql:
+                    _t.sleep(0.5)
         finally:
-            probe.close()
-            worker.close()
-        with_sql = [r for r in rows if r.get('sql_id')]
-        if not with_sql:
-            self.skipTest('采样窗口内没有捕获到带 sql_id 的会话')
+            stop.set()
+            t.join(timeout=15)
+            try:
+                worker.close()
+            except Exception:
+                pass
+
+        self.assertTrue(
+            with_sql,
+            '持续制造负载 15 秒仍未采到任何带 sql_id 的会话 —— '
+            'v$session 采样拿不到 sql_id，BUG-124 的 sql_text 补全无从谈起')
         # 至少要有 sql_text 字段（可能为 None，但不能整体缺失）
         for r in with_sql:
             self.assertIn('sql_text', r)
