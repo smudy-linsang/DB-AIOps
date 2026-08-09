@@ -964,6 +964,13 @@ export DIALECT_PG_DSN=postgresql://postgres:postgres@127.0.0.1:5433/targetdb
 python manage.py test monitor.tests_dialect -v 2
 ```
 
+> **务必对准 CI 用的引擎**：CI 跑的是 `mysql:8.0`。本地若图省事用 MariaDB
+> 替代（发行版 `apt install mariadb-server` 装到的就是它），**两边行为并不
+> 等价** —— 语句超时的变量名、单位、被掐断时是报错还是返回值都不同
+> （见 BUGFIX_DESIGN.md BUG-109 的补充表）。本轮就出现过"本地 MariaDB 全绿、
+> CI MySQL 8.0 挂一条"的情况，盲调了两轮。用 MariaDB 复现时请意识到
+> **你在测另一种数据库**，最终结论要在 MySQL 8.0 上确认。
+
 ---
 
 ### W4 — 系统自监控（本方案唯一新增业务能力）
