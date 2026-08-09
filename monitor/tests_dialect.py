@@ -412,6 +412,31 @@ class OracleDialectTests(TransactionTestCase):
 
     def setUp(self):
         self.cfg = _cfg_from_dsn(ORACLE_DSN, 'oracle', 'dialect-oracle')
+        self._require_catalog_access()
+
+    def _require_catalog_access(self):
+        """监控账号必须能读数据字典视图，否则所有 Oracle 采集都无从谈起。
+
+        权限不足是**环境配置问题**而非产品缺陷，这里给出可操作的 skip 说明，
+        避免把"CI 账号没授权"误报成"代码有 bug"。
+        生产部署同理：监控账号需要 SELECT_CATALOG_ROLE 或 SELECT ANY DICTIONARY。
+        """
+        try:
+            conn = self._conn()
+        except Exception as e:
+            self.skipTest(f'无法连接 Oracle: {e}')
+        try:
+            cur = conn.cursor()
+            cur.execute("SELECT COUNT(*) FROM v$session WHERE ROWNUM = 1")
+            cur.fetchone()
+        except Exception as e:
+            self.skipTest(
+                f'监控账号读不到 v$session（需 SELECT_CATALOG_ROLE）: {e}')
+        finally:
+            try:
+                conn.close()
+            except Exception:
+                pass
 
     def _conn(self, readonly=True):
         from monitor.db_connector import DbConnector

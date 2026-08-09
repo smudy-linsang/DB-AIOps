@@ -142,7 +142,10 @@ jobs:
           DIALECT_MYSQL_DSN: mysql://root:root123@127.0.0.1:3306/testdb
           DIALECT_PG_DSN: postgresql://postgres:postgres@127.0.0.1:5433/targetdb
           # service_name 走 DSN 的 path 段（_cfg_from_dsn 如此解析）
-          DIALECT_ORACLE_DSN: oracle://dbaiops:dbaiops123@127.0.0.1:1521/FREEPDB1
+          # 必须用有数据字典权限的账号：监控要读 v$session / v$sqlstats / dba_objects，
+          # 镜像自建的 APP_USER 只有 CREATE SESSION+RESOURCE，读不到这些视图。
+          # 生产环境对应的做法是给监控账号授 SELECT_CATALOG_ROLE。
+          DIALECT_ORACLE_DSN: oracle://system:oracle123@127.0.0.1:1521/FREEPDB1
         run: python manage.py test monitor.tests_dialect -v 2
 
   # ── 前端 ───────────────────────────────────────────────
