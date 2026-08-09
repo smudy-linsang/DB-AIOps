@@ -133,7 +133,19 @@ jobs:
           DIALECT_MYSQL_DSN: mysql://root:root123@127.0.0.1:3306/testdb
           DIALECT_PG_DSN: postgresql://postgres:postgres@127.0.0.1:5433/targetdb
           # service_name 走 DSN 的 path 段（_cfg_from_dsn 如此解析）
-        run: python manage.py test monitor.tests_dialect -v 2
+        # 把测试输出同时写进 job summary：service container 的日志会把
+        # job log 的尾部占满，导致 API 取不到 Python 侧的 traceback，
+        # 失败时无从诊断（本轮就因此盲调了两轮）。
+        run: |
+          set -o pipefail
+          python manage.py test monitor.tests_dialect -v 2 2>&1 | tee /tmp/dialect.log
+      - name: 失败输出写入 job summary
+        if: failure()
+        run: |
+          echo '## 方言测试失败输出' >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
+          tail -120 /tmp/dialect.log >> $GITHUB_STEP_SUMMARY
+          echo '```' >> $GITHUB_STEP_SUMMARY
 
   # ── Oracle 方言：独立 job 且不阻断 ─────────────────────────
   # 为什么单拆并且 continue-on-error：
