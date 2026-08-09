@@ -201,6 +201,27 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           tail -60 /tmp/oracle.log >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '(无输出)' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+      # 把"用例到底跑没跑"变成这个 job 自己的红绿，而不是要人去翻日志。
+      # 动机：informational job 绿灯有两种含义 —— ①用例真跑通了；②用例全 skip
+      # 了（连不上/没数据字典权限时 _require_catalog_access 会跳过）。这两种在
+      # jobs API 里长得一模一样，而 Oracle 容器日志会淹掉 job log、artifact 又
+      # 未必下得到。索性显式断言："跑了 ≥1 条 且 一条都没 skip"。
+      # 因为整个 job 是 continue-on-error，这里红了不阻断合并，只是把
+      # "还没真正验证过" 这个事实明确地摆在 CI 面板上 —— 绿灯造成的虚假安心，
+      # 正是 W1 建 CI 时要避免的东西。
+      - name: 确认用例真的跑了（不是全 skip）
+        if: always()
+        run: |
+          if [ ! -s /tmp/oracle.log ]; then
+            echo "::error::Oracle 方言测试没有任何输出"; exit 1
+          fi
+          if ! grep -qE '^Ran [1-9][0-9]* test' /tmp/oracle.log; then
+            echo "::error::Oracle 方言用例一条都没执行"; exit 1
+          fi
+          if grep -qE 'skipped=[1-9]' /tmp/oracle.log; then
+            echo "::error::存在 skip 的 Oracle 用例 —— 绿灯不代表方言已验证"; exit 1
+          fi
+          echo "Oracle 方言用例全部实跑通过，可以考虑摘掉 continue-on-error"
       # 再传一份 artifact：Oracle 容器启动日志有几百行，teardown 时会灌进 job log，
       # 从 API 按 tail 取日志根本翻不到 Python 那几行。artifact 可以直接下载。
       - name: 上传原始输出

@@ -1793,10 +1793,16 @@ Oracle 与达梦用例本地默认 skip（镜像体积/驱动限制），CI 的 
 
 `test-dialect-oracle` **目前是信息性 job（`continue-on-error: true`），不阻断合并**。
 
-原因：开发容器里起不了 Oracle（镜像 ~2GB、无 docker daemon），
-该 job 只能靠 CI 盲调。连续两次盲改（换 system 账号、加权限探测 skip）
-都没能拿到可诊断的失败输出 —— GitHub 的 job log API 返回的尾部被
-service container 日志占满，取不到 Python 侧的 traceback。
+原因：开发容器里起不了 Oracle，该 job 只能靠 CI 盲调。连续两次盲改
+（换 system 账号、加权限探测 skip）都没能拿到可诊断的失败输出 ——
+GitHub 的 job log API 返回的尾部被 service container 日志占满，
+取不到 Python 侧的 traceback。
+
+> 更正（本轮实测）：开发容器里**有** docker daemon（`dockerd` 手动拉起即可用），
+> 拦路的是**镜像拉不下来** —— 出网走代理，`production.cloudfront.docker.com`
+> 返回 403 Forbidden。所以 Oracle 依然只能在 CI 上验证，但原因不是"没有 docker"。
+> 相应地，MySQL 8.0 这种发行版有包的引擎可以直接 `apt install` 起本地实例
+> （本轮就是这么拿到 MySQL 8.0.46 的 ground truth 的）。
 
 **在有人能在可复现环境里真正跑通之前，把它当作信息性信号，
 比让 master 长期挂一个没人能诊断的红叉更诚实。**
@@ -1805,4 +1811,35 @@ service container 日志占满，取不到 Python 侧的 traceback。
 跑通后的收尾动作：去掉 `continue-on-error`，并将其加入分支必需检查。
 
 对比：MySQL 与 PostgreSQL 方言测试**已在本地真实数据库上验证通过**
-（MariaDB 10.11 + PostgreSQL 16），因此保持严格门禁。
+（MySQL 8.0.46 + MariaDB 10.11 + PostgreSQL 16），因此保持严格门禁。
+
+## B.6 后续：本地拿 MariaDB 冒充 MySQL，把自己坑了一轮
+
+W3 落地后 master 的 `方言测试（MySQL/PG）` 挂了。本地（MariaDB 10.11）全绿，
+CI（`mysql:8.0`）稳定失败。**失败的是我自己新写的用例，不是产品。**
+
+根因是两家对"语句被超时掐断"的表现根本不同：
+
+| | 变量 | 单位 | `SELECT SLEEP(30)` 被掐断时 |
+|---|---|---|---|
+| MySQL 8.0.46 | `max_execution_time` | 毫秒 | **不报错**，5s 提前返回 `1`（1=被中断，0=睡满） |
+| MariaDB 10.11.14 | `max_statement_time` | 秒 | 抛 `max_statement_time exceeded` |
+
+用例写死了 `assertRaises`，于是在 MySQL 上必红。改成断言**真正要保证的性质**
+——"语句没有跑满 30 秒"，没报错时再校验返回值为 1 以排除"睡满了正常返回"的假绿。
+
+**过程本身值得记一笔**：拿到 job log 之前，我先后两次基于猜测改 CI
+（换 Oracle 账号、加权限探测），两次都改错 —— 直到把 Oracle 拆成独立 job，
+看见"Oracle 绿、MySQL/PG 红"，才推翻了自己的假设。教训有两条：
+
+1. **没有可诊断的输出就不要动手改**。先花一次 push 把诊断信息（`tee` +
+   step summary + artifact）建起来，比连着盲改三轮快。
+2. **本地环境要对准 CI 的引擎**。`apt install mariadb-server` 拿到的不是
+   MySQL；用它复现时你在测另一种数据库。本轮最后是直接
+   `apt install mysql-server-8.0` 起了 8.0.46 实例，21 条方言用例
+   在 MySQL 8.0 上全绿，才确认修复有效。
+
+顺带产出：`test-dialect-oracle` 增加了一步显式断言"用例真的跑了且没有 skip"。
+在此之前，这个 informational job 的绿灯有歧义 —— 可能是跑通了，也可能是
+**全 skip 了**，两者在 jobs API 里长得一模一样。现在"还没真正验证过"这件事
+会明确显示在 CI 面板上（因为 job 是 `continue-on-error`，不阻断合并）。
