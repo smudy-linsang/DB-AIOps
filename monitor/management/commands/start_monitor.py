@@ -114,6 +114,8 @@ class Command(BaseCommand):
 
         scheduler = BlockingScheduler()
         scheduler.add_job(self.monitor_job, 'interval', seconds=60)
+        # 告警运维：自动升级扫描 + 聚合冲刷（接通 AlertManager 升级/聚合能力）
+        scheduler.add_job(self.alert_housekeeping_job, 'interval', seconds=60)
 
         # 立即执行一次
         self.monitor_job()
@@ -122,6 +124,20 @@ class Command(BaseCommand):
             scheduler.start()
         except (KeyboardInterrupt, SystemExit):
             print("\n监控进程已停止")
+
+    def alert_housekeeping_job(self):
+        """周期告警运维：对每个活跃库执行自动升级扫描 + 聚合冲刷。"""
+        from monitor.alert_manager import AlertManager
+        from monitor.models import DatabaseConfig
+        for cfg in DatabaseConfig.objects.filter(is_active=True):
+            try:
+                am = AlertManager(cfg)
+                n = am.run_escalation_scan()
+                am.flush_expired_aggregations()
+                if n:
+                    print(f"[ALERT-OPS] {cfg.name}: 升级 {n} 条告警")
+            except Exception as e:
+                logger.warning("[ALERT-OPS] %s 告警运维失败: %s", cfg.name, e)
 
     def _run_single_check(self, config):
         """在独立线程中执行单个数据库的采集，超时后自动记录 DOWN"""

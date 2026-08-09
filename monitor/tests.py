@@ -4,7 +4,7 @@ from unittest import mock
 
 from django.test import TestCase
 
-from monitor.alert_manager import AlertManager
+from monitor.alert_manager import AlertManager, reset_aggregation
 from monitor.crypto import decrypt_password, encrypt_password, is_encrypted
 from monitor.management.commands.start_monitor import Command
 from monitor.models import AlertLog, DatabaseConfig, MonitorLog
@@ -61,6 +61,7 @@ class PgCapacityTests(TestCase):
 
 class AlertManagerTests(TestCase):
     def setUp(self):
+        reset_aggregation()
         self.config = DatabaseConfig.objects.create(
             name="db1",
             db_type="mysql",
@@ -102,6 +103,7 @@ class AlertManagerTests(TestCase):
 
 class ProcessResultTests(TestCase):
     def setUp(self):
+        reset_aggregation()
         self.config = DatabaseConfig.objects.create(
             name="db-monitor-target",
             db_type="mysql",
@@ -155,6 +157,7 @@ class AlertConsistencyTests(TestCase):
     """告警模块 PG/ES 一致性与通知健壮性测试"""
 
     def setUp(self):
+        reset_aggregation()
         self.config = DatabaseConfig.objects.create(
             name="alert-cfg", db_type="mysql", host="127.0.0.1", port=3306,
             username="root", password=encrypt_password("root123"), is_active=True,
@@ -198,3 +201,53 @@ class AlertConsistencyTests(TestCase):
              mock.patch("monitor.notifications.send_wecom_alert", return_value=True):
             result = send_alert_notification(alert)
         self.assertTrue(result["email"])
+
+
+class AlertOpsTests(TestCase):
+    """告警自动升级与聚合功能测试（接通的功能缺口）"""
+
+    def setUp(self):
+        from monitor.models import NotificationRule
+        reset_aggregation()
+        self.config = DatabaseConfig.objects.create(
+            name="ops-cfg", db_type="mysql", host="127.0.0.1", port=3306,
+            username="root", password=encrypt_password("root123"), is_active=True,
+        )
+        # 全局规则：1 分钟未确认自动升级（4NF: channels 创建后赋值）
+        self.rule = NotificationRule.objects.create(name="escal", escalation_minutes=1)
+        self.rule.channels = ["email"]
+
+    def test_escalation_scan_upgrades_severity(self):
+        from django.utils import timezone as tz
+        from datetime import timedelta
+        am = AlertManager(self.config)
+        alert = AlertLog.objects.create(
+            config=self.config, alert_type="down", severity="warning",
+            title="esc", description="d", status="active",
+        )
+        # 制造 2 分钟前创建且 2 分钟前通知（满足升级+冷却条件）
+        AlertLog.objects.filter(id=alert.id).update(
+            create_time=tz.now() - timedelta(minutes=2),
+            last_notified_at=tz.now() - timedelta(minutes=2),
+        )
+        with mock.patch("monitor.notifications.send_email_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_dingtalk_alert", return_value=True), \
+             mock.patch("monitor.notifications.send_wecom_alert", return_value=True), \
+             mock.patch("monitor.elasticsearch_engine.sync_alert", return_value=True):
+            n = am.run_escalation_scan()
+        self.assertEqual(n, 1)
+        self.assertEqual(AlertLog.objects.get(id=alert.id).severity, "error")
+
+    def test_aggregation_flush_sends_batch(self):
+        am = AlertManager(self.config)
+        alerts = [
+            AlertLog.objects.create(config=self.config, alert_type="down",
+                                    severity="critical", title=f"a{i}", description="d",
+                                    status="active")
+            for i in range(3)
+        ]
+        with mock.patch.object(am, "_send_to_channels", return_value={}) as send:
+            for a in alerts:
+                am._add_to_aggregation(a, ("down", "agg_key"))
+        # 达到 MIN_COUNT=3 应触发一次聚合推送
+        self.assertTrue(send.called)

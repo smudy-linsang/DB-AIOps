@@ -25,6 +25,18 @@ from monitor.models import AlertLog, AlertSilenceWindow, AlertNotificationLog, N
 logger = logging.getLogger(__name__)
 
 
+# 模块级聚合缓冲区（跨实例/跨守护任务持久，使聚合在长运行守护中真正生效）
+# {(alert_type, metric_key): [AlertLog, ...]} / {(alert_type, metric_key): 窗口起始时间}
+_AGG_BUFFER: Dict[Tuple[str, str], List[AlertLog]] = defaultdict(list)
+_AGG_TS: Dict[Tuple[str, str], datetime] = {}
+
+
+def reset_aggregation():
+    """清空聚合缓冲（主要用于测试隔离）。"""
+    _AGG_BUFFER.clear()
+    _AGG_TS.clear()
+
+
 class AlertManager:
     """告警去重与状态管理 v3.0 - 通知规则驱动"""
 
@@ -43,9 +55,9 @@ class AlertManager:
         """
         self.config = config
         self.notifier = notifier or self._default_notifier
-        # 批量聚合缓冲区: {(alert_type, metric_key): [AlertLog, ...]}
-        self._aggregation_buffer: Dict[Tuple[str, str], List[AlertLog]] = defaultdict(list)
-        self._aggregation_timestamps: Dict[Tuple[str, str], datetime] = {}
+        # 聚合缓冲使用模块级共享状态（见 _AGG_BUFFER/_AGG_TS）
+        self._aggregation_buffer = _AGG_BUFFER
+        self._aggregation_timestamps = _AGG_TS
 
     # ------------------------------------------------------------------
     # 公共接口
@@ -495,6 +507,69 @@ class AlertManager:
                 title, description, ['email', 'dingtalk', 'wecom'],
                 alert=alert
             )
+
+        # 首条立即发送后打开聚合窗口：窗口内同类后续告警进入缓冲批量推送
+        if buffer_key not in self._aggregation_timestamps:
+            self._aggregation_timestamps[buffer_key] = timezone.now()
+
+    def flush_expired_aggregations(self):
+        """
+        冲刷到期聚合窗口：窗口到期或达到最小条数时批量推送。
+        由守护进程周期调用，保证缓冲告警不会滞留。
+        """
+        now = timezone.now()
+        for key in list(self._aggregation_timestamps.keys()):
+            start = self._aggregation_timestamps[key]
+            buffered = self._aggregation_buffer.get(key, [])
+            elapsed = (now - start).total_seconds()
+            if len(buffered) >= self.AGGREGATION_MIN_COUNT or (
+                buffered and elapsed >= self.AGGREGATION_WINDOW_SEC
+            ):
+                self._send_aggregated_alert(key, buffered)
+                self._aggregation_buffer.pop(key, None)
+                self._aggregation_timestamps.pop(key, None)
+            elif buffered and elapsed >= self.AGGREGATION_WINDOW_SEC:
+                # 窗口到期但不足最小条数，也冲刷（避免滞留）
+                self._send_aggregated_alert(key, buffered)
+                self._aggregation_buffer.pop(key, None)
+                self._aggregation_timestamps.pop(key, None)
+
+    def run_escalation_scan(self):
+        """
+        扫描当前库的活跃告警，对超时未确认者自动升级严重级别（接通 _check_escalation）。
+        冷却：距上次通知需满 escalation_minutes，避免每个扫描周期连续跳级。
+        返回升级的告警数。
+        """
+        escalated = 0
+        active = AlertLog.objects.filter(config=self.config, status='active')
+        for alert in active:
+            rules = self._match_rules(alert.alert_type, alert.severity)
+            for rule in rules:
+                if rule.escalation_minutes <= 0 or not alert.create_time:
+                    continue
+                now = timezone.now()
+                since_create = (now - alert.create_time).total_seconds()
+                since_notify = (now - alert.last_notified_at).total_seconds() if alert.last_notified_at else since_create
+                if since_create >= rule.escalation_minutes * 60 and since_notify >= rule.escalation_minutes * 60:
+                    new_sev = self._check_escalation(alert)
+                    if new_sev and new_sev != alert.severity:
+                        old = alert.severity
+                        alert.severity = new_sev
+                        alert.last_notified_at = now
+                        alert.save(update_fields=['severity', 'last_notified_at'])
+                        try:
+                            from monitor.elasticsearch_engine import sync_alert
+                            sync_alert(alert)
+                        except Exception:
+                            pass
+                        self._send_notification(
+                            alert,
+                            f"[升级] {alert.title}",
+                            f"告警 {old} 超过 {rule.escalation_minutes} 分钟未确认，升级为 {new_sev}。\n{alert.description}",
+                        )
+                        escalated += 1
+                    break
+        return escalated
 
     def _default_notifier(self, title, body):
         """默认通知器（日志输出）"""
