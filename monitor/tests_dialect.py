@@ -77,17 +77,47 @@ class MySQLDialectTests(TransactionTestCase):
             conn.close()
 
     def test_statement_timeout_actually_cancels(self):
-        """比"变量设对了"更强的断言：慢查询必须真的被中断。"""
+        """比"变量设对了"更强的断言：慢查询必须真的被中断。
+
+        两种方言的"中断"表现形式不同，本用例断言的是**真正要保证的那个性质**
+        —— 语句没有跑完 30 秒 —— 而不是某一家的报错形式：
+
+        - MariaDB 10.11（max_statement_time）：抛错
+          "Query execution was interrupted (max_statement_time exceeded)"。
+        - MySQL 8.0（max_execution_time）：对 SLEEP() **不报错**，而是让
+          SLEEP 提前返回 1（1 = 被中断，0 = 睡满）。已在 MySQL 8.0.46 上实测：
+          `SET SESSION max_execution_time=5000; SELECT SLEEP(30);` → 5.0s 返回 1。
+          这不是保护失效（超时确实在 5 秒时掐断了语句），只是 MySQL 对 SLEEP
+          这个特例不把 kill 转成客户端错误。
+
+        因此早期写死 assertRaises 的版本在 CI 的 mysql:8.0 上必然失败 ——
+        失败的是断言，不是产品。
+        """
         import time as _t
         conn = self._conn()
         try:
             cur = conn.cursor()
             t0 = _t.time()
-            with self.assertRaises(Exception):
-                cur.execute("SELECT SLEEP(30)")
+            raised = None
+            value = None
+            try:
+                cur.execute("SELECT SLEEP(30) AS s")
+                row = cur.fetchone()
+                value = list(row.values())[0] if isinstance(row, dict) else row[0]
+            except Exception as e:  # MariaDB 走这条路
+                raised = e
             elapsed = _t.time() - t0
-            self.assertLess(elapsed, 15,
-                            f'SLEEP(30) 耗时 {elapsed:.1f}s 才返回，语句超时没有真正生效')
+
+            self.assertLess(
+                elapsed, 15,
+                f'SLEEP(30) 耗时 {elapsed:.1f}s 才返回（报错={raised!r}, 返回值={value!r}），'
+                f'语句超时没有真正生效：目标库上的慢查询不会被中断')
+            # 没报错时，必须能证明是"被掐断"而不是"睡满了正常返回"
+            if raised is None:
+                self.assertEqual(
+                    int(value), 1,
+                    f'SLEEP 在 {elapsed:.1f}s 返回了 {value!r}：既没报错、返回值也不是 1'
+                    '（1 表示被中断），无法证明语句超时生效')
         finally:
             try:
                 conn.close()

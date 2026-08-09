@@ -650,6 +650,25 @@ MySQL 的 `max_execution_time` 对老版本不存在，用 `try/except` 包裹�
 - 单测：断言 psycopg2.connect 收到 `options` 含 `statement_timeout`
 - 单测：断言 pymysql 连接后执行了 `SET SESSION max_execution_time`
 
+### 补充（真库复测发现，2026-08）
+
+上面「静默降级」这一句本身就是缺陷，见 REVIEW-06：MariaDB 根本没有
+`max_execution_time`（它叫 `max_statement_time`，单位是秒），于是**整个 MariaDB
+系上语句超时保护静默地不存在**。现已改为「先试 MySQL 变量、失败再试 MariaDB 变量、
+两者都不支持才 `degrade.note` 留痕」，并由 `tests_dialect` 用真库回归。
+
+另有一处**方言语义差异**，容易被误判成保护失效，记录在案：
+
+| | 变量 | 慢查询被掐断时的表现 |
+|---|---|---|
+| MySQL 8.0 | `max_execution_time`（毫秒） | `SELECT SLEEP(30)` **不报错**，提前返回 `1`（1=被中断，0=睡满） |
+| MariaDB 10.11 | `max_statement_time`（秒） | 抛错 `max_statement_time exceeded` |
+
+已在 MySQL 8.0.46 / MariaDB 10.11.14 上分别实测。因此
+`test_statement_timeout_actually_cancels` 断言的是"语句没跑满 30 秒"这个**真正要
+保证的性质**，而不是某一家的报错形式；早期写死 `assertRaises` 的版本在 CI 的
+`mysql:8.0` 上必然红 —— 红的是断言，不是产品。
+
 ---
 
 ## BUG-110 PG 长连接不 commit → idle in transaction 阻塞被监控库 VACUUM
