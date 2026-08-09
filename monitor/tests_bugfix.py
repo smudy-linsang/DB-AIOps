@@ -1385,3 +1385,42 @@ class Bug132ApiKeyTtlTests(TestCase):
             APIKeyAuth.generate_api_key('sys', 1, ['metrics.view'])
             timeout = c.set.call_args[1]['timeout']
         self.assertEqual(timeout, APIKeyAuth._api_key_ttl_sec())
+
+
+# =============================================================================
+# REVIEW-02 自监控伪实例不得泄漏到面向用户的实例清单
+# =============================================================================
+class Review02SystemInstanceHiddenTests(TestCase):
+    """`__system__` 靠 is_active=False 藏在列表外，而 BUG-135 的修复恰恰改成了
+    "默认也返回停用实例" —— 两处改动叠加，伪实例就冒到了实例列表和导航树里。
+    """
+
+    def setUp(self):
+        from monitor.self_monitor import SYSTEM_CONFIG_NAME
+        self.sys_name = SYSTEM_CONFIG_NAME
+        DatabaseConfig.objects.create(
+            name=self.sys_name, db_type='mysql', host='localhost', port=0,
+            username='-', password='', is_active=False)
+        self.real = make_db('real-db')
+        self.user = make_user('rev2', RoleCode.DBA, [Perm.DATABASES_VIEW])
+        self.c = Client()
+        login(self.c, self.user)
+
+    def test_pseudo_instance_absent_from_list(self):
+        names = [d['name'] for d in self.c.get('/api/v1/databases/').json()['databases']]
+        self.assertNotIn(self.sys_name, names, '自监控伪实例不应出现在实例列表')
+        self.assertIn('real-db', names, '真实实例必须仍然返回')
+
+    def test_pseudo_instance_absent_even_with_include_inactive(self):
+        names = [d['name'] for d in
+                 self.c.get('/api/v1/databases/?include_inactive=1').json()['databases']]
+        self.assertNotIn(self.sys_name, names)
+
+    def test_停用的真实实例仍然可见(self):
+        """回归保护：排除伪实例不能把 BUG-135 一起改回去。"""
+        paused = make_db('paused-db', port=3307)
+        paused.is_active = False
+        paused.save(update_fields=['is_active'])
+        rows = {d['name']: d for d in self.c.get('/api/v1/databases/').json()['databases']}
+        self.assertIn('paused-db', rows)
+        self.assertFalse(rows['paused-db']['is_active'])

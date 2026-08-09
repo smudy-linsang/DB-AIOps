@@ -52,21 +52,32 @@ class SystemHealthView(View):
 
         components = []
         any_stale = False
+        any_missing = False
         for code, (display, _interval, stale_after) in COMPONENTS.items():
             beats = list(ComponentHeartbeat.objects.filter(component=code))
             if not beats:
+                # REVIEW-03: 从未上报 ≠ 健康。部署时漏启动某个常驻进程，
+                # 是最常见的真实故障，此前它只显示 unknown 却不影响顶层状态，
+                # /system/health 照报 ok —— W4 想挡的恰恰就是这种情况。
+                any_missing = True
                 components.append({'component': code, 'display': display,
                                    'status': 'unknown', 'instances': 0,
-                                   'last_beat_at': None, 'silent_sec': None})
+                                   'last_beat_at': None, 'silent_sec': None,
+                                   'hint': '从未上报心跳，该常驻进程可能未启动'})
                 continue
             latest = max(beats, key=lambda b: b.last_beat_at)
             silent = int((now - latest.last_beat_at).total_seconds())
-            stale = silent > stale_after or any(b.status == 'down' for b in beats)
+            # 逐实例判定：任一副本失联即该组件不健康
+            down_instances = [b for b in beats
+                              if b.status == 'down'
+                              or (now - b.last_beat_at).total_seconds() > stale_after]
+            stale = bool(down_instances)
             any_stale = any_stale or stale
             components.append({
                 'component': code, 'display': display,
                 'status': 'down' if stale else 'up',
                 'instances': len(beats),
+                'down_instances': len(down_instances),
                 'last_beat_at': latest.last_beat_at,
                 'silent_sec': silent,
             })
@@ -74,7 +85,7 @@ class SystemHealthView(View):
         degradations = degrade.snapshot()
         if dependencies['database'].get('status') != 'ok':
             status = 'down'
-        elif any_stale or degradations:
+        elif any_stale or any_missing or degradations:
             status = 'degraded'
         else:
             status = 'ok'
