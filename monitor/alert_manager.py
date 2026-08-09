@@ -500,7 +500,8 @@ class AlertManager:
             # 无匹配规则，回退默认
             self._send_to_channels(title, body, ['email', 'dingtalk', 'wecom'])
 
-        # 记录通知日志（对聚合中每个告警）
+        # 记录通知日志（对聚合中每个告警）。
+        # REVIEW-04: 缓冲期内告警可能已被删除，_log_notification 内部会跳过并隔离失败。
         for alert in alerts:
             self._log_notification(alert, 'aggregated', 'success', f'聚合推送({count}条)')
 
@@ -620,14 +621,27 @@ class AlertManager:
         logger.warning(f"[ALERT] {title}: {body}")
 
     def _log_notification(self, alert, channel, status, error_message=None, rule_id=None):
-        """记录通知发送日志"""
+        """记录通知发送日志。
+
+        REVIEW-04: 这里的失败必须包在保存点里。AlertNotificationLog.alert 是外键，
+        而聚合缓冲区 _AGG_BUFFER 会把 AlertLog 对象持有到窗口结束 —— 期间该告警
+        完全可能被「批量删除告警」清掉（AlertBatchDeleteView 就是干这个的）。
+        此时 INSERT 触发 ForeignKeyViolation，虽然被 except 兜住，但在 PostgreSQL 上
+        失败的语句会**污染当前事务**，后续查询全部报 InFailedSqlTransaction ——
+        与 BUG-136 同一类问题：一条无关紧要的日志写失败，拖垮整个调用链。
+        """
+        from django.db import transaction
+        if alert is None or alert.pk is None:
+            logger.debug("[AlertManager] 跳过通知日志：告警未落库")
+            return
         try:
-            AlertNotificationLog.objects.create(
-                alert=alert,
-                channel=channel,
-                status=status,
-                error_message=error_message,
-            )
+            with transaction.atomic():
+                AlertNotificationLog.objects.create(
+                    alert=alert,
+                    channel=channel,
+                    status=status,
+                    error_message=error_message,
+                )
         except Exception as e:
             logger.error(f"[AlertManager] 记录通知日志失败: {e}")
 

@@ -14,12 +14,13 @@ class Command(BaseCommand):
 
     def handle(self, *args, **options):
         from monitor.models import DatabaseConfig
+        from monitor.self_monitor import SYSTEM_CONFIG_NAME
         cfg, created = DatabaseConfig.objects.get_or_create(
-            name='__system__',
+            name=SYSTEM_CONFIG_NAME,
             defaults={'db_type': 'mysql', 'host': 'localhost', 'port': 0,
                       'username': '-', 'password': '', 'is_active': False},
         )
         if created:
-            self.stdout.write(self.style.SUCCESS(f"已创建伪实例 __system__ (id={cfg.id})"))
+            self.stdout.write(self.style.SUCCESS(f"已创建伪实例 {SYSTEM_CONFIG_NAME} (id={cfg.id})"))
         else:
-            self.stdout.write(f"伪实例 __system__ 已存在 (id={cfg.id})")
+            self.stdout.write(f"伪实例 {SYSTEM_CONFIG_NAME} 已存在 (id={cfg.id})")

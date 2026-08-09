@@ -141,9 +141,10 @@ class Command(BaseCommand):
         # W4 自监控：失联组件扫描（复用 AlertManager 告警链路）
         try:
             from monitor.self_monitor import run_heartbeat_check
-            n_stale = run_heartbeat_check()
-            if n_stale:
-                print(f"[ALERT-OPS] 自监控: {n_stale} 个组件失联")
+            res = run_heartbeat_check()
+            if res['stale'] or res['missing']:
+                print(f"[ALERT-OPS] 自监控: {res['stale']} 个组件失联, "
+                      f"{res['missing']} 个组件未启动")
         except Exception as e:
             logger.warning("[ALERT-OPS] 自监控扫描失败: %s", e)
 

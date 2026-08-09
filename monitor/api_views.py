@@ -37,6 +37,7 @@ from .models import MonitorLog, AlertLog, AuditLog, UserProfile, DatabaseConfig
 from .models import AlertSilenceWindow, AlertNotificationLog, NotificationRule
 from .models import BusinessSystem, DatabaseTopology, ReportRecord
 from .slow_query_engine import SlowQueryEngine
+from .self_monitor import SYSTEM_CONFIG_NAME
 from .auth import require_auth, require_role, require_permission, require_any_permission, get_user_role_code, get_user_database_ids, get_user_permissions, get_user_menu_permissions, is_super_admin
 
 
@@ -209,6 +210,10 @@ class DatabaseListView(JSONResponseMixin, View):
         configs = DatabaseConfig.objects.all()
         if not include_inactive:
             configs = configs.filter(is_active=True)
+        # REVIEW-02: 排除自监控伪实例。它靠 is_active=False 藏在列表外，
+        # 而 BUG-135 的修复恰恰改成了"默认也返回停用实例" —— 两处改动叠加，
+        # __system__ 就冒到了实例列表和导航树里。必须显式排除。
+        configs = configs.exclude(name=SYSTEM_CONFIG_NAME)
         if allowed_db_ids is not None:
             configs = configs.filter(id__in=allowed_db_ids)
 
