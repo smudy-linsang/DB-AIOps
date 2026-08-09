@@ -358,17 +358,22 @@ jobs:
 
 #### 2.1.2 分支保护配置（GitHub 仓库设置，手工一次）
 
+> 📌 **项目决策（2026-08-09，仓库 Owner）**：本项目**允许直推 master**，
+> 不强制 PR 流程。下表按此决策调整：保留 CI 必需检查，去掉 PR 强制项。
+
 `Settings → Branches → Add rule`，`master` 分支：
 
 | 配置项 | 值 | 说明 |
 |--------|----|------|
-| Require a pull request before merging | ✅ | 禁止直推 master |
+| Require a pull request before merging | ❌ | Owner 允许直推 master，不强制 PR |
 | Require status checks to pass | ✅ | 勾选 `静态检查`、`单元测试（无外部依赖）`、`集成测试（PostgreSQL）`、`前端构建与测试` |
-| Require branches to be up to date | ✅ | 防止"各自都绿、合了就红" |
-| Do not allow bypassing | ✅（含管理员） | 否则门禁形同虚设 |
+| Require branches to be up to date | ❌ | 与直推模式不匹配，跳过 |
+| Do not allow bypassing | ❌ | 保留 Owner 直推能力 |
 
-> ⚠️ 这一步是 W1 的**关键**。ci.yml 只是产生信号，分支保护才让信号有约束力。
-> 不做这步，等于装了报警器但不接电源。
+> ⚠️ 直推模式下的约束力来源：**本地 `scripts/validate.sh` + pre-commit 钩子是第一道闸**
+> （提交前拦截语法错误与密钥），CI 是推送后的权威验证 —— 直推绕不开 CI 运行，
+> 红色 CI 会立即暴露在 Actions 页面并阻断后续 PR 合并。
+> 若未来转为团队协作，恢复"Require PR + Do not allow bypassing"即可升级为强门禁。
 
 #### 2.1.3 `scripts/check_deps.py`（新增）
 
@@ -1627,7 +1632,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | V1 | CI 在 PR 上运行 | 开一个改 1 行的 PR | 4 个必需 job 全部出现并通过 |
 | V2 | CI 能拦住坏代码 | PR 中引入语法错误 | `静态检查` 失败，合并按钮被禁用 |
 | V3 | 迁移漂移被拦 | 改模型但不生成 migration | `静态检查` 的迁移漂移步骤失败 |
-| V4 | 分支保护生效 | 尝试直推 master | 被拒绝 |
+| V4 | 分支规则生效（直推模式） | 直推 master | 推送成功且触发 CI 运行，4 项必需检查出现 |
 | V5 | unit 层零依赖 | 停掉所有 Docker，`scripts/validate.sh unit` | 退出码 0，< 15s |
 | V6 | JSON 契约 | `scripts/validate.sh unit --json \| python -m json.tool` | 合法 JSON，含 exit_code/stages |
 | V7 | 依赖缺失被发现 | `pip uninstall jsonschema` 后跑 `check_deps.py` | 退出码 1，明确指出 jsonschema |
@@ -1642,7 +1647,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 
 ### 5.2 完成定义（DoD）
 
-**P1 完成**：V1–V4、V6 通过；`master` 分支保护已开启且含 4 项必需检查。
+**P1 完成**：V1–V4、V6 通过；`master` 分支规则已开启必需状态检查（项目允许直推，不设 PR 强制）。
 **P2 完成**：V5、V7、V12、V13 通过；unit 层用例数 ≥ 60。
 **P3 完成**：V9、V10、V11 通过；`checkers/` 关键路径（连接、超时、只读、ASH 形状）有真库覆盖。
 **P4 完成**：V8、V14 通过；B1–B3 批次降级留痕改造完成。
