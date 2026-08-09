@@ -201,6 +201,16 @@ jobs:
           echo '```' >> $GITHUB_STEP_SUMMARY
           tail -60 /tmp/oracle.log >> $GITHUB_STEP_SUMMARY 2>/dev/null || echo '(无输出)' >> $GITHUB_STEP_SUMMARY
           echo '```' >> $GITHUB_STEP_SUMMARY
+      # 再传一份 artifact：Oracle 容器启动日志有几百行，teardown 时会灌进 job log，
+      # 从 API 按 tail 取日志根本翻不到 Python 那几行。artifact 可以直接下载。
+      - name: 上传原始输出
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: oracle-dialect-log
+          path: /tmp/oracle.log
+          if-no-files-found: warn
+          retention-days: 7
 
   # ── 前端 ───────────────────────────────────────────────
   frontend:
