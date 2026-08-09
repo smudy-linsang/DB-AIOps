@@ -16,6 +16,7 @@ Author: DB-AIOps Team
 
 import hashlib
 import hmac
+import logging
 import secrets
 import time
 from datetime import datetime, timedelta
@@ -28,6 +29,8 @@ from django.contrib.auth.models import User
 from django.core.cache import cache
 
 from .models import UserProfile
+
+logger = logging.getLogger(__name__)
 
 
 # =============================================================================
@@ -781,6 +784,29 @@ def _login_user_count_key(username: str) -> str:
     return f"login_ufail_{_digest(username.lower())}"
 
 
+def _warn_untrusted_xff_once(remote: str) -> None:
+    """检测到"疑似部署在未配置的反向代理之后"时告警一次（按 remote 去重，10 分钟内不重复）。
+
+    默认不信任任何 XFF 是安全的选择，但会带来一个隐蔽的运维后果：
+    所有请求的来源 IP 都塌缩成代理自身的 IP，限流按 (用户名, 代理IP) 聚合，
+    等于该用户名全网共用一个计数器 —— 偏严（会误锁合法用户），不会漏放，
+    但运维需要知道自己处在这个状态。这里给出可操作的提示，而不是静默降级。
+    """
+    key = f"xff_untrusted_warned_{_digest(remote)}"
+    try:
+        if cache.get(key):
+            return
+        cache.set(key, 1, 600)
+    except Exception:
+        pass
+    logger.warning(
+        "检测到来自 %s 的请求带有 X-Forwarded-For，但该地址不在 TRUSTED_PROXY_IPS 中，"
+        "已按直连处理（忽略 XFF）。若确实部署在反向代理之后，请设置环境变量 "
+        "DJANGO_TRUSTED_PROXY_IPS=%s（多个用逗号分隔），否则登录限流会把所有客户端"
+        "当作同一来源，可能误锁合法用户。",
+        remote, remote)
+
+
 def _client_ip(request: HttpRequest) -> str:
     """解析真实客户端 IP。
 
@@ -788,11 +814,17 @@ def _client_ip(request: HttpRequest) -> str:
     sha256(username:ip)，攻击者每次请求带一个随机 XFF 就能让计数器永远停在 1，
     锁定逻辑永不触发 —— 爆破防护完全是装饰性的。
     现在只有当请求确实来自已配置的可信代理时才采信 XFF。
+
+    默认 TRUSTED_PROXY_IPS 为空（谁都不信）是刻意的安全默认值：
+    误配置的后果是"偏严"（限流粒度变粗、可能误锁），而不是"漏放"（可被绕过）。
     """
     remote = request.META.get('REMOTE_ADDR', '') or 'unknown'
     trusted = getattr(settings, 'TRUSTED_PROXY_IPS', None) or []
     if remote not in trusted:
-        return remote                      # 直连：XFF 一律不信
+        # 直连：XFF 一律不信；但若对方确实带了 XFF，提示运维可能漏配了代理白名单
+        if request.META.get('HTTP_X_FORWARDED_FOR'):
+            _warn_untrusted_xff_once(remote)
+        return remote
     xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
     if not xff:
         return remote

@@ -275,6 +275,40 @@ class Bug106LoginThrottleTests(TestCase):
             self.assertEqual(self._try(xff=f'10.2.2.{i}').status_code, 401)
         self.assertEqual(self._try(xff='10.2.2.200').status_code, 429)
 
+    def test_untrusted_xff_triggers_actionable_warning(self):
+        """默认不信任 XFF 是安全的，但不该静默 —— 要告诉运维怎么配。"""
+        from django.core.cache import cache
+        cache.clear()
+        req = mock.Mock(META={'REMOTE_ADDR': '172.18.0.5',
+                              'HTTP_X_FORWARDED_FOR': '203.0.113.7'})
+        with self.assertLogs('monitor.auth', level='WARNING') as cm:
+            ip = auth_mod._client_ip(req)
+        self.assertEqual(ip, '172.18.0.5', '未配置可信代理时必须按直连处理')
+        joined = '\n'.join(cm.output)
+        self.assertIn('DJANGO_TRUSTED_PROXY_IPS', joined, '提示必须可操作')
+        self.assertIn('172.18.0.5', joined, '要告诉运维该把哪个 IP 加进白名单')
+
+    def test_untrusted_xff_warning_is_deduplicated(self):
+        """告警按来源去重，不能把日志刷爆。"""
+        from django.core.cache import cache
+        cache.clear()
+        req = mock.Mock(META={'REMOTE_ADDR': '172.18.0.5',
+                              'HTTP_X_FORWARDED_FOR': '203.0.113.7'})
+        with self.assertLogs('monitor.auth', level='WARNING') as cm:
+            for _ in range(50):
+                auth_mod._client_ip(req)
+        self.assertEqual(len(cm.output), 1, '同一来源 10 分钟内只告警一次')
+
+    def test_no_warning_when_no_xff_present(self):
+        """直连且无 XFF 是正常情况，不该产生噪音。"""
+        from django.core.cache import cache
+        import logging as _logging
+        cache.clear()
+        req = mock.Mock(META={'REMOTE_ADDR': '10.0.0.9'})
+        with mock.patch.object(auth_mod.logger, 'warning') as w:
+            auth_mod._client_ip(req)
+        w.assert_not_called()
+
     def test_remaining_seconds_actually_counts_down(self):
         """返回值应是真实剩余秒，而非每次都报满额锁定时长。"""
         from django.core.cache import cache
@@ -330,6 +364,32 @@ class Bug103PerfAuthorizationTests(TestCase):
         login(c, self.scoped)
         r = c.get(f'/api/v1/databases/{self.db1.id}/perf/aas/')
         self.assertEqual(r.status_code, 404)
+
+    def test_existence_is_not_leaked_by_status_or_body(self):
+        """越权实例 与 压根不存在的实例，对外响应必须完全一致。
+
+        否则攻击者可以用 404/403 的差异把整个实例清单探出来。
+        """
+        c = Client()
+        login(c, self.scoped)
+        r_denied = c.get(f'/api/v1/databases/{self.db1.id}/perf/aas/')
+        r_absent = c.get('/api/v1/databases/999999/perf/aas/')
+        self.assertEqual(r_denied.status_code, r_absent.status_code)
+        self.assertEqual(r_denied.json(), r_absent.json())
+
+    def test_denial_reason_is_logged_server_side(self):
+        """对外不区分，但服务端日志要能区分，否则排障无从下手。"""
+        c = Client()
+        login(c, self.scoped)
+        with self.assertLogs('monitor.api_views_perf', level='WARNING') as cm:
+            c.get(f'/api/v1/databases/{self.db1.id}/perf/aas/')
+        self.assertTrue(any('超出用户数据范围' in m for m in cm.output),
+                        f'越权应记录明确原因, 实际: {cm.output}')
+
+        with self.assertLogs('monitor.api_views_perf', level='WARNING') as cm:
+            c.get('/api/v1/databases/999999/perf/aas/')
+        self.assertTrue(any('实例不存在' in m for m in cm.output),
+                        f'不存在应记录明确原因, 实际: {cm.output}')
 
     def test_in_scope_instance_is_reachable(self):
         c = Client()

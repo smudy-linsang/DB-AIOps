@@ -117,16 +117,28 @@ class PerfBaseView(View):
     def get_config(self, config_id):
         """按用户数据范围取实例。
 
-        越权与不存在统一返回 None → 调用方回 404，避免泄露实例存在性
-        （403/404 的差异本身就是一个可枚举的信息侧信道）。
+        越权与不存在对外统一返回 None → 调用方回 404，避免泄露实例存在性
+        （403/404 的差异本身就是一个可枚举的信息侧信道：攻击者可以据此
+        把整个实例清单探出来）。
+
+        安全不该以排障困难为代价：对外不区分，但**服务端日志区分得很清楚** ——
+        运维查一条 WARNING 就知道是"越权被拦"还是"实例真的不存在"。
         """
         user = getattr(getattr(self, '_request', None), 'user', None)
         qs = DatabaseConfig.objects.filter(id=config_id)
+        allowed = None
         if user is not None:
             allowed = get_user_database_ids(user)
             if allowed is not None:
                 qs = qs.filter(id__in=allowed)
-        return qs.first()
+        cfg = qs.first()
+        if cfg is None:
+            exists = DatabaseConfig.objects.filter(id=config_id).exists()
+            logger.warning(
+                "[perf] 拒绝访问 config_id=%s user=%s 原因=%s (对外统一返回 404)",
+                config_id, getattr(user, 'username', '?'),
+                '超出用户数据范围' if exists else '实例不存在')
+        return cfg
 
     def live_conn(self, config, timeout_ms=3000):
         """实时直连 (只读 + 3s 语句超时预算)。失败返回 None。"""

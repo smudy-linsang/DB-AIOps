@@ -1888,13 +1888,13 @@ BUG-106 的用例用 `override_settings(LOGIN_MAX_ATTEMPTS=3)` 收窄阈值，�
 
 | 轮次 | 内容 | 结果 |
 |------|------|------|
-| 第 1 轮 | `tests_bugfix.py` 缺陷回归（82 用例） | **82/82 通过** |
+| 第 1 轮 | `tests_bugfix.py` 缺陷回归（87 用例） | **87/87 通过** |
 | 第 2 轮 | 全量存量测试回归（`tests.py`/`tests_phase7`/`tests_phase8`） | **零回归**，137/137 通过 |
 | 第 3 轮 | `tests_concurrency.py` 并发竞态（8 用例） | **8/8 通过** |
 | 第 4 轮 | 静态检查 + 前端构建 | `compileall` / `manage.py check` / `makemigrations --check` 全过；`npm run build` 成功 |
 | 第 5 轮 | 稳定性：全量 ×3 + 随机顺序 ×3 + 并发套件 ×12 | **全部通过，无 flaky** |
 
-最终全量：**145 个用例，OK**。
+最终全量：**150 个用例，OK**。
 
 ## 5.2 测试阶段的三点收获
 
@@ -1906,21 +1906,71 @@ BUG-106 的用例用 `override_settings(LOGIN_MAX_ATTEMPTS=3)` 收窄阈值，�
 3. **BUG-137 是在纯净环境下才暴露的**：依赖装齐时行为完全正常，
    只有缺 `jsonschema` 时才显出 fail-open 的危险姿态。
 
-## 5.3 已知遗留（非本次引入）
+## 5.3 两处安全取舍的最终定案
+
+初稿把这两点列为"需要使用者决定"，最终按**从严**定案，各补一层可诊断性 ——
+安全不该以排障困难为代价。
+
+### (1) `TRUSTED_PROXY_IPS` 默认为空（不信任任何 XFF）
+
+**为什么这是更安全的一侧**：两种误配置的后果不对称。
+- 默认为空 + 实际在代理后 → 来源 IP 塌缩成代理 IP，限流按 (用户名, 代理IP) 聚合。
+  结果是**偏严**：同一用户名全网共用一个计数器，可能误锁合法用户，但**不会漏放**。
+- 默认信任 XFF + 实际直连 → 攻击者伪造 XFF 即可绕过限流（这正是 BUG-106 原貌）。
+
+宁可误锁也不能漏放，所以保留空默认值。
+
+**补的可诊断性**：`_client_ip()` 一旦发现"请求带了 XFF、但来源不在白名单里"，
+就按来源去重打一条 WARNING（10 分钟内不重复），并直接把该填的环境变量和 IP 写在日志里：
+
+```
+检测到来自 172.18.0.5 的请求带有 X-Forwarded-For，但该地址不在 TRUSTED_PROXY_IPS 中，
+已按直连处理（忽略 XFF）。若确实部署在反向代理之后，请设置环境变量
+DJANGO_TRUSTED_PROXY_IPS=172.18.0.5 ...
+```
+
+另外，账号维度计数（`LOGIN_MAX_ATTEMPTS_PER_USER`）本身与 IP 无关，
+即便代理场景下 IP 维度粒度变粗，分布式爆破仍会被账号维度兜住。
+
+### (2) 越权实例返回 404 而非 403
+
+**为什么这是更安全的一侧**：403/404 的差异本身就是可枚举的信息侧信道 ——
+攻击者遍历 config_id，凡是回 403 的就是"存在但我没权限"，
+于是整个实例清单（含数量、ID 分布）被探得一清二楚。
+
+**补的可诊断性**：对外统一 404，但服务端日志把两种情况分得很清楚：
+
+```python
+logger.warning("[perf] 拒绝访问 config_id=%s user=%s 原因=%s (对外统一返回 404)",
+               config_id, username, '超出用户数据范围' if exists else '实例不存在')
+```
+
+运维查一条日志就知道是越权被拦还是实例真的不存在，前台则什么都问不出来。
+
+**验证**：
+- `test_existence_is_not_leaked_by_status_or_body` —— 越权实例与不存在实例的
+  状态码和响应体必须逐字节一致
+- `test_denial_reason_is_logged_server_side` —— 两种情况的日志必须能区分
+- `test_untrusted_xff_triggers_actionable_warning` / `..._is_deduplicated` /
+  `test_no_warning_when_no_xff_present`
+
+---
+
+## 5.4 已知遗留（非本次引入）
 
 - `manage.py check --deploy` 仍有 1 项 WARNING（生产部署项，与本次缺陷无关）
 - `tenancy.py` 保持未接入状态，已在模块头显著标注（BUG-132）
 - `APIKeyAuth` 仍基于缓存存储，Redis 重启后 Key 失效；持久化列入后续迭代（BUG-132）
 
-## 5.4 复现测试的方法
+## 5.5 复现测试的方法
 
 ```bash
 export POSTGRES_HOST=127.0.0.1 POSTGRES_USER=postgres POSTGRES_PASSWORD=''
 export TIMESCALEDB_ENABLED=False ES_ENABLED=False
 export DJANGO_SECRET_KEY=test DB_MONITOR_SECRET_KEY=test
 
-python manage.py test monitor                      # 全量 145
-python manage.py test monitor.tests_bugfix         # 缺陷回归 82
+python manage.py test monitor                      # 全量 150
+python manage.py test monitor.tests_bugfix         # 缺陷回归 87
 python manage.py test monitor.tests_concurrency    # 并发竞态 8
 python manage.py test monitor --shuffle            # 随机顺序查耦合
 ```
