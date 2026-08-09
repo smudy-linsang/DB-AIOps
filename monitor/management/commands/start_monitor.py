@@ -595,15 +595,15 @@ class Command(BaseCommand):
         self._last_plan_at[config.id] = _t.time()
         try:
             from monitor.timeseries import get_timeseries_storage
-            ts_conn = get_timeseries_storage()._get_connection()
-            tcur = ts_conn.cursor()
-            tcur.execute(
-                "SELECT sql_digest, MAX(db_name) FROM sql_stat WHERE db_config_id=%s "
-                "AND time > NOW() - interval '1 hour' "
-                "GROUP BY sql_digest ORDER BY SUM(elapsed_ms_delta) DESC LIMIT 10",
-                (config.id,))
-            digests = tcur.fetchall()
-            tcur.close()
+            with get_timeseries_storage().cursor() as tcur:
+                if tcur is None:
+                    return
+                tcur.execute(
+                    "SELECT sql_digest, MAX(db_name) FROM sql_stat WHERE db_config_id=%s "
+                    "AND time > NOW() - interval '1 hour' "
+                    "GROUP BY sql_digest ORDER BY SUM(elapsed_ms_delta) DESC LIMIT 10",
+                    (config.id,))
+                digests = tcur.fetchall()
         except Exception:
             return
         if not digests:
@@ -618,15 +618,15 @@ class Command(BaseCommand):
         """从 ASH 样本取该 digest 最近一条原文与库名 (带字面量, EXPLAIN 用)。"""
         try:
             from monitor.timeseries import get_timeseries_storage
-            conn = get_timeseries_storage()._get_connection()
-            cur = conn.cursor()
-            cur.execute(
-                "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s "
-                "AND sql_digest=%s AND sql_text IS NOT NULL AND sql_text <> '' "
-                "ORDER BY time DESC LIMIT 1", (config_id, digest))
-            row = cur.fetchone()
-            cur.close()
-            return (row[0], row[1]) if row else (None, None)
+            with get_timeseries_storage().cursor() as cur:
+                if cur is None:
+                    return None, None
+                cur.execute(
+                    "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s "
+                    "AND sql_digest=%s AND sql_text IS NOT NULL AND sql_text <> '' "
+                    "ORDER BY time DESC LIMIT 1", (config_id, digest))
+                row = cur.fetchone()
+                return (row[0], row[1]) if row else (None, None)
         except Exception:
             return None, None
 

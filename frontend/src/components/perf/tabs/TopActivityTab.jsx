@@ -3,6 +3,7 @@ import { Card, Radio, Space, Table, Tag, Typography, message } from 'antd';
 import { perfAPI } from '../../../services/api';
 import AasChart from '../AasChart';
 import BreakdownBar from '../BreakdownBar';
+import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
@@ -21,17 +22,23 @@ export default function TopActivityTab({ configId, range, onOpenSql, refreshKey 
 
   useEffect(() => { setSel(null); }, [range, configId]);
 
+  // BUG-133: 判活，避免自动刷新/切窗时旧响应覆盖新数据
   useEffect(() => {
-    if (!configId) return;
-    perfAPI.aas(configId, { ...range, by: 'wait_class' })
-      .then((r) => setAas(r.data))
-      .catch((e) => message.error(`AAS 加载失败: ${e.message}`));
+    if (!configId) return undefined;
+    return withAlive((alive) => {
+      perfAPI.aas(configId, { ...range, by: 'wait_class' })
+        .then((r) => { if (alive()) setAas(r.data); })
+        .catch((e) => { if (alive()) message.error(fmtPerfError('AAS 加载', e)); });
+    });
   }, [configId, range, refreshKey]);
 
   useEffect(() => {
-    if (!configId) return;
-    perfAPI.topActivity(configId, { ...(sel || range), dim, limit: 15 })
-      .then((r) => setRows(r.data.rows || [])).catch(() => setRows([]));
+    if (!configId) return undefined;
+    return withAlive((alive) => {
+      perfAPI.topActivity(configId, { ...(sel || range), dim, limit: 15 })
+        .then((r) => { if (alive()) setRows(r.data?.rows || []); })
+        .catch(() => { if (alive()) setRows([]); });
+    });
   }, [configId, range, sel, dim, refreshKey]);
 
   const onBrush = useCallback((from, to) => setSel({ from, to }), []);

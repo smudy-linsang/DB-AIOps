@@ -13,6 +13,8 @@ import SqlTab from '../components/perf/tabs/SqlTab';
 import BlockingTab from '../components/perf/tabs/BlockingTab';
 import CompareDrawer from '../components/perf/CompareDrawer';
 import SqlDetailPanel from '../components/perf/SqlDetailPanel';
+import SessionDetailPanel from '../components/perf/SessionDetailPanel';
+import { withAlive } from '../components/perf/useSafeAsync';
 
 const { Title, Text } = Typography;
 
@@ -40,6 +42,7 @@ export default function PerformanceCenter() {
   const [refreshKey, setRefreshKey] = useState(0);
   const [compareOpen, setCompareOpen] = useState(false);
   const [sqlDrawer, setSqlDrawer] = useState(null);   // digest → 抽屉
+  const [sessionDrawer, setSessionDrawer] = useState(null); // 会话行 → 抽屉
   const [selectedDigest, setSelectedDigest] = useState(null); // Tab4 常驻详情
   const [openIncidents, setOpenIncidents] = useState([]);
 
@@ -48,15 +51,24 @@ export default function PerformanceCenter() {
     return from && to ? { from, to } : { window: windowKey };
   }, [sp, windowKey]);
 
+  // BUG-133: 加 alive 判活，避免快速切换实例时旧响应覆盖新数据
   useEffect(() => {
-    databaseAPI.getDetail(configId).then((r) => setDb(r.data || r)).catch(() => {});
+    if (!Number.isFinite(configId)) return undefined;
+    return withAlive((alive) => {
+      databaseAPI.getDetail(configId)
+        .then((r) => { if (alive()) setDb(r.data || r); })
+        .catch(() => { if (alive()) setDb(null); });
+    });
   }, [configId]);
 
   // 事故联动横幅 (phase7/30 §7)
   useEffect(() => {
-    incidentAPI.list({ config_id: configId, status: 'open,diagnosing,plan_ready,executing,verifying' })
-      .then((r) => setOpenIncidents((r.data?.items || r.items || []).slice(0, 3)))
-      .catch(() => setOpenIncidents([]));
+    if (!Number.isFinite(configId)) return undefined;
+    return withAlive((alive) => {
+      incidentAPI.list({ config_id: configId, status: 'open,diagnosing,plan_ready,executing,verifying' })
+        .then((r) => { if (alive()) setOpenIncidents((r.data?.items || r.items || []).slice(0, 3)); })
+        .catch(() => { if (alive()) setOpenIncidents([]); });
+    });
   }, [configId, refreshKey]);
 
   useEffect(() => {
@@ -77,7 +89,13 @@ export default function PerformanceCenter() {
     setSqlDrawer(digest);
   }, [tab]);
 
-  const common = { configId, range, refreshKey, onOpenSql: openSql };
+  // BUG-125: onOpenSession 此前从未传入，HomeTab 的「Top 会话」点击被静默吞掉
+  const openSession = useCallback((row) => setSessionDrawer(row), []);
+
+  const common = {
+    configId, range, refreshKey,
+    onOpenSql: openSql, onOpenSession: openSession,
+  };
   const items = [
     { key: 'home', label: '性能主页', children: <ErrorBoundary><HomeTab {...common} /></ErrorBoundary> },
     { key: 'top', label: '顶级活动', children: <ErrorBoundary><TopActivityTab {...common} /></ErrorBoundary> },
@@ -87,6 +105,15 @@ export default function PerformanceCenter() {
       children: <ErrorBoundary><SqlTab {...common} selectedDigest={selectedDigest} /></ErrorBoundary> },
     { key: 'blocking', label: '阻塞分析', children: <ErrorBoundary><BlockingTab {...common} /></ErrorBoundary> },
   ];
+
+  if (!Number.isFinite(configId)) {
+    return (
+      <div style={{ padding: 24 }}>
+        <Alert type="error" showIcon message="非法的实例 ID"
+               description="URL 中的实例 ID 不是有效数字，请从数据库列表重新进入。" />
+      </div>
+    );
+  }
 
   return (
     <div style={{ padding: 12 }}>
@@ -128,6 +155,14 @@ export default function PerformanceCenter() {
       <Drawer title={`SQL 详情: ${(sqlDrawer || '').slice(0, 16)}…`} width={920}
               open={!!sqlDrawer} onClose={() => setSqlDrawer(null)} destroyOnClose>
         {sqlDrawer && <SqlDetailPanel configId={configId} digest={sqlDrawer} />}
+      </Drawer>
+      <Drawer title={`会话详情: ${sessionDrawer?.key || sessionDrawer?.session_id || ''}`}
+              width={760} open={!!sessionDrawer}
+              onClose={() => setSessionDrawer(null)} destroyOnClose>
+        {sessionDrawer && (
+          <SessionDetailPanel configId={configId} session={sessionDrawer}
+                              range={range} onOpenSql={openSql} />
+        )}
       </Drawer>
     </div>
   );

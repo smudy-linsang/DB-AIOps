@@ -104,8 +104,14 @@ class PlatformHealthCheckView(View):
                 return {'status': 'disabled', 'message': 'TimescaleDB not enabled'}
             from monitor.timeseries import get_timeseries_storage
             ts = get_timeseries_storage()
-            if ts.enabled and ts._get_connection():
-                return {'status': 'ok', 'message': 'TimescaleDB connection is alive'}
+            if ts.enabled:
+                # 真正跑一条语句：只拿到连接对象不足以证明链路可用
+                with ts.cursor() as cur:
+                    if cur is not None:
+                        cur.execute("SELECT 1")
+                        cur.fetchone()
+                        return {'status': 'ok',
+                                'message': 'TimescaleDB connection is alive'}
             return {'status': 'error', 'message': 'TimescaleDB enabled but connection failed'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}

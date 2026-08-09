@@ -14,6 +14,7 @@ import json
 import logging
 import re
 
+from django.db import IntegrityError
 from django.utils import timezone
 
 logger = logging.getLogger("monitor.plan_capture")
@@ -115,6 +116,28 @@ def _capture_oracle(cur, sql_id):
     return {'nodes': nodes}, plan_text, float(cost) if cost is not None else None, plan_hash
 
 
+def _swap_current_plan(config, sql_digest, plan_hash, plan_json, plan_text, cost, source):
+    """在一个事务内完成「翻转旧的当前计划 → 插入新的当前计划」。
+
+    返回 (prev, plan)。计划未变时返回 (None, prev)，调用方据此跳过事件。
+    撞唯一约束时抛 IntegrityError，由调用方重试。
+    """
+    from django.db import transaction
+    from monitor.models import SqlPlan
+    with transaction.atomic():
+        current_qs = SqlPlan.objects.select_for_update().filter(
+            config=config, sql_digest=sql_digest, is_current=True)
+        prev = current_qs.first()
+        if prev and prev.plan_hash == plan_hash:
+            return None, prev            # 计划未变, 不重复落库
+        current_qs.update(is_current=False)
+        plan = SqlPlan.objects.create(
+            config=config, sql_digest=sql_digest, plan_hash=plan_hash,
+            plan_json=plan_json, plan_text=plan_text or '',
+            cost_total=cost, source=source, is_current=True)
+        return prev, plan
+
+
 def capture(config, sql_digest, sql_text=None, source='auto', conn=None, db_name=None):
     """采集一次计划并落库。返回 SqlPlan 或 None。conn 可复用外部连接。
 
@@ -157,20 +180,35 @@ def capture(config, sql_digest, sql_text=None, source='auto', conn=None, db_name
         finally:
             cur.close()
 
-        prev = SqlPlan.objects.filter(config=config, sql_digest=sql_digest,
-                                      is_current=True).first()
-        if prev and prev.plan_hash == plan_hash:
-            return prev  # 计划未变, 不重复落库
         # 原文随计划留存 (详情页/优化建议在 ASH 无样本时兜底读取)
         if sql_text and isinstance(plan_json, dict):
             plan_json = dict(plan_json, _sql_text=sql_text[:1000])
-        plan = SqlPlan.objects.create(
-            config=config, sql_digest=sql_digest, plan_hash=plan_hash,
-            plan_json=plan_json, plan_text=plan_text or '',
-            cost_total=cost, source=source, is_current=True)
+
+        # BUG-119: 采集线程与用户手工 EXPLAIN 并发时，原实现(无事务无锁)会让
+        # 两者都读到同一个 prev、都创建 is_current=True 的新行 —— 同一 digest
+        # 出现多个"当前计划"，详情页的 is_current 标记随之混乱。
+        #
+        # 仅靠 select_for_update 不够：行锁锁不住"尚不存在的行"。T1 把旧行置
+        # false 并插入新行后，阻塞在旧行上的 T2 醒来时谓词已不匹配，它既看不到
+        # 旧行也看不到 T1 刚插入的新行，于是再插一条 is_current=True。
+        # 真正的保证来自 SqlPlan 上的部分唯一约束 uniq_current_plan_per_digest；
+        # 这里负责在撞约束时重试一次（此时能读到对方刚写入的新"当前计划"）。
+        prev, plan = None, None
+        for attempt in range(3):
+            try:
+                prev, plan = _swap_current_plan(
+                    config, sql_digest, plan_hash, plan_json, plan_text, cost, source)
+                break
+            except IntegrityError:
+                if attempt == 2:
+                    logger.warning("[plan] %s/%s 计划落库重试耗尽",
+                                   config.id, sql_digest)
+                    return None
+                logger.debug("[plan] 当前计划被并发写入, 重试 (%d)", attempt + 1)
+        if plan is None:
+            return None
+        # 事件发送（含时序库查询与 Redis 写入）放在事务外，不占用行锁
         if prev:
-            prev.is_current = False
-            prev.save(update_fields=['is_current'])
             _maybe_emit_plan_change(config, sql_digest, prev, plan)
         return plan
     except Exception as e:
@@ -189,35 +227,35 @@ def _digest_latency(config_id, sql_digest, since, until):
     """sql_stat 中该 digest 的平均单次耗时 ms; 无数据返回 None。"""
     try:
         from monitor.timeseries import get_timeseries_storage
-        conn = get_timeseries_storage()._get_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT SUM(elapsed_ms_delta)::float, SUM(exec_delta)::float FROM sql_stat "
-            "WHERE db_config_id=%s AND sql_digest=%s AND time BETWEEN %s AND %s",
-            (config_id, sql_digest, since, until))
-        row = cur.fetchone()
-        cur.close()
-        if row and row[1]:
-            return row[0] / row[1]
-    except Exception:
-        pass
+        with get_timeseries_storage().cursor() as cur:
+            if cur is None:
+                return None
+            cur.execute(
+                "SELECT SUM(elapsed_ms_delta)::float, SUM(exec_delta)::float FROM sql_stat "
+                "WHERE db_config_id=%s AND sql_digest=%s AND time BETWEEN %s AND %s",
+                (config_id, sql_digest, since, until))
+            row = cur.fetchone()
+            if row and row[1]:
+                return row[0] / row[1]
+    except Exception as e:
+        logger.debug("[plan] 取 digest 延迟失败: %s", e)
     return None
 
 
 def _in_top_elapsed(config_id, sql_digest, top_n=20) -> bool:
     try:
         from monitor.timeseries import get_timeseries_storage
-        conn = get_timeseries_storage()._get_connection()
-        cur = conn.cursor()
-        cur.execute(
-            "SELECT sql_digest FROM sql_stat WHERE db_config_id=%s "
-            "AND time > NOW() - interval '1 hour' "
-            "GROUP BY sql_digest ORDER BY SUM(elapsed_ms_delta) DESC LIMIT %s",
-            (config_id, top_n))
-        tops = {r[0] for r in cur.fetchall()}
-        cur.close()
-        return sql_digest in tops
-    except Exception:
+        with get_timeseries_storage().cursor() as cur:
+            if cur is None:
+                return False
+            cur.execute(
+                "SELECT sql_digest FROM sql_stat WHERE db_config_id=%s "
+                "AND time > NOW() - interval '1 hour' "
+                "GROUP BY sql_digest ORDER BY SUM(elapsed_ms_delta) DESC LIMIT %s",
+                (config_id, top_n))
+            return sql_digest in {r[0] for r in cur.fetchall()}
+    except Exception as e:
+        logger.debug("[plan] Top 耗时判定失败: %s", e)
         return False
 
 

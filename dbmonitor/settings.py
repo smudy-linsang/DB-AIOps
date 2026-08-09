@@ -217,6 +217,15 @@ TIMESCALEDB_NAME = os.environ.get('TIMESCALEDB_NAME', 'timeseriesdb')
 TIMESCALEDB_USER = os.environ.get('TIMESCALEDB_USER', 'postgres')
 TIMESCALEDB_PASSWORD = os.environ.get('TIMESCALEDB_PASSWORD', 'postgres123')
 
+# TimescaleDB 连接池（BUG-101）：此前是单例单连接被多线程共享，游标交叉污染
+TIMESCALEDB_POOL_MAX = int(os.environ.get('TIMESCALEDB_POOL_MAX', 16))
+TIMESCALEDB_STATEMENT_TIMEOUT_MS = int(
+    os.environ.get('TIMESCALEDB_STATEMENT_TIMEOUT_MS', 15000))
+
+# Redis 客户端单例连接池上限（BUG-112）
+REDIS_MAX_CONNECTIONS = int(os.environ.get('REDIS_MAX_CONNECTIONS', 50))
+REDIS_SOCKET_TIMEOUT = int(os.environ.get('REDIS_SOCKET_TIMEOUT', 5))
+
 # TimescaleDB 时序数据保留策略
 TIMESCALEDB_RETENTION_DAYS = int(os.environ.get('TIMESCALEDB_RETENTION_DAYS', '90'))
 TIMESCALEDB_COMPRESSION_INTERVAL = os.environ.get('TIMESCALEDB_COMPRESSION_INTERVAL', '7 days')
@@ -462,6 +471,39 @@ API_TOKEN_EXPIRY_HOURS = int(os.environ.get('API_TOKEN_EXPIRY_HOURS', 24))  # To
 LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', 5))
 LOGIN_FAIL_WINDOW_SEC = int(os.environ.get('LOGIN_FAIL_WINDOW_SEC', 600))
 LOGIN_LOCKOUT_SEC = int(os.environ.get('LOGIN_LOCKOUT_SEC', 900))
+# 账号维度上限（跨 IP）：攻击者换 IP 也无法绕过（BUG-106）
+LOGIN_MAX_ATTEMPTS_PER_USER = int(os.environ.get('LOGIN_MAX_ATTEMPTS_PER_USER', 20))
+
+# 可信反向代理（BUG-106）：仅当请求确实来自这些 IP 时才采信 X-Forwarded-For。
+# 留空表示不信任任何 XFF（直连部署的安全默认值）。
+# 部署在 Nginx/LB 之后时，填入代理自身的 IP，例如 "172.18.0.5" 或 "10.0.0.1,10.0.0.2"。
+TRUSTED_PROXY_IPS = [ip.strip() for ip in
+                     os.environ.get('DJANGO_TRUSTED_PROXY_IPS', '').split(',') if ip.strip()]
+# XFF 链中自右向左跳过的可信代理跳数
+TRUSTED_PROXY_DEPTH = int(os.environ.get('DJANGO_TRUSTED_PROXY_DEPTH', 1))
+
+# 外部集成 API Key 有效期（BUG-132）：此前误用 5 分钟的缓存 TTL
+API_KEY_TTL_SEC = int(os.environ.get('API_KEY_TTL_SEC', 90 * 86400))
+
+# 运维工单职责分离（BUG-105）：禁止审批自己提交的工单。
+# 单人运维场景可置 False 关闭。
+AUDIT_REQUIRE_SEPARATE_APPROVER = os.environ.get(
+    'AUDIT_REQUIRE_SEPARATE_APPROVER', 'True').lower() in ('true', '1', 'yes')
+
+# LLM 输出结构校验 fail-closed（BUG-137）：jsonschema 缺失时拒绝放行，
+# 而不是静默跳过 —— LLM 输出会驱动 RCA 结论与自动修复预案。
+LLM_SCHEMA_VALIDATION_REQUIRED = os.environ.get(
+    'LLM_SCHEMA_VALIDATION_REQUIRED', 'True').lower() in ('true', '1', 'yes')
+
+# 目标库语句超时（BUG-109）：防止被监控库的慢查询拖垮监控系统自身的 Web 进程
+TARGET_DB_STATEMENT_TIMEOUT_MS = int(
+    os.environ.get('TARGET_DB_STATEMENT_TIMEOUT_MS', 5000))
+
+# 性能中心期间对比的单区间最大跨度（BUG-131）
+PERF_COMPARE_MAX_SPAN_SEC = int(os.environ.get('PERF_COMPARE_MAX_SPAN_SEC', 7 * 86400))
+
+# 哨兵长连接最大存活时长（BUG-110）：定期重建，避免任何形式的资源累积
+SENTINEL_CONN_MAX_AGE_SEC = int(os.environ.get('SENTINEL_CONN_MAX_AGE_SEC', 1800))
 
 # ============================================================================
 # 日志配置

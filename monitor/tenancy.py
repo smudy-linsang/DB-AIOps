@@ -2,6 +2,13 @@
 多租户支持模块
 ==============
 
+⚠️ 当前版本【未接入】：本模块定义的租户隔离逻辑尚未在任何 API 路径中启用
+（全项目对本模块零引用，见 BUG-132）。请勿据此认为多租户隔离已经生效。
+
+现阶段的数据范围隔离由 `monitor.auth.get_user_database_ids()` 承担：
+按 UserProfile.allowed_databases 限定用户可见的实例集合。
+本模块的接入计划见 DB_AIOps_MASTER_DESIGN.md。
+
 实现租户数据隔离和识别：
 - 租户上下文管理
 - 基于租户的查询过滤

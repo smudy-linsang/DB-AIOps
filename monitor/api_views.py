@@ -21,6 +21,8 @@ Author: DB-AIOps Team
 import json
 from datetime import datetime, timedelta
 from typing import Optional
+from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 from django.http import JsonResponse
@@ -200,10 +202,15 @@ class DatabaseListView(JSONResponseMixin, View):
             config=OuterRef('pk')
         ).order_by('-create_time')
 
+        # BUG-135: 此前硬过滤 is_active=True，被停用的实例从列表里彻底消失 ——
+        # 前端把「启停监控」开关关掉后该行就不见了，再也无法重新启用。
+        # 改为默认返回全部并带上 is_active 供前端灰显，需要时用参数收窄。
+        include_inactive = request.GET.get('include_inactive', '1') not in ('0', 'false', 'False')
+        configs = DatabaseConfig.objects.all()
+        if not include_inactive:
+            configs = configs.filter(is_active=True)
         if allowed_db_ids is not None:
-            configs = DatabaseConfig.objects.filter(id__in=allowed_db_ids, is_active=True)
-        else:
-            configs = DatabaseConfig.objects.filter(is_active=True)
+            configs = configs.filter(id__in=allowed_db_ids)
 
         configs = configs.annotate(
             latest_status=Subquery(latest_log_subq.values('status')[:1], output_field=CharField()),
@@ -560,15 +567,14 @@ class DatabaseStatusView(JSONResponseMixin, View):
             from .timeseries import get_timeseries_storage
             ts = get_timeseries_storage()
             if ts.enabled:
-                conn = ts._get_connection()
-                if conn:
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT time, status, raw_data FROM collection_snapshot WHERE db_config_id = %s ORDER BY time DESC LIMIT 1",
-                        (config_id,)
-                    )
-                    row = cur.fetchone()
-                    cur.close()
+                with ts.cursor() as cur:
+                    row = None
+                    if cur is not None:
+                        cur.execute(
+                            "SELECT time, status, raw_data FROM collection_snapshot WHERE db_config_id = %s ORDER BY time DESC LIMIT 1",
+                            (config_id,)
+                        )
+                        row = cur.fetchone()
                     if row:
                         raw_data = row[2] if row[2] else {}
                         if isinstance(raw_data, str):
@@ -1412,6 +1418,18 @@ class AuditLogApproveView(JSONResponseMixin, View):
         if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
 
+        # BUG-105(a) 职责分离：此前不校验审批人是否就是申请人，同一个 DBA
+        # 提交 KILL_SESSION 工单后可自行批准，四眼原则形同虚设。
+        if getattr(settings, 'AUDIT_REQUIRE_SEPARATE_APPROVER', True):
+            applicant = (audit_log.executor or '').strip()
+            if applicant and applicant == request.user.username:
+                return self.error_response(
+                    '不能审批自己提交的工单（职责分离）。请由其他 DBA 审批。', 403)
+
+        if audit_log.status != 'pending':
+            return self.error_response(
+                f"工单状态为 '{audit_log.status}'，只能审批待审批工单", 400)
+
         # 更新审批状态（BUG-007：AuditLog 为单级审批模型，使用 approver/approve_time，
         # 原 approver_1/approver_2 多级字段在模型中不存在，会导致 AttributeError）
         audit_log.approver = request.user.username
@@ -1450,10 +1468,18 @@ class AuditLogRejectView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
-        
+
+        # 只有待审批工单可拒绝：此前无状态校验，能把已执行成功的工单改成 rejected，
+        # 审计记录与实际发生的事情不符。
+        if audit_log.status != 'pending':
+            return self.error_response(
+                f"工单状态为 '{audit_log.status}'，只能拒绝待审批工单", 400)
+
         audit_log.status = 'rejected'
-        audit_log.save()
-        
+        audit_log.approver = request.user.username
+        audit_log.approve_time = timezone.now()
+        audit_log.save(update_fields=['status', 'approver', 'approve_time'])
+
         return self.json_response({
             'status': 'success',
             'message': 'Audit log rejected',
@@ -1485,28 +1511,38 @@ class AuditLogExecuteView(JSONResponseMixin, View):
         """
         from monitor.db_connector import get_db_connection, close_db_connection
         from monitor.auto_remediation_engine import AutoRemediationEngine
-        
+
         try:
-            # 1. 获取审计记录
+            # 1. 获取审计记录（先做一次无锁读，用于 RBAC 与 404 判断）
             audit_log = AuditLog.objects.get(id=audit_id)
         except AuditLog.DoesNotExist:
             return self.error_response('Audit log not found', 404)
-        
+
         # 2. RBAC 检查
         allowed_db_ids = get_user_database_ids(request.user)
         if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
-        
-        # 3. 检查状态
-        if audit_log.status != 'approved':
-            return self.error_response(
-                f"操作状态为 '{audit_log.status}'，只能执行已批准的工单",
-                400
-            )
-        
+
+        # 3. BUG-105(b) 状态检查 + 抢占，必须原子。
+        # 原实现是典型 TOCTOU：两个并发请求（前端双击 / 客户端重试）都读到
+        # 'approved' 就都会执行 —— 对 `ALTER TABLESPACE ... ADD DATAFILE`
+        # 意味着加了两个数据文件。这里用行锁把"检查"和"置为 executing"合成一步，
+        # 第二个请求进来只会看到 executing 而被拒。
+        with transaction.atomic():
+            audit_log = AuditLog.objects.select_for_update().get(id=audit_id)
+            if audit_log.status != 'approved':
+                return self.error_response(
+                    f"操作状态为 '{audit_log.status}'，只能执行已批准的工单",
+                    400
+                )
+            audit_log.status = 'executing'
+            audit_log.executor = request.user.username
+            audit_log.execute_time = timezone.now()
+            audit_log.save(update_fields=['status', 'executor', 'execute_time'])
+
         # 4. 获取数据库配置
         config = audit_log.config
-        
+
         # 5. 获取数据库连接
         conn = None
         try:
@@ -1592,9 +1628,31 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
         allowed_db_ids = get_user_database_ids(request.user)
         if allowed_db_ids is not None and audit_log.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
-        
-        # 获取数据库连接
+
+        # BUG-102: 预执行此前完全绕过了 SQL 白名单校验（执行路径有、这里没有），
+        # 两条路径的安全策略发生漂移。先做与执行路径一致的校验。
+        from monitor.auto_remediation_engine import AutoRemediationEngine
+        is_safe, safety_reason = AutoRemediationEngine._validate_sql_safety(
+            audit_log.sql_command or '')
+        if not is_safe:
+            return self.json_response({
+                'status': 'invalid',
+                'message': f"SQL 安全校验失败: {safety_reason}",
+                'sql_preview': audit_log.sql_command
+            }, status=400)
+
+        # 获取数据库配置
         config = audit_log.config
+        db_type = (config.db_type or '').lower()
+        # BUG-102: 达梦(dm)不在原分支列表中，会落入 else 分支 `test_sql = sql`
+        # —— 名为 dry-run 的接口在达梦库上是**真实执行**。用户点"验证语法"，
+        # 会话就真的被杀了。这里改为白名单：不认识的库类型一律不执行。
+        explain_prefix = {
+            'oracle': 'EXPLAIN PLAN FOR ', 'dm': 'EXPLAIN PLAN FOR ',
+            'mysql': 'EXPLAIN ', 'gbase': 'EXPLAIN ', 'tdsql': 'EXPLAIN ',
+            'pgsql': 'EXPLAIN ', 'postgresql': 'EXPLAIN ',
+        }.get(db_type)
+
         conn = None
         try:
             conn = get_db_connection(config)
@@ -1604,48 +1662,56 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
                 'message': f"数据库连接失败: {str(e)}",
                 'sql_preview': audit_log.sql_command
             })
-        
+
         try:
             cursor = conn.cursor()
-            
+
             # 解析SQL命令
             sql_commands = []
             for line in audit_log.sql_command.split(';'):
                 line = line.strip()
                 if line and not line.startswith('--'):
                     sql_commands.append(line)
-            
-            # 尝试解析每条SQL（不执行）
+
+            # 尝试解析每条SQL（只走 EXPLAIN，绝不原样执行）
             parsed = []
             for sql in sql_commands:
+                if explain_prefix is None:
+                    parsed.append({
+                        'sql': sql, 'status': 'unsupported',
+                        'error': f'{db_type} 不支持预执行语法校验，已跳过（不会执行）'
+                    })
+                    continue
                 try:
-                    # 使用 EXPLAIN 或 DESCRIBE 验证语法
-                    db_type = config.db_type.lower()
-                    if db_type == 'oracle':
-                        test_sql = f"EXPLAIN PLAN FOR {sql}"
-                    elif db_type in ['mysql', 'gbase', 'tdsql']:
-                        test_sql = f"EXPLAIN {sql}"
-                    elif db_type in ['pgsql', 'postgresql']:
-                        test_sql = f"EXPLAIN {sql}"
-                    else:
-                        test_sql = sql
-                    
-                    cursor.execute(test_sql)
+                    cursor.execute(explain_prefix + sql)
                     parsed.append({'sql': sql, 'status': 'valid'})
                 except Exception as e:
                     parsed.append({'sql': sql, 'status': 'invalid', 'error': str(e)})
-            
+
             cursor.close()
-            
-            all_valid = all(p['status'] == 'valid' for p in parsed)
-            
+            # EXPLAIN 也会开启只读事务，回滚避免连接残留 idle in transaction
+            try:
+                conn.rollback()
+            except Exception:
+                pass
+
+            all_valid = bool(parsed) and all(p['status'] == 'valid' for p in parsed)
+            unsupported = any(p['status'] == 'unsupported' for p in parsed)
+
+            if unsupported:
+                message = f'{db_type} 不支持预执行语法校验'
+            elif all_valid:
+                message = '所有SQL语法验证通过'
+            else:
+                message = '部分SQL语法验证失败'
+
             return self.json_response({
                 'status': 'valid' if all_valid else 'invalid',
-                'message': '所有SQL语法验证通过' if all_valid else '部分SQL语法验证失败',
+                'message': message,
                 'sql_preview': audit_log.sql_command,
                 'parsed_commands': parsed
             })
-            
+
         except Exception as e:
             return self.json_response({
                 'status': 'invalid',
@@ -2924,20 +2990,19 @@ class DashboardChartsView(JSONResponseMixin, View):
             from .timeseries import get_timeseries_storage
             ts = get_timeseries_storage()
             if ts.enabled:
-                conn = ts._get_connection()
-                if conn:
-                    db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
-                    # 简单查询最近指标
-                    cur = conn.cursor()
-                    cur.execute(
-                        "SELECT time, db_config_id, metric_name, metric_value "
-                        "FROM metric_point "
-                        "WHERE db_config_id = ANY(%s) AND time >= %s "
-                        "ORDER BY time",
-                        (db_ids, since)
-                    )
-                    rows = cur.fetchall()
-                    cur.close()
+                with ts.cursor() as cur:
+                    rows = []
+                    if cur is not None:
+                        db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
+                        # 简单查询最近指标
+                        cur.execute(
+                            "SELECT time, db_config_id, metric_name, metric_value "
+                            "FROM metric_point "
+                            "WHERE db_config_id = ANY(%s) AND time >= %s "
+                            "ORDER BY time",
+                            (db_ids, since)
+                        )
+                        rows = cur.fetchall()
                     if rows:
                         # 按时间聚合为趋势数据
                         trend_data = self._aggregate_trend_from_rows(rows)

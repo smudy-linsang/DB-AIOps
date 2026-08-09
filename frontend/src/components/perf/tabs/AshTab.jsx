@@ -8,6 +8,7 @@ import * as echarts from 'echarts/core';
 import ReactEChartsCore from 'echarts-for-react/lib/core';
 import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
+import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
@@ -23,16 +24,19 @@ export default function AshTab({ configId, range, onOpenSql, refreshKey, initFil
   const [filters, setFilters] = useState(initFilters || []); // [{col,value}]
   const [data, setData] = useState(null);
 
+  // BUG-133: 判活，避免旧响应覆盖新数据
   useEffect(() => {
-    if (!configId) return;
+    if (!configId) return undefined;
     const params = {
       ...range, dims: ALL_DIMS.join(','),
       filters: filters.map((f) => `${f.col}:${f.value}`).join(','),
       limit: 100,
     };
-    perfAPI.ashFacets(configId, params)
-      .then((r) => setData(r.data))
-      .catch((e) => message.error(`ASH 分面失败: ${e.message}`));
+    return withAlive((alive) => {
+      perfAPI.ashFacets(configId, params)
+        .then((r) => { if (alive()) setData(r.data); })
+        .catch((e) => { if (alive()) message.error(fmtPerfError('ASH 分面', e)); });
+    });
   }, [configId, range, filters, refreshKey]);
 
   const addFilter = (col, value) => {

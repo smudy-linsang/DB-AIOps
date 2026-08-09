@@ -741,26 +741,81 @@ def logout_user(token: str) -> bool:
 # 基于缓存的失败计数与临时锁定：同一 (用户名, IP) 在窗口内连续失败达到阈值后，
 # 锁定一段时间，期间拒绝登录尝试。生产环境缓存为 Redis，可跨 worker 生效。
 
-LOGIN_MAX_ATTEMPTS = getattr(settings, 'LOGIN_MAX_ATTEMPTS', 5)
-LOGIN_FAIL_WINDOW_SEC = getattr(settings, 'LOGIN_FAIL_WINDOW_SEC', 600)   # 计数窗口 10 分钟
-LOGIN_LOCKOUT_SEC = getattr(settings, 'LOGIN_LOCKOUT_SEC', 900)           # 锁定 15 分钟
+# 注意：这些阈值必须在**调用时**读取 settings，不能在模块导入时求值。
+# 模块级 getattr(settings, ...) 会把值固化在 import 那一刻，导致运行期
+# 无法调整、override_settings 也完全失效（配置项形同虚设）。
+def _login_max_attempts() -> int:
+    return int(getattr(settings, 'LOGIN_MAX_ATTEMPTS', 5))
+
+
+def _login_fail_window_sec() -> int:
+    return int(getattr(settings, 'LOGIN_FAIL_WINDOW_SEC', 600))   # 计数窗口 10 分钟
+
+
+def _login_lockout_sec() -> int:
+    return int(getattr(settings, 'LOGIN_LOCKOUT_SEC', 900))       # 锁定 15 分钟
+
+
+def _login_max_attempts_per_user() -> int:
+    """账号维度上限（跨 IP）：防止攻击者换 IP 绕过 (用户名,IP) 维度的计数。"""
+    return int(getattr(settings, 'LOGIN_MAX_ATTEMPTS_PER_USER', 20))
+
+
+def _digest(raw: str) -> str:
+    return hashlib.sha256(raw.encode()).hexdigest()[:24]
 
 
 def _login_lock_key(username: str, ip: str) -> str:
-    raw = f"{username.lower()}:{ip}"
-    return f"login_lock_{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+    return f"login_lock_{_digest(f'{username.lower()}:{ip}')}"
 
 
 def _login_count_key(username: str, ip: str) -> str:
-    raw = f"{username.lower()}:{ip}"
-    return f"login_fail_{hashlib.sha256(raw.encode()).hexdigest()[:24]}"
+    return f"login_fail_{_digest(f'{username.lower()}:{ip}')}"
+
+
+def _login_user_lock_key(username: str) -> str:
+    return f"login_ulock_{_digest(username.lower())}"
+
+
+def _login_user_count_key(username: str) -> str:
+    return f"login_ufail_{_digest(username.lower())}"
 
 
 def _client_ip(request: HttpRequest) -> str:
+    """解析真实客户端 IP。
+
+    BUG-106: 原实现无条件信任 X-Forwarded-For。由于失败计数键是
+    sha256(username:ip)，攻击者每次请求带一个随机 XFF 就能让计数器永远停在 1，
+    锁定逻辑永不触发 —— 爆破防护完全是装饰性的。
+    现在只有当请求确实来自已配置的可信代理时才采信 XFF。
+    """
+    remote = request.META.get('REMOTE_ADDR', '') or 'unknown'
+    trusted = getattr(settings, 'TRUSTED_PROXY_IPS', None) or []
+    if remote not in trusted:
+        return remote                      # 直连：XFF 一律不信
     xff = request.META.get('HTTP_X_FORWARDED_FOR', '')
-    if xff:
-        return xff.split(',')[0].strip()
-    return request.META.get('REMOTE_ADDR', 'unknown')
+    if not xff:
+        return remote
+    parts = [p.strip() for p in xff.split(',') if p.strip()]
+    if not parts:
+        return remote
+    # 从右往左跳过 depth 跳可信代理，取真实客户端
+    depth = max(1, int(getattr(settings, 'TRUSTED_PROXY_DEPTH', 1)))
+    idx = len(parts) - depth
+    return parts[idx] if 0 <= idx < len(parts) else parts[0]
+
+
+def _remaining_lock_sec(key: str) -> Optional[int]:
+    """返回剩余锁定秒数。缓存里存的是绝对到期时间戳，因此能给出真实剩余量
+    （原实现存的是固定的 LOCKOUT_SEC，每次都报满额，用户看到的倒计时不会走）。"""
+    expire_at = cache.get(key)
+    if not expire_at:
+        return None
+    remaining = int(expire_at - time.time())
+    if remaining <= 0:
+        cache.delete(key)
+        return None
+    return remaining
 
 
 def check_login_allowed(request: HttpRequest, username: str) -> Optional[int]:
@@ -769,24 +824,38 @@ def check_login_allowed(request: HttpRequest, username: str) -> Optional[int]:
     返回 None 表示允许；返回整数表示已被锁定，值为剩余锁定秒数。
     """
     ip = _client_ip(request)
-    ttl = cache.get(_login_lock_key(username, ip))
-    if ttl:
-        return int(ttl)
+    for key in (_login_lock_key(username, ip), _login_user_lock_key(username)):
+        remaining = _remaining_lock_sec(key)
+        if remaining is not None:
+            return remaining
     return None
 
 
-def record_login_failure(request: HttpRequest, username: str) -> None:
-    """记录一次登录失败，达到阈值则触发锁定。"""
-    ip = _client_ip(request)
-    count_key = _login_count_key(username, ip)
+def _bump(count_key: str, window: int) -> int:
     try:
-        attempts = cache.incr(count_key)
+        return cache.incr(count_key)
     except ValueError:
-        cache.set(count_key, 1, LOGIN_FAIL_WINDOW_SEC)
-        attempts = 1
-    if attempts >= LOGIN_MAX_ATTEMPTS:
-        cache.set(_login_lock_key(username, ip), LOGIN_LOCKOUT_SEC, LOGIN_LOCKOUT_SEC)
+        cache.set(count_key, 1, window)
+        return 1
+
+
+def record_login_failure(request: HttpRequest, username: str) -> None:
+    """记录一次登录失败，达到阈值则触发锁定（IP 维度 + 账号维度双计数）。"""
+    ip = _client_ip(request)
+    now = time.time()
+    window = _login_fail_window_sec()
+    lockout = _login_lockout_sec()
+
+    count_key = _login_count_key(username, ip)
+    if _bump(count_key, window) >= _login_max_attempts():
+        cache.set(_login_lock_key(username, ip), now + lockout, lockout)
         cache.delete(count_key)
+
+    # 账号维度：即便攻击者不断换 IP，同一账号的失败总数仍会累计到锁定
+    ucount_key = _login_user_count_key(username)
+    if _bump(ucount_key, window) >= _login_max_attempts_per_user():
+        cache.set(_login_user_lock_key(username), now + lockout, lockout)
+        cache.delete(ucount_key)
 
 
 def record_login_success(request: HttpRequest, username: str) -> None:
@@ -794,6 +863,8 @@ def record_login_success(request: HttpRequest, username: str) -> None:
     ip = _client_ip(request)
     cache.delete(_login_count_key(username, ip))
     cache.delete(_login_lock_key(username, ip))
+    cache.delete(_login_user_count_key(username))
+    cache.delete(_login_user_lock_key(username))
 
 
 # =============================================================================
@@ -805,9 +876,13 @@ class APIKeyAuth:
     API Key 认证类
     """
     
-    # API Key 缓存时间（秒）
+    # 查库/校验结果的缓存时长（秒）
     CACHE_TIMEOUT = 300
-    
+    # BUG-132: Key 有效期此前误用 CACHE_TIMEOUT，生成 5 分钟后即失效，
+    # 作为"外部系统集成"凭证毫无意义。有效期独立可配。
+    # 注意：当前仍仅存于缓存，Redis 重启后失效；持久化(ApiKey 模型)列入后续迭代。
+    API_KEY_TTL_SEC = getattr(settings, 'API_KEY_TTL_SEC', 90 * 86400)
+
     @classmethod
     def generate_api_key(cls, name: str, user_id: int, permissions: List[str] = None) -> str:
         """
@@ -823,8 +898,8 @@ class APIKeyAuth:
             'user_id': user_id,
             'permissions': permissions or [],
             'created_at': datetime.now().isoformat()
-        }, timeout=cls.CACHE_TIMEOUT)
-        
+        }, timeout=cls.API_KEY_TTL_SEC)
+
         return api_key
     
     @classmethod

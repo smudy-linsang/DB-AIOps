@@ -165,7 +165,13 @@ class AuditLog(models.Model):
     )
     
     # 关联信息
-    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, verbose_name="数据库")
+    # BUG-136: config 原为 NOT NULL，但 AuditLogMiddleware 对所有写请求建审计记录，
+    # 而登录、用户管理、角色配置这类平台级操作根本没有关联实例 —— INSERT 触发
+    # NotNullViolation，被中间件的 except 吞掉，审计记录静默丢失。
+    # 审计追踪是合规特性，"大部分写操作查不到记录"是实质性缺陷。
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+                               null=True, blank=True, verbose_name="数据库",
+                               help_text="平台级操作（登录/用户/角色）无关联实例，可为空")
     related_log = models.ForeignKey(MonitorLog, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="关联监控日志")
     
     # 新增: 触发告警（用于告警与工单关联）
@@ -337,11 +343,20 @@ class UserProfile(models.Model):
 
 
 class UserProfileDatabase(models.Model):
-    """4NF 子表：用户可访问数据库（多值拆分）"""
+    """4NF 子表：用户可访问数据库（多值拆分）
+
+    BUG-130: config_id 原为裸 IntegerField，删除 DatabaseConfig 后授权记录残留。
+    若新实例复用了同一自增 ID（手工 setval / 数据迁移导入），旧授权会意外套用
+    到新实例上 —— 静默的越权。改为真外键并级联删除；db_column 保持 config_id
+    不变，因此 `o.config_id` 的既有读法与列名都不受影响。
+    """
     profile = models.ForeignKey(UserProfile, on_delete=models.CASCADE, related_name='alloweddatabase_set')
-    config_id = models.IntegerField(db_index=True)
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
+                               db_column='config_id', related_name='+',
+                               verbose_name="可访问数据库")
+
     class Meta:
-        unique_together = [('profile', 'config_id')]
+        unique_together = [('profile', 'config')]
 
 
 # ==========================================
@@ -1765,6 +1780,18 @@ class SqlPlan(models.Model):
         verbose_name_plural = "SQL执行计划列表"
         ordering = ['-captured_at']
         indexes = [models.Index(fields=['config', 'sql_digest', 'is_current'])]
+        constraints = [
+            # BUG-119: 类文档一直声称 "is_current=True (唯一)"，但此前没有任何
+            # 机制保证它。仅靠 select_for_update 不够 —— 行锁锁不住"尚不存在的行"
+            # (幻读)：T1 把旧行置 false 并插入新行后，阻塞在旧行上的 T2 醒来时
+            # 谓词已不匹配，它既看不到旧行也看不到 T1 刚插入的新行，于是再插一条
+            # is_current=True。唯一约束在数据库层面把这个不变量钉死。
+            models.UniqueConstraint(
+                fields=['config', 'sql_digest'],
+                condition=models.Q(is_current=True),
+                name='uniq_current_plan_per_digest',
+            ),
+        ]
 
     def __str__(self):
         return f"{self.sql_digest[:12]}@{self.plan_hash[:8]}"

@@ -5,6 +5,7 @@ import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
 import SqlDetailPanel from '../SqlDetailPanel';
 import KillModal from '../KillModal';
+import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
@@ -16,12 +17,19 @@ export default function SqlTab({ configId, selectedDigest, onOpenSql, refreshKey
   const [killTarget, setKillTarget] = useState(null);
 
   const load = () => {
-    if (!configId) return;
+    if (!configId) return undefined;
     setLoading(true);
-    perfAPI.runningSql(configId)
-      .then((r) => { setRows(r.data.rows || []); setDegraded(!!r.data.degraded); })
-      .catch((e) => message.error(`运行中 SQL 加载失败: ${e.message}`))
-      .finally(() => setLoading(false));
+    // BUG-133: 判活，避免自动刷新下旧响应覆盖新数据
+    return withAlive((alive) => {
+      perfAPI.runningSql(configId)
+        .then((r) => {
+          if (!alive()) return;
+          setRows(r.data?.rows || []);
+          setDegraded(!!r.data?.degraded);
+        })
+        .catch((e) => { if (alive()) message.error(fmtPerfError('运行中 SQL 加载', e)); })
+        .finally(() => { if (alive()) setLoading(false); });
+    });
   };
   useEffect(load, [configId, refreshKey]);
 

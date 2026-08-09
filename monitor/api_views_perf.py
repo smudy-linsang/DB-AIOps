@@ -9,6 +9,7 @@ Phase 7B: 性能中心 API (phase7/20)。九端点, 响应字段名为前后端�
 import json
 import logging
 from datetime import timedelta
+from functools import wraps
 
 from django.db.models import Count
 from django.utils import timezone
@@ -17,7 +18,7 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from monitor.auth import require_auth
+from monitor.auth import Perm, get_user_database_ids, has_permission, require_auth
 from monitor.models import DatabaseConfig, Incident, SqlPlan
 
 logger = logging.getLogger(__name__)
@@ -57,16 +58,50 @@ def _bucket_sec(fd, td) -> int:
 
 
 def _ts_cursor():
+    """借出一个时序库游标 (上下文管理器)。时序库不可用时 yield None。
+
+    BUG-101: 原实现返回单例连接上的裸游标且由调用方 close()，多线程共用同一条
+    psycopg2 连接会导致结果集交叉污染。现由连接池借还。
+    """
     from monitor.timeseries import get_timeseries_storage
-    conn = get_timeseries_storage()._get_connection()
-    return conn.cursor() if conn else None
+    return get_timeseries_storage().cursor()
+
+
+def tsdb_guard(fn):
+    """BUG-120: 时序库查询统一兜底，把裸异常收敛为约定的 502 降级响应，
+    而不是抛出 500 + HTML 错误页（前端 JSON 解析失败 → 白屏）。"""
+    @wraps(fn)
+    def wrapper(self, request, *a, **k):
+        try:
+            return fn(self, request, *a, **k)
+        except Exception as e:
+            logger.warning("[perf] %s 查询失败: %s", fn.__qualname__, e, exc_info=True)
+            return self.err('TSDB_ERROR',
+                            f'时序库查询失败: {e.__class__.__name__}', 502)
+    return wrapper
 
 
 class PerfBaseView(View):
+    """性能中心视图基类。
+
+    BUG-103: 此前全部端点只有 @require_auth —— 既不校验功能权限，也不做
+    数据范围隔离。任何登录用户可读取任意实例的 ASH 明细（含 SQL 原文、登录用户、
+    客户端 IP、被锁对象），并可对任意实例提交 KILL_SESSION 高危工单。
+    现在基类统一收口：功能权限 + allowed_databases 数据范围。
+    """
+
+    # 子类可覆盖：只读端点用 METRICS_VIEW，写操作/敏感端点提权
+    required_perm = Perm.METRICS_VIEW
+
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    def dispatch(self, *a, **k):
-        return super().dispatch(*a, **k)
+    def dispatch(self, request, *a, **k):
+        # Django CBV 在 super().dispatch() 内才给 self.request 赋值，
+        # 而 get_config() 需要在那之前拿到 user，这里显式暂存。
+        self._request = request
+        if not has_permission(request.user, self.required_perm):
+            return self.err('FORBIDDEN', f'缺少权限: {self.required_perm}', 403)
+        return super().dispatch(request, *a, **k)
 
     def json_response(self, data, status=200):
         from django.http import JsonResponse
@@ -80,13 +115,25 @@ class PerfBaseView(View):
         return self.json_response({'code': code, 'message': message}, status=status)
 
     def get_config(self, config_id):
-        return DatabaseConfig.objects.filter(id=config_id).first()
+        """按用户数据范围取实例。
 
-    def live_conn(self, config):
-        """实时直连 (只读, 3s 语句超时由各端点自行遵守预算)。失败返回 None。"""
+        越权与不存在统一返回 None → 调用方回 404，避免泄露实例存在性
+        （403/404 的差异本身就是一个可枚举的信息侧信道）。
+        """
+        user = getattr(getattr(self, '_request', None), 'user', None)
+        qs = DatabaseConfig.objects.filter(id=config_id)
+        if user is not None:
+            allowed = get_user_database_ids(user)
+            if allowed is not None:
+                qs = qs.filter(id__in=allowed)
+        return qs.first()
+
+    def live_conn(self, config, timeout_ms=3000):
+        """实时直连 (只读 + 3s 语句超时预算)。失败返回 None。"""
         from monitor.db_connector import DbConnector
         try:
-            return DbConnector.get_connection(config)
+            return DbConnector.get_connection(
+                config, statement_timeout_ms=timeout_ms, readonly=True)
         except Exception as e:
             logger.debug("[perf] 直连失败 %s: %s", config.id, e)
             return None
@@ -96,6 +143,7 @@ class PerfBaseView(View):
 # 7B-02a AAS 时间线
 # ============================================================
 class AasView(PerfBaseView):
+    @tsdb_guard
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -103,21 +151,22 @@ class AasView(PerfBaseView):
         fd, td = _parse_range(request)
         bucket = _bucket_sec(fd, td)
         by = request.GET.get('by', 'wait_class')
-        top = int(request.GET.get('top', 8))
+        try:
+            top = int(request.GET.get('top', 8))
+        except (TypeError, ValueError):
+            return self.err('BAD_PARAM', 'top 需为整数')
+        top = max(1, min(top, 50))
         if by not in ('wait_class', 'user_name', 'db_name', 'sql_digest'):
             return self.err('BAD_PARAM', f'不支持的维度 {by}')
-        cur = _ts_cursor()
-        if not cur:
-            return self.err('TSDB_DOWN', '时序库不可用', 502)
-        try:
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
             cur.execute(
                 f"SELECT time_bucket(%s::interval, bucket) AS t, {by}, SUM(active_sec) "
                 f"FROM session_ash_1m WHERE db_config_id=%s AND bucket >= %s AND bucket < %s "
                 f"GROUP BY 1,2 ORDER BY 1",
                 (f'{bucket} seconds', cfg.id, fd, td))
             rows = cur.fetchall()
-        finally:
-            cur.close()
         # 非等待类维度: TopN 外合并 (other)
         series_map = {}
         totals_by_key = {}
@@ -135,9 +184,12 @@ class AasView(PerfBaseView):
             pts = series_map.setdefault(k2, {})
             pts[t] = pts.get(t, 0) + (active or 0)
             bucket_total[t] = bucket_total.get(t, 0) + (active or 0)
+        # BUG-126: 堆叠面积图要求各系列 x 轴对齐。只输出"有数据的桶"会让
+        # ECharts 把某系列画在错误的堆叠高度上，必须补齐全时间轴的零点。
+        all_buckets = sorted(bucket_total)
         series = [{'key': k,
-                   'points': [[t.isoformat(), round(v / bucket, 3)]
-                              for t, v in sorted(pts.items())]}
+                   'points': [[t.isoformat(), round(pts.get(t, 0) / bucket, 3)]
+                              for t in all_buckets]}
                   for k, pts in series_map.items()]
         db_time = sum(totals_by_key.values())
         window_sec = max((td - fd).total_seconds(), 1)
@@ -160,19 +212,23 @@ _DIM_MAP_RAW = {'session': 'session_id', 'module': 'module',
 
 
 class TopActivityView(PerfBaseView):
+    @tsdb_guard
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
             return self.err('NOT_FOUND', '实例不存在', 404)
         fd, td = _parse_range(request)
         dim = request.GET.get('dim', 'sql')
-        limit = int(request.GET.get('limit', 10))
+        try:
+            limit = int(request.GET.get('limit', 10))
+        except (TypeError, ValueError):
+            return self.err('BAD_PARAM', 'limit 需为整数')
+        limit = max(1, min(limit, 200))
         if dim not in {**_DIM_MAP_1M, **_DIM_MAP_RAW}:
             return self.err('BAD_PARAM', f'不支持的维度 {dim}')
-        cur = _ts_cursor()
-        if not cur:
-            return self.err('TSDB_DOWN', '时序库不可用', 502)
-        try:
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
             if dim in _DIM_MAP_1M:
                 col = _DIM_MAP_1M[dim]
                 cur.execute(
@@ -232,8 +288,11 @@ class TopActivityView(PerfBaseView):
                     for r in rows:
                         u, p, q = info.get(r['key'], (None, None, None))
                         r.update({'user_name': u, 'program': p, 'sql_text': q})
-        finally:
-            cur.close()
+        # 顶级活动本身属基础监控(METRICS_VIEW)，但 SQL 原文是敏感面：
+        # 无 SQL 监控权限的用户只看到指纹，看不到语句内容。
+        if not has_permission(request.user, Perm.SQL_MONITORING_VIEW):
+            for r in rows:
+                r.pop('sql_text', None)
         return self.ok({'window_sec': int((td - fd).total_seconds()),
                         'total_active_sec': round(total_all, 1), 'rows': rows})
 
@@ -242,6 +301,10 @@ class TopActivityView(PerfBaseView):
 # 7B-02c ASH 分面切片
 # ============================================================
 class AshFacetsView(PerfBaseView):
+    # ASH 明细含 SQL 原文/登录用户/客户端 IP/被锁对象，是全系统最敏感的数据面
+    required_perm = Perm.SQL_MONITORING_VIEW
+
+    @tsdb_guard
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -261,11 +324,14 @@ class AshFacetsView(PerfBaseView):
                 params.append(val)
                 filters.append((col, val))
         wsql = (' AND ' + ' AND '.join(where)) if where else ''
-        limit = min(int(request.GET.get('limit', 50)), 200)
-        cur = _ts_cursor()
-        if not cur:
-            return self.err('TSDB_DOWN', '时序库不可用', 502)
         try:
+            limit = min(int(request.GET.get('limit', 50)), 200)
+        except (TypeError, ValueError):
+            return self.err('BAD_PARAM', 'limit 需为整数')
+        limit = max(1, limit)
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
             base = (f"FROM session_sample WHERE db_config_id=%s "
                     f"AND time >= %s AND time < %s{wsql}")
             args = [cfg.id, fd, td] + params
@@ -286,13 +352,12 @@ class AshFacetsView(PerfBaseView):
                         for t, a in cur.fetchall()]
             cur.execute(
                 f"SELECT time, session_id, user_name, db_name, wait_class, wait_event, "
-                f"sql_digest, sql_text, lock_object, active_secs "
-                f"{base} ORDER BY time DESC LIMIT {limit}", args)
+                f"sql_digest, sql_text, lock_object, active_secs, wait_secs "
+                f"{base} ORDER BY time DESC LIMIT %s", args + [limit])
             cols = ['time', 'session_id', 'user_name', 'db_name', 'wait_class',
-                    'wait_event', 'sql_digest', 'sql_text', 'lock_object', 'active_secs']
+                    'wait_event', 'sql_digest', 'sql_text', 'lock_object',
+                    'active_secs', 'wait_secs']
             rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-        finally:
-            cur.close()
         return self.ok({'matched_active_sec': round(matched, 1),
                         'filters': [{'col': c, 'value': v} for c, v in filters],
                         'facets': facets, 'timeline': timeline, 'rows': rows})
@@ -302,6 +367,9 @@ class AshFacetsView(PerfBaseView):
 # 7B-03a 实时会话
 # ============================================================
 class SessionsLiveView(PerfBaseView):
+    # 返回实时会话的完整 SQL 原文
+    required_perm = Perm.SQL_MONITORING_VIEW
+
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -311,8 +379,10 @@ class SessionsLiveView(PerfBaseView):
             try:
                 from monitor.sentinel import sample_sessions
                 cur = conn.cursor()
-                rows = sample_sessions(cur, cfg.db_type)
-                cur.close()
+                try:
+                    rows = sample_sessions(cur, cfg.db_type, config_id=cfg.id)
+                finally:
+                    cur.close()
                 for r in rows:
                     r['killable'] = True
                     r.pop('wait_event_type', None)
@@ -327,27 +397,28 @@ class SessionsLiveView(PerfBaseView):
                 except Exception:
                     pass
         # 降级: 最近一次 ASH 样本
-        cur = _ts_cursor()
         rows, at = [], None
-        if cur:
-            try:
-                cur.execute(
-                    "SELECT MAX(time) FROM session_sample WHERE db_config_id=%s "
-                    "AND time > NOW() - interval '120 seconds'", (cfg.id,))
-                at = cur.fetchone()[0]
-                if at:
+        try:
+            with _ts_cursor() as cur:
+                if cur is not None:
                     cur.execute(
-                        "SELECT session_id, user_name, client_host, db_name, command, state, "
-                        "wait_class, wait_event, active_secs, sql_id, sql_text, is_blocked, "
-                        "blocker_id, lock_type, lock_mode, lock_object, program, module "
-                        "FROM session_sample WHERE db_config_id=%s AND time=%s", (cfg.id, at))
-                    cols = ['session_id', 'user_name', 'client_host', 'db_name', 'command',
-                            'state', 'wait_class', 'wait_event', 'active_secs', 'sql_id',
-                            'sql_text', 'is_blocked', 'blocker_id', 'lock_type', 'lock_mode',
-                            'lock_object', 'program', 'module']
-                    rows = [dict(zip(cols, r), killable=False) for r in cur.fetchall()]
-            finally:
-                cur.close()
+                        "SELECT MAX(time) FROM session_sample WHERE db_config_id=%s "
+                        "AND time > NOW() - interval '120 seconds'", (cfg.id,))
+                    at = cur.fetchone()[0]
+                    if at:
+                        cur.execute(
+                            "SELECT session_id, user_name, client_host, db_name, command, state, "
+                            "wait_class, wait_event, active_secs, sql_id, sql_text, is_blocked, "
+                            "blocker_id, lock_type, lock_mode, lock_object, program, module, "
+                            "wait_secs, trx_age_secs "
+                            "FROM session_sample WHERE db_config_id=%s AND time=%s", (cfg.id, at))
+                        cols = ['session_id', 'user_name', 'client_host', 'db_name', 'command',
+                                'state', 'wait_class', 'wait_event', 'active_secs', 'sql_id',
+                                'sql_text', 'is_blocked', 'blocker_id', 'lock_type', 'lock_mode',
+                                'lock_object', 'program', 'module', 'wait_secs', 'trx_age_secs']
+                        rows = [dict(zip(cols, r), killable=False) for r in cur.fetchall()]
+        except Exception as e:
+            logger.warning("[perf] 实时会话降级查询失败: %s", e)
         return self.ok({'degraded': True, 'fallback': '目标库直连失败, 显示最近 ASH 样本',
                         'at': at.isoformat() if at else None, 'sessions': rows})
 
@@ -355,14 +426,46 @@ class SessionsLiveView(PerfBaseView):
 # ============================================================
 # 7B-03b 阻塞树 (实时 / 历史回放)
 # ============================================================
+def _find_cycles(edges, exclude):
+    """在 waiter->blocker 有向图中找出所有环。
+
+    每个节点出度 <= 1（一个会话只会被一个 blocker 挡住），因此从任一未访问节点
+    沿边前进，要么走到没有出边的终点，要么撞回自己走过的路径 —— 即环。
+    """
+    seen = set(exclude)
+    cycles = []
+    for start in edges:
+        if start in seen:
+            continue
+        path, index, cur = [], {}, start
+        while cur in edges and cur not in seen:
+            if cur in index:                      # 撞回路径 → 找到环
+                cycles.append(path[index[cur]:])
+                break
+            index[cur] = len(path)
+            path.append(cur)
+            cur = edges[cur]
+        seen.update(path)
+    return cycles
+
+
 def _build_blocking_tree(rows):
+    """构建阻塞树。
+
+    BUG-111: 原实现用 `roots = set(edges.values()) - set(edges.keys())` 求根，
+    即"是别人的 blocker 且自己不是 waiter"。出现环时（A 等 B、B 等 A —— 也就是
+    死锁/循环等待），环上每个节点都同时是 blocker 和 waiter，全被减掉，roots 为空，
+    返回空树，前端于是显示绿色的"当前无阻塞链"。
+    数据库正在死锁，而 DBA 打开阻塞分析页看到的是"一切正常" —— 比不实现更有害。
+    现在补齐环检测，把环作为独立的 deadlock_cycle 根输出并优先排序。
+    """
     nodes = {r['session_id']: dict(r) for r in rows if r.get('session_id')}
     edges = {}
     for r in rows:
         if r.get('is_blocked') and r.get('blocker_id'):
             edges[r['session_id']] = str(r['blocker_id'])
     # blocker 可能不在活跃样本 (Oracle 空闲持锁) → 占位节点
-    for waiter, blocker in edges.items():
+    for waiter, blocker in list(edges.items()):
         if blocker not in nodes:
             # Oracle session_id 形如 sid,serial; blocker_id 只有 sid → 前缀匹配
             hit = next((k for k in nodes if k.split(',')[0] == blocker), None)
@@ -376,27 +479,45 @@ def _build_blocking_tree(rows):
     for waiter, blocker in edges.items():
         children.setdefault(blocker, []).append(waiter)
 
-    def build(sid, visited):
+    def build(sid, visited, path):
+        if sid in path:
+            # 回到本次下行路径上的节点：标记为环引用，终止递归（不再返回 None，
+            # 否则环会被整体丢弃）
+            n = dict(nodes.get(sid, {'session_id': sid}))
+            n.update({'children': [], 'subtree_waiters': 0,
+                      'cycle_ref': True, 'killable': False})
+            return n
         if sid in visited:
-            return None  # 环保护
+            return None
         visited.add(sid)
         n = dict(nodes.get(sid, {'session_id': sid}))
-        kids = [build(c, visited) for c in sorted(children.get(sid, []))]
+        kids = [build(c, visited, path | {sid}) for c in sorted(children.get(sid, []))]
         n['children'] = [k for k in kids if k]
-        n['subtree_waiters'] = sum(1 + k['subtree_waiters'] for k in n['children'])
-        n['wait_secs'] = n.get('active_secs')
+        n['subtree_waiters'] = sum(1 + k.get('subtree_waiters', 0) for k in n['children'])
+        # BUG-123: wait_secs 优先用采集端算出的真实锁等待时长，
+        # 老数据无该列时回退 active_secs
+        n['wait_secs'] = n.get('wait_secs') if n.get('wait_secs') is not None \
+            else n.get('active_secs')
         n['killable'] = not n.get('placeholder', False)
         return n
 
-    roots = sorted(set(edges.values()) - set(edges.keys()))
     visited = set()
     tree = []
-    for r in roots:
-        t = build(r, visited)
+    # ① 常规根：是 blocker 但不是 waiter
+    for r in sorted(set(edges.values()) - set(edges.keys())):
+        t = build(r, visited, frozenset())
         if t:
             t['role'] = 'root_blocker'
             tree.append(t)
-    tree.sort(key=lambda n: -n['subtree_waiters'])
+    # ② 环：上一步走不到的、仍在 edges 中的节点必然构成循环等待
+    for cyc in _find_cycles(edges, exclude=visited):
+        t = build(cyc[0], visited, frozenset())
+        if t:
+            t['role'] = 'deadlock_cycle'
+            t['cycle_members'] = cyc
+            tree.append(t)
+    # 死锁环排最前，其余按影响面降序
+    tree.sort(key=lambda n: (n.get('role') != 'deadlock_cycle', -n['subtree_waiters']))
     return tree
 
 
@@ -409,12 +530,22 @@ class BlockingTreeView(PerfBaseView):
         if at_param == 'now':
             conn = self.live_conn(cfg)
             if not conn:
-                return self.ok({'degraded': True, 'at': None, 'tree': []})
+                return self.ok({'degraded': True, 'at': None, 'tree': [],
+                                'fallback': '目标库直连失败'})
             try:
                 from monitor.sentinel import sample_sessions
                 cur = conn.cursor()
-                rows = sample_sessions(cur, cfg.db_type)
-                cur.close()
+                try:
+                    rows = sample_sessions(cur, cfg.db_type, config_id=cfg.id)
+                finally:
+                    cur.close()
+            except Exception as e:
+                # BUG-121: 直连成功但采集失败(缺 performance_schema/v$lock 权限等)
+                # 时原先抛 500, 与 SessionsLiveView 的优雅降级行为不一致。
+                logger.debug("[perf] 实时阻塞树采集失败, 降级: %s", e)
+                return self.ok({
+                    'degraded': True, 'at': None, 'tree': [],
+                    'fallback': '目标库采集失败(可能缺少 performance_schema/v$lock 权限)'})
             finally:
                 try:
                     conn.close()
@@ -425,25 +556,23 @@ class BlockingTreeView(PerfBaseView):
             at = parse_datetime(at_param)
             if not at:
                 return self.err('BAD_PARAM', 'at 时间格式非法')
-            cur = _ts_cursor()
-            if not cur:
-                return self.err('TSDB_DOWN', '时序库不可用', 502)
-            try:
+            with _ts_cursor() as cur:
+                if cur is None:
+                    return self.err('TSDB_DOWN', '时序库不可用', 502)
                 cur.execute(
                     "SELECT session_id, user_name, db_name, wait_class, wait_event, "
                     "active_secs, is_blocked, blocker_id, sql_text, lock_type, lock_mode, "
-                    "lock_object FROM session_sample WHERE db_config_id=%s "
-                    "AND time BETWEEN %s AND %s", (cfg.id, at - timedelta(seconds=10), at))
+                    "lock_object, wait_secs, trx_age_secs FROM session_sample "
+                    "WHERE db_config_id=%s AND time BETWEEN %s AND %s",
+                    (cfg.id, at - timedelta(seconds=10), at))
                 cols = ['session_id', 'user_name', 'db_name', 'wait_class', 'wait_event',
                         'active_secs', 'is_blocked', 'blocker_id', 'sql_text',
-                        'lock_type', 'lock_mode', 'lock_object']
+                        'lock_type', 'lock_mode', 'lock_object', 'wait_secs', 'trx_age_secs']
                 dedup = {}
                 for r in cur.fetchall():
                     d = dict(zip(cols, r))
                     dedup[d['session_id']] = d  # 取窗口内最后一条
                 rows = list(dedup.values())
-            finally:
-                cur.close()
         return self.ok({'at': at.isoformat(), 'tree': _build_blocking_tree(rows)})
 
 
@@ -451,6 +580,9 @@ class BlockingTreeView(PerfBaseView):
 # 7B-04 运行中 SQL (进度)
 # ============================================================
 class RunningSqlView(PerfBaseView):
+    # 返回实时会话的完整 SQL 原文
+    required_perm = Perm.SQL_MONITORING_VIEW
+
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -496,12 +628,15 @@ class RunningSqlView(PerfBaseView):
             "WHERE s.type='USER' AND s.status='ACTIVE' AND s.sql_id IS NOT NULL "
             "AND s.sid <> SYS_CONTEXT('USERENV','SID')")
         raw = cur.fetchall()
-        sql_ids = sorted({r[1] for r in raw})
+        sql_ids = sorted({r[1] for r in raw if r[1]})
         texts = {}
         if sql_ids:
-            in_list = ','.join(f"'{s}'" for s in sql_ids[:50])
+            # 绑定变量而非字面量拼接：sql_id 虽来自目标库(基本可信)，但拼接式
+            # SQL 不该出现在代码里，且绑定变量可复用共享池中的游标
+            chunk = sql_ids[:50]
+            binds = ','.join(f':{i + 1}' for i in range(len(chunk)))
             cur.execute(f"SELECT sql_id, SUBSTR(sql_text,1,500) FROM v$sqlstats "
-                        f"WHERE sql_id IN ({in_list})")
+                        f"WHERE sql_id IN ({binds})", chunk)
             texts = dict(cur.fetchall())
         out = []
         for (sid, sql_id, user, elapsed, state, wc, event,
@@ -592,34 +727,37 @@ class RunningSqlView(PerfBaseView):
 # ============================================================
 def _raw_sql_text(config_id, digest):
     """返回 (sql_text, db_name)。ASH 原文优先 (带字面量, 可 EXPLAIN)。"""
-    cur = _ts_cursor()
-    if not cur:
-        return None, None
     try:
-        cur.execute(
-            "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s AND sql_digest=%s "
-            "AND sql_text IS NOT NULL AND sql_text <> '' ORDER BY time DESC LIMIT 1",
-            (config_id, digest))
-        row = cur.fetchone()
-        if row:
-            return row[0], row[1]
-        cur.execute(
-            "SELECT sql_text_sample, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
-            "AND sql_text_sample IS NOT NULL ORDER BY time DESC LIMIT 1", (config_id, digest))
-        row = cur.fetchone()
-        if row:
-            return row[0], row[1]
-        # 兜底: 从已采集计划取随存的原文
-        plan = SqlPlan.objects.filter(config_id=config_id, sql_digest=digest)\
-            .order_by('-captured_at').first()
-        if plan and isinstance(plan.plan_json, dict) and plan.plan_json.get('_sql_text'):
-            return plan.plan_json['_sql_text'], None
-        return None, None
-    finally:
-        cur.close()
+        with _ts_cursor() as cur:
+            if cur is None:
+                return None, None
+            cur.execute(
+                "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s AND sql_digest=%s "
+                "AND sql_text IS NOT NULL AND sql_text <> '' ORDER BY time DESC LIMIT 1",
+                (config_id, digest))
+            row = cur.fetchone()
+            if row:
+                return row[0], row[1]
+            cur.execute(
+                "SELECT sql_text_sample, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
+                "AND sql_text_sample IS NOT NULL ORDER BY time DESC LIMIT 1", (config_id, digest))
+            row = cur.fetchone()
+            if row:
+                return row[0], row[1]
+    except Exception as e:
+        logger.debug("[perf] 取 SQL 原文失败 %s/%s: %s", config_id, digest, e)
+    # 兜底: 从已采集计划取随存的原文
+    plan = SqlPlan.objects.filter(config_id=config_id, sql_digest=digest)\
+        .order_by('-captured_at').first()
+    if plan and isinstance(plan.plan_json, dict) and plan.plan_json.get('_sql_text'):
+        return plan.plan_json['_sql_text'], None
+    return None, None
 
 
 class SqlDetailView(PerfBaseView):
+    required_perm = Perm.SQL_MONITORING_VIEW
+
+    @tsdb_guard
     def get(self, request, config_id, digest):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -627,10 +765,9 @@ class SqlDetailView(PerfBaseView):
         fd, td = _parse_range(request)
         if 'window' not in request.GET and 'from' not in request.GET:
             fd = td - timedelta(hours=24)
-        cur = _ts_cursor()
-        if not cur:
-            return self.err('TSDB_DOWN', '时序库不可用', 502)
-        try:
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
             cur.execute(
                 "SELECT time_bucket('300 seconds', time), SUM(exec_delta), "
                 "SUM(elapsed_ms_delta), SUM(rows_delta), SUM(reads_delta) "
@@ -658,15 +795,20 @@ class SqlDetailView(PerfBaseView):
             wc_rows = cur.fetchall()
             wc_total = sum(a for _, a in wc_rows) or 1
             breakdown = {w: round(a / wc_total, 3) for w, a in wc_rows}
-        finally:
-            cur.close()
         sql_text, _dbn = _raw_sql_text(cfg.id, digest)
         plans_qs = list(SqlPlan.objects.filter(config=cfg, sql_digest=digest)
                         .order_by('-captured_at')[:10])
         plans = [{'plan_hash': p.plan_hash, 'captured_at': p.captured_at,
                   'is_current': p.is_current, 'cost_total': p.cost_total,
                   'source': p.source} for p in plans_qs]
-        plan_changed_at = plans_qs[0].captured_at if len(plans_qs) >= 2 else None
+        # BUG-118: 原实现只看"有没有 >=2 条计划记录"就报"计划已变更", 不比对
+        # plan_hash。手工 EXPLAIN 和历史数据会产生同 hash 的多行, 于是稳定的 SQL
+        # 常年挂着红标 —— 狼来了效应, 真正的计划突变被淹没。
+        plan_changed_at = None
+        for newer, older in zip(plans_qs, plans_qs[1:]):
+            if newer.plan_hash != older.plan_hash:
+                plan_changed_at = newer.captured_at
+                break
         # 优化建议 (规则式, 失败静默)
         suggestions = []
         if sql_text:
@@ -700,13 +842,19 @@ class SqlDetailView(PerfBaseView):
             'trend': {'bucket_sec': 300, 'series': trend},
             'ash_breakdown': breakdown, 'plans': plans,
             'plan_changed_at': plan_changed_at,
+            'plan_hash_count': len({p.plan_hash for p in plans_qs}),
             'advisor': {'index_suggestions': suggestions},
             'related_incidents': related[:5],
         })
 
 
 class SqlPlanDetailView(PerfBaseView):
+    required_perm = Perm.SQL_MONITORING_VIEW
+
     def get(self, request, config_id, digest, plan_hash):
+        # 此前直接按 config_id 查 SqlPlan，绕过了数据范围隔离
+        if not self.get_config(config_id):
+            return self.err('NOT_FOUND', '实例不存在', 404)
         plan = SqlPlan.objects.filter(config_id=config_id, sql_digest=digest,
                                       plan_hash=plan_hash).order_by('-captured_at').first()
         if not plan:
@@ -717,6 +865,8 @@ class SqlPlanDetailView(PerfBaseView):
 
 
 class SqlExplainView(PerfBaseView):
+    required_perm = Perm.SQL_MONITORING_VIEW
+
     def post(self, request, config_id, digest):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -726,7 +876,19 @@ class SqlExplainView(PerfBaseView):
         except Exception:
             body = {}
         raw_text, db_name = _raw_sql_text(cfg.id, digest)
-        sql_text = body.get('sql_text') or raw_text
+        # BUG-122: 原先无条件采信 body['sql_text'], 任何登录用户都能把任意 SQL
+        # 送到目标库做 EXPLAIN, 借错误消息枚举表结构。现要求用户提供的 SQL
+        # 归一化后指纹必须与 URL 中的 digest 一致 —— 只能解释"这条" SQL。
+        user_sql = (body.get('sql_text') or '').strip()
+        if user_sql:
+            try:
+                from monitor.sqlfingerprint import unified_digest
+                if unified_digest(cfg.db_type, None, user_sql) != digest:
+                    return self.err('BAD_PARAM', '提供的 SQL 与该指纹不匹配', 400)
+            except Exception as e:
+                logger.debug("[perf] explain 指纹校验失败: %s", e)
+                return self.err('BAD_PARAM', 'SQL 指纹校验失败', 400)
+        sql_text = user_sql or raw_text
         if cfg.db_type not in ('oracle', 'dm') and not sql_text:
             return self.err('40002', '无 SQL 原文样例, 无法 EXPLAIN')
         from monitor.plan_capture import capture
@@ -769,6 +931,7 @@ def _window_block(cfg, fd, td, cur):
 
 
 class CompareView(PerfBaseView):
+    @tsdb_guard
     def get(self, request, config_id):
         cfg = self.get_config(config_id)
         if not cfg:
@@ -781,14 +944,21 @@ class CompareView(PerfBaseView):
             assert all([a_fd, a_td, b_fd, b_td])
         except Exception:
             return self.err('BAD_PARAM', '需要 a_from/a_to/b_from/b_to (ISO8601)')
-        cur = _ts_cursor()
-        if not cur:
-            return self.err('TSDB_DOWN', '时序库不可用', 502)
-        try:
+        # BUG-131: 原先不校验起止顺序。传反了会让 SQL 命中空集, 而
+        # `win = max((td-fd).total_seconds(), 1)` 把负数钳成 1,
+        # avg_aas 算出 0 —— 页面显示"该期间 AAS 为 0", 看起来像真实数据。
+        if not (a_fd < a_td and b_fd < b_td):
+            return self.err('BAD_PARAM', '时间区间起点必须早于终点')
+        from django.conf import settings as _settings
+        max_span = int(getattr(_settings, 'PERF_COMPARE_MAX_SPAN_SEC', 7 * 86400))
+        if ((a_td - a_fd).total_seconds() > max_span
+                or (b_td - b_fd).total_seconds() > max_span):
+            return self.err('BAD_PARAM', f'单个对比区间不得超过 {max_span // 86400} 天')
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
             a = _window_block(cfg, a_fd, a_td, cur)
             b = _window_block(cfg, b_fd, b_td, cur)
-        finally:
-            cur.close()
         a_map = {r['key']: r['active_sec'] for r in a['top_sql']}
         b_map = {r['key']: r['active_sec'] for r in b['top_sql']}
         diff = []
@@ -813,6 +983,9 @@ _KILL_SQL = {
 
 
 class SessionKillView(PerfBaseView):
+    # 提交高危运维工单，等价于建工单权限；只读用户不得触达
+    required_perm = Perm.TICKETS_CREATE
+
     def post(self, request, config_id, session_id):
         cfg = self.get_config(config_id)
         if not cfg:
