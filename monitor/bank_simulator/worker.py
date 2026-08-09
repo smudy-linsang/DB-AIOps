@@ -32,12 +32,14 @@ def _acct_no(prefix, n):
 
 
 def _row_to_dict(cursor, row):
-    """将 (cursor, row) 转为 dict; DictCursor 返回的 dict 直接返回。"""
+    """将 (cursor, row) 转为 dict; DictCursor 返回的 dict 直接返回。
+    列名统一小写, 屏蔽 Oracle 大写列名差异。
+    """
     if isinstance(row, dict):
-        return row
+        return {k.lower(): v for k, v in row.items()}
     if row is None:
         return None
-    cols = [d[0] for d in cursor.description]
+    cols = [d[0].lower() for d in cursor.description]
     return dict(zip(cols, row))
 
 
@@ -51,9 +53,47 @@ def _fetchall_dict(cursor):
     if not rows:
         return []
     if isinstance(rows[0], dict):
-        return rows
-    cols = [d[0] for d in cursor.description]
+        return [{k.lower(): v for k, v in r.items()} for r in rows]
+    cols = [d[0].lower() for d in cursor.description]
     return [dict(zip(cols, r)) for r in rows]
+
+
+def _to_oracle_binds(sql: str) -> str:
+    """将 %s 占位符替换为 Oracle 位置绑定 :1, :2, ..."""
+    n = 0
+
+    def _repl(_m):
+        nonlocal n
+        n += 1
+        return f':{n}'
+    import re
+    return re.sub(r'%s', _repl, sql)
+
+
+def _scalar(row):
+    """从 fetchone() 返回的行中提取第一个标量值 (兼容 tuple/DictCursor/Oracle 大写)。"""
+    if row is None:
+        return None
+    if isinstance(row, (list, tuple)):
+        return row[0]
+    if isinstance(row, dict):
+        return next(iter(row.values()))
+    return row
+
+
+class _BindCursor:
+    """包装 DB-API cursor, 把 %s 占位符自动转为 Oracle :1, :2 位置绑定。
+    仅 Oracle 方言使用; 其它方言直接用原生 cursor, 零开销。
+    """
+    def __init__(self, cur):
+        self._cur = cur
+
+    def execute(self, sql, params=None):
+        sql = _to_oracle_binds(sql)
+        return self._cur.execute(sql, params)
+
+    def __getattr__(self, name):
+        return getattr(self._cur, name)
 
 
 # ---------------------------------------------------------------------------
@@ -152,12 +192,11 @@ class BankWorker:
     # ------------------------------------------------------------------ 种子
     def seed(self):
         """幂等种子: 10 客户 + 20 账户 + 5 贷款。"""
-        cur = self.conn.cursor()
+        cur = self._cur()
         try:
             # 客户
             cur.execute("SELECT COUNT(*) FROM bsim_customer")
-            n = cur.fetchone()
-            n = n[0] if isinstance(n, (list, tuple)) else list(n.values())[0]
+            n = _scalar(cur.fetchone())
             if n == 0:
                 now = _dt.datetime.now()
                 for i in range(1, 11):
@@ -173,8 +212,7 @@ class BankWorker:
 
             # 账户
             cur.execute("SELECT COUNT(*) FROM bsim_account")
-            n = cur.fetchone()
-            n = n[0] if isinstance(n, (list, tuple)) else list(n.values())[0]
+            n = _scalar(cur.fetchone())
             if n == 0:
                 now = _dt.datetime.now()
                 for i in range(1, 21):
@@ -196,8 +234,7 @@ class BankWorker:
 
             # 贷款
             cur.execute("SELECT COUNT(*) FROM bsim_loan")
-            n = cur.fetchone()
-            n = n[0] if isinstance(n, (list, tuple)) else list(n.values())[0]
+            n = _scalar(cur.fetchone())
             if n == 0 and self.account_ids:
                 today = _dt.date.today()
                 for i in range(1, 6):
@@ -225,7 +262,10 @@ class BankWorker:
 
     # ------------------------------------------------------------------ 事务
     def _cur(self):
-        return self.conn.cursor()
+        cur = self.conn.cursor()
+        if self.dialect.use_named_params:
+            return _BindCursor(cur)
+        return cur
 
     def _do_teller(self):
         """柜面交易: 存款 / 取款 / 手续费。"""
@@ -245,8 +285,7 @@ class BankWorker:
                     (amount, amount, now, acct))
                 cur.execute(
                     "SELECT balance FROM bsim_account WHERE account_id=%s", (acct,))
-                row = cur.fetchone()
-                bal = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
+                bal = _scalar(cur.fetchone())
                 cur.execute(
                     "INSERT INTO bsim_transaction "
                     "(tx_no, account_id, tx_type, amount, balance_after, channel, remark, tx_time) "
@@ -259,8 +298,11 @@ class BankWorker:
                 row = cur.fetchone()
                 if row is None:
                     return
-                bal, avail = (row[0], row[1]) if isinstance(row, (list, tuple)) \
-                    else (row['balance'], row['available_balance'])
+                if isinstance(row, (list, tuple)):
+                    bal, avail = row[0], row[1]
+                else:
+                    bal = row.get('balance') or row.get('BALANCE')
+                    avail = row.get('available_balance') or row.get('AVAILABLE_BALANCE')
                 if avail < amount:
                     return  # 余额不足, 跳过
                 cur.execute(
@@ -283,8 +325,7 @@ class BankWorker:
                     (fee, fee, now, acct, fee))
                 cur.execute(
                     "SELECT balance FROM bsim_account WHERE account_id=%s", (acct,))
-                row = cur.fetchone()
-                bal = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
+                bal = _scalar(cur.fetchone())
                 cur.execute(
                     "INSERT INTO bsim_transaction "
                     "(tx_no, account_id, tx_type, amount, balance_after, channel, remark, tx_time) "
@@ -301,7 +342,9 @@ class BankWorker:
             cur.close()
 
     def _do_transfer(self):
-        """内部转账 (事务)。"""
+        """内部转账 (事务)。GBase 8A MPP 不支持行级锁, 跳过。"""
+        if (self.cfg.db_type or '').lower() == 'gbase':
+            return
         if len(self.account_ids) < 2:
             return
         a, b = random.sample(self.account_ids, 2)
@@ -314,7 +357,7 @@ class BankWorker:
             row = cur.fetchone()
             if row is None:
                 return
-            bal = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
+            bal = _scalar(row)
             if bal < amount:
                 return
             cur.execute(
@@ -329,12 +372,10 @@ class BankWorker:
                 (amount, amount, now, b))
             cur.execute(
                 "SELECT balance FROM bsim_account WHERE account_id=%s", (a,))
-            row = cur.fetchone()
-            bal_a = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
+            bal_a = _scalar(cur.fetchone())
             cur.execute(
                 "SELECT balance FROM bsim_account WHERE account_id=%s", (b,))
-            row = cur.fetchone()
-            bal_b = row[0] if isinstance(row, (list, tuple)) else list(row.values())[0]
+            bal_b = _scalar(cur.fetchone())
             cur.execute(
                 "INSERT INTO bsim_transaction "
                 "(tx_no, account_id, tx_type, amount, balance_after, channel, "
@@ -408,10 +449,10 @@ class BankWorker:
             today = _dt.date.today()
             cur.execute(
                 "SELECT account_id, "
-                "SUM(CASE WHEN tx_type='DEPOSIT' THEN 1 ELSE 0 END), "
-                "SUM(CASE WHEN tx_type='DEPOSIT' THEN amount ELSE 0 END), "
-                "SUM(CASE WHEN tx_type='WITHDRAW' THEN 1 ELSE 0 END), "
-                "SUM(CASE WHEN tx_type='WITHDRAW' THEN amount ELSE 0 END) "
+                "SUM(CASE WHEN tx_type='DEPOSIT' THEN 1 ELSE 0 END) AS dep_cnt, "
+                "SUM(CASE WHEN tx_type='DEPOSIT' THEN amount ELSE 0 END) AS dep_amt, "
+                "SUM(CASE WHEN tx_type='WITHDRAW' THEN 1 ELSE 0 END) AS wth_cnt, "
+                "SUM(CASE WHEN tx_type='WITHDRAW' THEN amount ELSE 0 END) AS wth_amt "
                 "FROM bsim_transaction WHERE tx_time >= %s GROUP BY account_id",
                 (_dt.datetime.combine(today, _dt.time.min),))
             rows = _fetchall_dict(cur)
@@ -419,18 +460,17 @@ class BankWorker:
                 cur.execute(
                     "SELECT balance FROM bsim_account WHERE account_id=%s",
                     (r['account_id'],))
-                b = cur.fetchone()
-                bal = b[0] if isinstance(b, (list, tuple)) else list(b.values())[0]
+                bal = _scalar(cur.fetchone())
                 cur.execute(
                     "INSERT INTO bsim_daily_summary "
                     "(summary_date, account_id, deposit_count, deposit_amount, "
                     "withdraw_count, withdraw_amount, eod_balance) "
                     "VALUES (%s,%s,%s,%s,%s,%s,%s)",
                     (today, r['account_id'],
-                     r.get(list(r.keys())[1], 0) or 0,
-                     r.get(list(r.keys())[2], 0) or 0,
-                     r.get(list(r.keys())[3], 0) or 0,
-                     r.get(list(r.keys())[4], 0) or 0,
+                     r.get('dep_cnt', 0) or 0,
+                     r.get('dep_amt', 0) or 0,
+                     r.get('wth_cnt', 0) or 0,
+                     r.get('wth_amt', 0) or 0,
                      bal))
             # 审计日志
             cur.execute(

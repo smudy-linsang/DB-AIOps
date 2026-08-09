@@ -340,6 +340,11 @@ class OracleDialect(Dialect):
     def drop_indexes(self):
         return ["DROP INDEX idx_bsim_tx_time"]
 
+    def all_ddl(self):
+        # Oracle 不支持 CREATE TABLE IF NOT EXISTS, 去掉该子句,
+        # 由 worker 捕获 ORA-00955 实现幂等。
+        return [s.replace(' IF NOT EXISTS', '') for s in super().all_ddl()]
+
 
 def get_dialect(db_type: str) -> Dialect:
     t = (db_type or '').lower()

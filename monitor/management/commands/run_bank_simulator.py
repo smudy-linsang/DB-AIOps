@@ -9,15 +9,29 @@
   ./manage.py run_bank_simulator --duration 3600    # 运行 N 秒后退出 (默认一直跑)
 """
 import logging
+import os
 import signal
 import threading
 import time
 
+from django.conf import settings
 from django.core.management.base import BaseCommand
 
 from monitor.bank_simulator.worker import BankWorker
 
 logger = logging.getLogger('bank_simulator')
+
+
+def _attach_file_handler(log_path: str):
+    """给 bank_simulator logger 挂一个文件 handler, 保证后台运行时日志落盘。"""
+    os.makedirs(os.path.dirname(log_path) or '.', exist_ok=True)
+    fh = logging.FileHandler(log_path, encoding='utf-8')
+    fh.setLevel(logging.INFO)
+    fh.setFormatter(logging.Formatter(
+        '[%(asctime)s] %(levelname)s %(name)s: %(message)s'))
+    logger.addHandler(fh)
+    logger.setLevel(logging.INFO)
+    logger.propagate = True  # 同时保留 console
 
 
 class Command(BaseCommand):
@@ -33,6 +47,12 @@ class Command(BaseCommand):
 
     def handle(self, *args, **opts):
         from monitor.models import DatabaseConfig
+
+        # 日志落盘: logs/bank_simulator.log
+        log_path = os.path.join(
+            getattr(settings, 'BASE_DIR', os.getcwd()), 'logs', 'bank_simulator.log')
+        _attach_file_handler(log_path)
+        logger.info('== 银行业务模拟器启动 (log=%s) ==', log_path)
 
         if opts['db_ids']:
             ids = [int(x) for x in opts['db_ids'].split(',') if x.strip()]
@@ -72,6 +92,9 @@ class Command(BaseCommand):
         start = time.time()
         try:
             while not stop_event.is_set():
+                # dry-run 模式: 所有 worker 线程结束即退出
+                if opts['dry_run'] and all(not t.is_alive() for t in threads):
+                    break
                 stop_event.wait(1)
                 if opts['duration'] and (time.time() - start) >= opts['duration']:
                     self.stdout.write(self.style.SUCCESS(
