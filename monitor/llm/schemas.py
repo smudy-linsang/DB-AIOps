@@ -9,6 +9,8 @@ import json
 import logging
 import re
 
+from django.conf import settings
+
 logger = logging.getLogger("monitor.llm")
 
 
@@ -129,9 +131,19 @@ def _validate(text: str, schema: dict, what: str) -> dict:
         raise SchemaValidationError(f"{what}: JSON 解析失败: {e}") from e
     try:
         import jsonschema
+    except ImportError as e:
+        # BUG-137: 原先这里只 warning 然后**放行** —— 一旦 jsonschema 缺失
+        # (依赖装漏、精简镜像)，所有 LLM 输出的结构校验被静默跳过，
+        # 而这些输出会驱动 RCA 结论与自动修复预案。安全姿态必须 fail-closed。
+        # jsonschema 是 requirements.txt 中的硬依赖，缺失即环境异常。
+        if getattr(settings, 'LLM_SCHEMA_VALIDATION_REQUIRED', True):
+            raise SchemaValidationError(
+                f"{what}: jsonschema 未安装，无法校验 LLM 输出结构。"
+                f"这是硬依赖，请检查部署环境 (pip install jsonschema)") from e
+        logger.warning("[llm] jsonschema 未安装, 已按配置跳过结构校验")
+        return obj
+    try:
         jsonschema.validate(obj, schema)
-    except ImportError:
-        logger.warning("[llm] jsonschema 未安装, 跳过结构校验")
     except Exception as e:
         raise SchemaValidationError(f"{what}: 结构校验失败: {getattr(e, 'message', e)}") from e
     return obj

@@ -106,25 +106,30 @@ class AuditLogMiddleware:
 
         # 记录审计日志
         try:
+            from django.db import transaction
             from monitor.models import AuditLog as AuditLogModel
-            AuditLogModel.objects.create(
-                config_id=self._extract_db_config_id(path),
-                action_type=action_type,
-                description=f'{user_info} {request.method} {path}',
-                sql_command=body_summary,
-                risk_level=self._assess_risk(request.method, path),
-                status='success',
-                execution_context={
-                    'user_info': user_info,
-                    'method': request.method,
-                    'path': path,
-                    'query_string': request.META.get('QUERY_STRING', '')[:500],
-                    'remote_addr': self._get_client_ip(request),
-                    'user_agent': request.META.get('HTTP_USER_AGENT', '')[:200],
-                },
-            )
+            # 包在保存点里：万一写失败，回滚保存点即可，不会污染外层事务
+            with transaction.atomic():
+                AuditLogModel.objects.create(
+                    config_id=self._extract_db_config_id(path),
+                    action_type=action_type,
+                    description=f'{user_info} {request.method} {path}',
+                    sql_command=body_summary,
+                    risk_level=self._assess_risk(request.method, path),
+                    status='success',
+                    execution_context={
+                        'user_info': user_info,
+                        'method': request.method,
+                        'path': path,
+                        'query_string': request.META.get('QUERY_STRING', '')[:500],
+                        'remote_addr': self._get_client_ip(request),
+                        'user_agent': request.META.get('HTTP_USER_AGENT', '')[:200],
+                    },
+                )
         except Exception:
-            # 审计日志写入失败不应影响正常请求
+            # 审计日志写入失败不应影响正常请求。
+            # 注意：在 PostgreSQL 下，失败的 INSERT 会污染当前事务，
+            # 后续查询将报 InFailedSqlTransaction。这里主动回滚到保存点隔离影响。
             logger.warning('AuditLog write failed', exc_info=True)
 
     @staticmethod

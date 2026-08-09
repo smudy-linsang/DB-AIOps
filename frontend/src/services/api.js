@@ -49,21 +49,41 @@ api.interceptors.response.use(
     }
 
     // 5xx 服务端错误：对幂等请求自动重试
-    const isRetryable = !config || config.__retryCount >= MAX_RETRIES
-    const isIdempotent = !config.method || config.method?.toLowerCase() === 'get'
+    // BUG-116: 上一版第 52 行用 `!config` 做了短路保护，第 53 行却无条件解引用
+    // config.method —— error.config 为 undefined 时（请求拦截器抛错、请求被取消）
+    // 这里抛 TypeError，整个 Promise 以 TypeError 拒绝，页面显示
+    // "Cannot read properties of undefined (reading 'method')"，真实错误原因彻底丢失。
+    // 同时变量名 isRetryable 的语义与实际含义相反，一并更正。
+    const cfg = error.config
+    const retriesExhausted = !cfg || (cfg.__retryCount || 0) >= MAX_RETRIES
+    const isIdempotent = !!cfg && (!cfg.method || String(cfg.method).toLowerCase() === 'get')
     const isServerError = error.response?.status >= 500
+    const isNetworkError = !error.response
 
-    if (!isRetryable && isIdempotent && (isServerError || !error.response)) {
-      config.__retryCount += 1
+    if (!retriesExhausted && isIdempotent && (isServerError || isNetworkError)) {
+      cfg.__retryCount = (cfg.__retryCount || 0) + 1
       // 指数退避延迟
-      const delay = RETRY_DELAY_MS * Math.pow(2, config.__retryCount - 1)
+      const delay = RETRY_DELAY_MS * Math.pow(2, cfg.__retryCount - 1)
       await new Promise(resolve => setTimeout(resolve, delay))
-      return api(config)
+      return api(cfg)
     }
 
-    // 4xx 客户端错误或其他：直接拒绝
-    const message = error.response?.data?.error || error.message || '请求失败'
-    return Promise.reject(new Error(message))
+    // BUG-117: 后端有两套错误契约 —— api_views.py 返回 {error: "..."}，
+    // 而性能中心 api_views_perf.py 返回 {code: "TSDB_DOWN", message: "时序库不可用"}。
+    // 旧代码只读 data.error，于是性能中心所有失败都退化成
+    // "Request failed with status code 502"，后端准备好的可操作提示全被丢弃。
+    const data = error.response?.data
+    const message =
+      data?.error ||
+      data?.message ||
+      data?.detail ||
+      error.message ||
+      '请求失败'
+    const err = new Error(message)
+    err.code = data?.code || error.response?.status
+    err.status = error.response?.status
+    err.payload = data
+    return Promise.reject(err)
   }
 )
 

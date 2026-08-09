@@ -359,7 +359,9 @@ WHERE state = 'idle'
         try:
             audit = AuditLog.objects.get(id=audit_id)
 
-            if audit.status != 'approved':
+            # 'executing' 表示调用方（AuditLogExecuteView）已在行锁内完成抢占，
+            # 见 BUG-105(b)。此处仍拒绝其余状态。
+            if audit.status not in ('approved', 'executing'):
                 return False, "操作未批准，无法执行"
 
             # 安全校验 SQL
@@ -400,6 +402,19 @@ WHERE state = 'idle'
                         result = cursor.fetchall()
                         results.append(result)
 
+                # BUG-104: 必须显式提交。psycopg2/pymysql/oracledb/pyodbc 默认
+                # autocommit=False —— 此前全程不 commit，连接关闭时事务被隐式
+                # ROLLBACK。KILL / pg_terminate_backend 是非事务操作，恰好"看着正常"，
+                # 掩盖了这个缺陷；而白名单里的 ALTER TABLESPACE / ALTER DATABASE
+                # DATAFILE 在 PG 上是 DDL，会被完整回滚 —— 界面显示"执行成功，
+                # 受影响行数 N"，表空间实际没扩容，半小时后故障升级。
+                # 系统对操作者撒谎，是最危险的一类缺陷。
+                try:
+                    db_connection.commit()
+                except Exception as commit_err:
+                    # 已处于 autocommit 的连接会抛错，属正常情况
+                    logger.debug(f"[AutoRemediation] commit 跳过: {commit_err}")
+
                 audit.status = 'success'
                 audit.execution_result = f"执行成功\n受影响行数：{cursor.rowcount}"
                 audit.save(update_fields=['status', 'execution_result'])
@@ -407,6 +422,10 @@ WHERE state = 'idle'
                 return True, "操作执行成功"
 
             except Exception as e:
+                try:
+                    db_connection.rollback()
+                except Exception:
+                    pass
                 audit.status = 'failed'
                 audit.execution_result = f"执行失败：{str(e)}"
                 audit.save(update_fields=['status', 'execution_result'])

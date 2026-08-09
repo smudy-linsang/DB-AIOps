@@ -9,6 +9,7 @@ import ReactEChartsCore from 'echarts-for-react/lib/core';
 import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
 import KillModal from '../KillModal';
+import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
@@ -22,20 +23,28 @@ export default function BlockingTab({ configId, onOpenSql, refreshKey }) {
   const [killTarget, setKillTarget] = useState(null);
 
   const load = () => {
-    if (!configId) return;
+    if (!configId) return undefined;
+    // 历史回放模式下未选时刻就不要发请求（后端会当成 now，与界面语义不符）
+    if (mode === 'replay' && !at) { setData(null); return undefined; }
     setLoading(true);
-    perfAPI.blockingTree(configId, mode === 'live' ? 'now' : at?.toISOString())
-      .then((r) => setData(r.data))
-      .catch((e) => message.error(`阻塞树加载失败: ${e.message}`))
-      .finally(() => setLoading(false));
+    // BUG-133: 判活，避免旧响应覆盖新数据
+    return withAlive((alive) => {
+      perfAPI.blockingTree(configId, mode === 'live' ? 'now' : at.toISOString())
+        .then((r) => { if (alive()) setData(r.data); })
+        .catch((e) => { if (alive()) message.error(fmtPerfError('阻塞树加载', e)); })
+        .finally(() => { if (alive()) setLoading(false); });
+    });
   };
   useEffect(load, [configId, mode, at, refreshKey]);
 
   useEffect(() => {
-    if (!configId) return;
-    perfAPI.ashFacets(configId, { window: '24h', dims: 'wait_class',
-                                  filters: 'wait_class:concurrency' })
-      .then((r) => setHeat(r.data.timeline || [])).catch(() => setHeat([]));
+    if (!configId) return undefined;
+    return withAlive((alive) => {
+      perfAPI.ashFacets(configId, { window: '24h', dims: 'wait_class',
+                                    filters: 'wait_class:concurrency' })
+        .then((r) => { if (alive()) setHeat(r.data?.timeline || []); })
+        .catch(() => { if (alive()) setHeat([]); });
+    });
   }, [configId, refreshKey]);
 
   const heatOption = useMemo(() => ({
@@ -47,6 +56,11 @@ export default function BlockingTab({ configId, onOpenSql, refreshKey }) {
                data: heat.map((p) => [p.t, p.aas]) }],
   }), [heat]);
 
+  const cycles = useMemo(
+    () => (data?.tree || []).filter((n) => n.role === 'deadlock_cycle'),
+    [data],
+  );
+
   const onHeatClick = (params) => {
     if (params?.value?.[0]) {
       setMode('replay');
@@ -57,10 +71,16 @@ export default function BlockingTab({ configId, onOpenSql, refreshKey }) {
   const columns = [
     { title: '会话', dataIndex: 'session_id', width: 110,
       render: (v, r) => <Text code strong={r.role === 'root_blocker'}>{v}</Text> },
-    { title: '角色', width: 90,
-      render: (_, r) => (r.role === 'root_blocker'
-        ? <Tag color="red">阻塞根源</Tag>
-        : r.placeholder ? <Tag>持锁(空闲)</Tag> : <Tag color="orange">被阻塞</Tag>) },
+    { title: '角色', width: 100,
+      render: (_, r) => {
+        // BUG-111: 后端新增 deadlock_cycle 角色（循环等待/死锁），必须显著区分 ——
+        // 这正是 DBA 打开本页最想看到的场景
+        if (r.role === 'deadlock_cycle') return <Tag color="magenta">死锁环</Tag>;
+        if (r.role === 'root_blocker') return <Tag color="red">阻塞根源</Tag>;
+        if (r.cycle_ref) return <Tag color="magenta">环回</Tag>;
+        if (r.placeholder) return <Tag>持锁(空闲)</Tag>;
+        return <Tag color="orange">被阻塞</Tag>;
+      } },
     { title: '用户', dataIndex: 'user_name', width: 90, ellipsis: true },
     { title: '等待秒', dataIndex: 'wait_secs', width: 76 },
     { title: '锁类型/模式', width: 150,
@@ -95,13 +115,28 @@ export default function BlockingTab({ configId, onOpenSql, refreshKey }) {
           {data?.at && <Text type="secondary">快照时刻: {String(data.at).slice(0, 19)}</Text>}
         </Space>
       </Card>
-      <Card size="small" style={{ marginTop: 8 }} title="阻塞树 (根源标红, 按影响面排序)">
+      <Card size="small" style={{ marginTop: 8 }} title="阻塞树 (死锁环优先, 根源标红, 按影响面排序)">
+        {data?.degraded && (
+          <Alert type="warning" showIcon style={{ marginBottom: 8 }}
+                 message={data.fallback || '目标库采集失败，无法获取实时阻塞链'} />
+        )}
+        {cycles.length > 0 && (
+          <Alert type="error" showIcon style={{ marginBottom: 8 }}
+            message={`检测到 ${cycles.length} 个循环等待（死锁）`}
+            description={cycles.map((c) => (
+              <div key={c.session_id} style={{ fontSize: 12 }}>
+                环路：{(c.cycle_members || []).join(' → ')}
+                {(c.cycle_members || []).length ? ` → ${c.cycle_members[0]}` : ''}
+              </div>
+            ))} />
+        )}
         {(data?.tree || []).length ? (
           <Table size="small" rowKey="session_id" loading={loading} columns={columns}
             dataSource={data.tree} pagination={false}
             expandable={{ childrenColumnName: 'children', defaultExpandAllRows: true }}
-            rowClassName={(r) => (r.role === 'root_blocker' ? 'perf-root-blocker' : '')} />
-        ) : (
+            rowClassName={(r) => (r.role === 'deadlock_cycle' ? 'perf-deadlock-cycle'
+              : r.role === 'root_blocker' ? 'perf-root-blocker' : '')} />
+        ) : !data?.degraded && (
           <Alert type="success" showIcon message="当前无阻塞链" />
         )}
       </Card>
@@ -112,7 +147,10 @@ export default function BlockingTab({ configId, onOpenSql, refreshKey }) {
       </Card>
       <KillModal configId={configId} target={killTarget}
                  onClose={() => setKillTarget(null)} onDone={load} />
-      <style>{'.perf-root-blocker td { background: #fff1f0 !important; }'}</style>
+      <style>{`
+        .perf-root-blocker td { background: #fff1f0 !important; }
+        .perf-deadlock-cycle td { background: #fff0f6 !important; font-weight: 600; }
+      `}</style>
     </div>
   );
 }

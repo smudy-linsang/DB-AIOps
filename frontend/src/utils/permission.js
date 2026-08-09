@@ -147,22 +147,31 @@ export function getUserRole() {
   }
 }
 
+/*
+ * BUG-107: 以下判断此前都以 `getUserRole() === 'super_admin'` 短路放行。
+ * 而 role 来自 localStorage —— 浏览器控制台一行
+ *   localStorage.setItem('user', JSON.stringify({role:'super_admin'}))
+ * 就能解锁全部菜单和路由。
+ *
+ * 现在一律只认服务端下发的 permissions 数组。这不会误伤超管：
+ * 服务端 auth.get_user_permissions() 对 super_admin 直接返回全量权限清单
+ * （见 monitor/auth.py），所以超管的 permissions 本就是完整的。
+ *
+ * 需要明确的是，前端鉴权只负责 UX（不显示够不到的入口）。
+ * 真正的防线在后端 —— 篡改 localStorage 只会让按钮可见、请求 403。
+ */
+
 /**
  * 检查当前用户是否有某个权限
  */
 export function hasPermission(permissionCode) {
-  const role = getUserRole();
-  if (role === 'super_admin') return true;
-  const permissions = getUserPermissions();
-  return permissions.includes(permissionCode);
+  return getUserPermissions().includes(permissionCode);
 }
 
 /**
  * 检查当前用户是否有列表中任意一个权限（OR 语义）
  */
 export function hasAnyPermission(permissionCodes) {
-  const role = getUserRole();
-  if (role === 'super_admin') return true;
   const permissions = getUserPermissions();
   return permissionCodes.some(code => permissions.includes(code));
 }
@@ -171,8 +180,6 @@ export function hasAnyPermission(permissionCodes) {
  * 检查当前用户是否有列表中所有权限（AND 语义）
  */
 export function hasAllPermissions(permissionCodes) {
-  const role = getUserRole();
-  if (role === 'super_admin') return true;
   const permissions = getUserPermissions();
   return permissionCodes.every(code => permissions.includes(code));
 }
@@ -181,10 +188,7 @@ export function hasAllPermissions(permissionCodes) {
  * 根据权限过滤可见菜单
  */
 export function getVisibleMenus() {
-  const role = getUserRole();
-  if (role === 'super_admin') return Object.keys(MENU_PERMISSION_MAP);
-  const permissions = getUserPermissions();
-  const permSet = new Set(permissions);
+  const permSet = new Set(getUserPermissions());
   return Object.entries(MENU_PERMISSION_MAP)
     .filter(([_, perm]) => permSet.has(perm))
     .map(([path]) => path);
@@ -194,9 +198,6 @@ export function getVisibleMenus() {
  * 检查路由是否可访问
  */
 export function canAccessRoute(pathname) {
-  const role = getUserRole();
-  if (role === 'super_admin') return true;
-
   const permissions = getUserPermissions();
   const permSet = new Set(permissions);
 

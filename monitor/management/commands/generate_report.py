@@ -11,6 +11,8 @@
 """
 
 import datetime
+import html as _html
+
 from django.core.management.base import BaseCommand
 from django.utils import timezone
 
@@ -18,6 +20,12 @@ from monitor.models import (
     DatabaseConfig, MonitorLog, AlertLog, HealthScore,
     PredictionResult, ReportRecord,
 )
+
+
+def _esc(value) -> str:
+    """HTML 转义任意值（BUG-108）。报表内容含被监控库来源的数据，
+    未转义即为存储型 XSS 载体。"""
+    return _html.escape('' if value is None else str(value), quote=True)
 
 
 class Command(BaseCommand):
@@ -94,15 +102,17 @@ class Command(BaseCommand):
                 pred_str = f"预计 {pred.predicted_warn_date} 触达告警线"
 
             status_color = '#52c41a' if status == 'UP' else '#f5222d'
+            # BUG-108: 实例名/主机名等由用户录入，直接插值会形成存储型 XSS
+            # （报表在前端用 dangerouslySetInnerHTML 渲染，也可直接下载打开）。
             db_rows += f'''
             <tr>
-                <td>{config.name}</td>
-                <td>{config.get_db_type_display()}</td>
-                <td>{config.host}:{config.port}</td>
-                <td style="color:{status_color};font-weight:bold">{status}</td>
-                <td>{health_str}</td>
+                <td>{_esc(config.name)}</td>
+                <td>{_esc(config.get_db_type_display())}</td>
+                <td>{_esc(config.host)}:{_esc(config.port)}</td>
+                <td style="color:{status_color};font-weight:bold">{_esc(status)}</td>
+                <td>{_esc(health_str)}</td>
                 <td>{active_alerts}</td>
-                <td style="color:#fa8c16">{pred_str}</td>
+                <td style="color:#fa8c16">{_esc(pred_str)}</td>
             </tr>'''
 
         # 告警统计
@@ -120,7 +130,7 @@ class Command(BaseCommand):
 <html lang="zh-CN">
 <head>
 <meta charset="UTF-8">
-<title>{title}</title>
+<title>{_esc(title)}</title>
 <style>
 body {{ font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif; margin: 40px; background: #f5f7fa; }}
 .container {{ max-width: 1200px; margin: 0 auto; background: #fff; padding: 30px; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.08); }}
@@ -138,7 +148,7 @@ td {{ padding: 10px 12px; border-bottom: 1px solid #f0f0f0; }}
 </head>
 <body>
 <div class="container">
-<h1>{title}</h1>
+<h1>{_esc(title)}</h1>
 <p>统计周期: {period_start.strftime('%Y-%m-%d')} ~ {period_end.strftime('%Y-%m-%d')}</p>
 
 <div class="summary">

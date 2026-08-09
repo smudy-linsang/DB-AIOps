@@ -11,6 +11,7 @@ Phase 6A: Redis Stream 消息总线 (跨进程唯一契约源)
 编码约定: 每条消息塞单个 field "data" = json.dumps(payload)，消费端 json.loads。
 """
 import json
+import threading
 import uuid
 
 from django.conf import settings
@@ -30,10 +31,42 @@ _STREAM_GROUPS = {
 }
 
 
+# BUG-112: 进程级单例客户端。原实现每次 emit 都 redis.from_url() 新建一个
+# Redis 实例及其独立 ConnectionPool —— N 实例 × 每 5s ASH 采样 × 多个事件,
+# 每分钟数百个连接池, 最终耗尽 Redis 的 maxclients 使整条事件流水线中断。
+# redis-py 的客户端对象本身线程安全 (内部按需从池中取连接), 可安全共享。
+_BUS = None
+_BUS_LOCK = threading.Lock()
+
+
 def get_bus():
-    """获取 Redis 客户端 (复用 settings.REDIS_URL)"""
-    import redis
-    return redis.from_url(getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0'))
+    """获取 Redis 客户端单例 (复用 settings.REDIS_URL)"""
+    global _BUS
+    if _BUS is None:
+        with _BUS_LOCK:
+            if _BUS is None:
+                import redis
+                _BUS = redis.from_url(
+                    getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0'),
+                    max_connections=int(getattr(settings, 'REDIS_MAX_CONNECTIONS', 50)),
+                    socket_timeout=int(getattr(settings, 'REDIS_SOCKET_TIMEOUT', 5)),
+                    socket_connect_timeout=int(getattr(settings, 'REDIS_SOCKET_TIMEOUT', 5)),
+                    health_check_interval=30,
+                    retry_on_timeout=True,
+                )
+    return _BUS
+
+
+def reset_bus():
+    """丢弃当前客户端单例 (测试隔离 / 配置变更后重建)。"""
+    global _BUS
+    with _BUS_LOCK:
+        old, _BUS = _BUS, None
+    if old is not None:
+        try:
+            old.close()
+        except Exception:
+            pass
 
 
 def ensure_groups(bus=None):

@@ -5,6 +5,7 @@ import AasChart from '../AasChart';
 import BreakdownBar from '../BreakdownBar';
 import WaitClassTag from '../WaitClassTag';
 import { waitClassLabel } from '../waitClassMeta';
+import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
@@ -18,22 +19,30 @@ export default function HomeTab({ configId, range, onOpenSql, onOpenSession, ref
 
   useEffect(() => { setSubRange(null); }, [range, configId]);
 
+  // BUG-133: 用 withAlive 保证只有本次 effect 存活时才写 state，
+  // 避免自动刷新/切窗时慢的旧响应覆盖新数据
   useEffect(() => {
-    if (!configId) return;
+    if (!configId) return undefined;
     setLoading(true);
-    perfAPI.aas(configId, { ...range, by: 'wait_class' })
-      .then((r) => setAas(r.data))
-      .catch((e) => message.error(`AAS 加载失败: ${e.message}`))
-      .finally(() => setLoading(false));
+    return withAlive((alive) => {
+      perfAPI.aas(configId, { ...range, by: 'wait_class' })
+        .then((r) => { if (alive()) setAas(r.data); })
+        .catch((e) => { if (alive()) message.error(fmtPerfError('AAS 加载', e)); })
+        .finally(() => { if (alive()) setLoading(false); });
+    });
   }, [configId, range, refreshKey]);
 
   useEffect(() => {
-    if (!configId) return;
+    if (!configId) return undefined;
     const win = subRange || range;
-    perfAPI.topActivity(configId, { ...win, dim: 'sql' })
-      .then((r) => setTopSql(r.data.rows || [])).catch(() => setTopSql([]));
-    perfAPI.topActivity(configId, { ...win, dim: 'session' })
-      .then((r) => setTopSess(r.data.rows || [])).catch(() => setTopSess([]));
+    return withAlive((alive) => {
+      perfAPI.topActivity(configId, { ...win, dim: 'sql' })
+        .then((r) => { if (alive()) setTopSql(r.data?.rows || []); })
+        .catch(() => { if (alive()) setTopSql([]); });
+      perfAPI.topActivity(configId, { ...win, dim: 'session' })
+        .then((r) => { if (alive()) setTopSess(r.data?.rows || []); })
+        .catch(() => { if (alive()) setTopSess([]); });
+    });
   }, [configId, range, subRange, refreshKey]);
 
   const onRangeChange = useCallback((from, to) => setSubRange({ from, to }), []);

@@ -13,6 +13,7 @@
 """
 
 import logging
+import threading
 from collections import defaultdict
 from datetime import datetime, timedelta
 from typing import Dict, List, Optional, Tuple
@@ -30,11 +31,17 @@ logger = logging.getLogger(__name__)
 _AGG_BUFFER: Dict[Tuple[str, str], List[AlertLog]] = defaultdict(list)
 _AGG_TS: Dict[Tuple[str, str], datetime] = {}
 
+# BUG-115(b): 上面两个 dict 被 start_monitor 的 ThreadPoolExecutor 下多个采集
+# 线程并发读写。"append → 判长度 → 发送 → pop" 不是原子的：两个线程可能同时
+# 判定达阈值导致同一批告警推送两次；pop 与 append 交错则会静默丢告警。
+_AGG_LOCK = threading.RLock()
+
 
 def reset_aggregation():
     """清空聚合缓冲（主要用于测试隔离）。"""
-    _AGG_BUFFER.clear()
-    _AGG_TS.clear()
+    with _AGG_LOCK:
+        _AGG_BUFFER.clear()
+        _AGG_TS.clear()
 
 
 class AlertManager:
@@ -406,57 +413,74 @@ class AlertManager:
     # ------------------------------------------------------------------
 
     def _should_aggregate(self, alert_type, metric_key) -> bool:
-        """检查是否应该进入聚合模式"""
+        """检查是否应该进入聚合模式。
+
+        BUG-115(a): 原实现窗口过期后只返回 False，却不清理时间戳。而
+        flush_expired_aggregations 的清理条件要求 buffered 非空 —— 于是"开窗后
+        窗口内没有第二条同类告警"这一最常见的情况会让时间戳永久滞留：
+        此后 _should_aggregate 恒为 False，**该类型的聚合功能被永久关闭**，
+        且 _AGG_TS 单调增长（内存泄漏）。这里过期即清理，让下一条告警重新开窗。
+        """
         buffer_key = (alert_type, metric_key)
-
-        if buffer_key not in self._aggregation_timestamps:
-            return False
-
-        elapsed = (timezone.now() - self._aggregation_timestamps[buffer_key]).total_seconds()
-        return elapsed < self.AGGREGATION_WINDOW_SEC
+        with _AGG_LOCK:
+            ts = self._aggregation_timestamps.get(buffer_key)
+            if ts is None:
+                return False
+            if (timezone.now() - ts).total_seconds() >= self.AGGREGATION_WINDOW_SEC:
+                self._aggregation_timestamps.pop(buffer_key, None)
+                self._aggregation_buffer.pop(buffer_key, None)
+                return False
+            return True
 
     def _add_to_aggregation(self, alert, buffer_key):
         """将告警加入聚合缓冲区"""
-        self._aggregation_buffer[buffer_key].append(alert)
-
-        if buffer_key not in self._aggregation_timestamps:
-            self._aggregation_timestamps[buffer_key] = timezone.now()
-
-        # 检查是否达到聚合发送条件
-        if len(self._aggregation_buffer[buffer_key]) >= self.AGGREGATION_MIN_COUNT:
-            self._send_aggregated_alert(buffer_key, self._aggregation_buffer[buffer_key])
-            self._aggregation_buffer.pop(buffer_key, None)
-            self._aggregation_timestamps.pop(buffer_key, None)
+        to_send = None
+        with _AGG_LOCK:
+            self._aggregation_buffer[buffer_key].append(alert)
+            self._aggregation_timestamps.setdefault(buffer_key, timezone.now())
+            # 检查是否达到聚合发送条件（取出后立即清空，避免其它线程重复发送）
+            if len(self._aggregation_buffer[buffer_key]) >= self.AGGREGATION_MIN_COUNT:
+                to_send = self._aggregation_buffer.pop(buffer_key, [])
+                self._aggregation_timestamps.pop(buffer_key, None)
+        # 网络 IO 放在锁外，避免通知渠道阻塞拖住所有采集线程
+        if to_send:
+            self._send_aggregated_alert(buffer_key, to_send)
 
     def _send_aggregated_alert(self, buffer_key, alerts):
         """发送聚合告警（v3.0: 使用通知规则）"""
         alert_type, metric_key = buffer_key
         count = len(alerts)
-        unique_configs = list(set(a.config.name for a in alerts))
+        if not count:
+            return
+        unique_configs = sorted({a.config.name for a in alerts})
 
-        title = f"[聚合告警] {alert_type} - {metric_key} ({count}个实例)"
-        body = f"检测到 {count} 个同类告警：\n"
+        title = (f"[聚合告警] {alert_type} - {metric_key} "
+                 f"({count}条/{len(unique_configs)}个实例)")
+        body = f"检测到 {count} 个同类告警，涉及实例：{', '.join(unique_configs[:10])}\n"
         for a in alerts[:5]:
             body += f"- {a.config.name}: {a.title}\n"
         if count > 5:
             body += f"... 还有 {count - 5} 个\n"
 
-        # 使用第一个告警的严重程度匹配规则
-        severity = alerts[0].severity if alerts else 'warning'
-        matched_rules = self._match_rules(alert_type, severity)
-
-        if matched_rules:
-            all_channels = []
-            seen = set()
-            for rule in matched_rules:
+        # BUG-115(c): 聚合是跨实例的，而 _match_rules() 按 self.config 过滤 ——
+        # self 只是"碰巧触发 flush 的那个实例"，用它的规则给整批告警做路由是错的
+        # （某实例配了钉钉、另一实例配了邮件，结果只走其中一种）。
+        # 现在按各告警自己的实例匹配规则，取渠道并集。
+        all_channels, seen = [], set()
+        for a in alerts:
+            try:
+                rules = AlertManager(a.config)._match_rules(alert_type, a.severity)
+            except Exception as e:
+                logger.warning(f"[AlertManager] 聚合路由匹配失败 config={a.config_id}: {e}")
+                continue
+            for rule in rules:
                 for ch in rule.channels:
                     if ch not in seen:
-                        all_channels.append(ch)
                         seen.add(ch)
-            if all_channels:
-                self._send_to_channels(title, body, all_channels, alert=alerts[0])
-            else:
-                self.notifier(title, body)
+                        all_channels.append(ch)
+
+        if all_channels:
+            self._send_to_channels(title, body, all_channels, alert=alerts[0])
         else:
             # 无匹配规则，回退默认
             self._send_to_channels(title, body, ['email', 'dingtalk', 'wecom'])
@@ -509,8 +533,8 @@ class AlertManager:
             )
 
         # 首条立即发送后打开聚合窗口：窗口内同类后续告警进入缓冲批量推送
-        if buffer_key not in self._aggregation_timestamps:
-            self._aggregation_timestamps[buffer_key] = timezone.now()
+        with _AGG_LOCK:
+            self._aggregation_timestamps.setdefault(buffer_key, timezone.now())
 
     def flush_expired_aggregations(self):
         """
@@ -518,21 +542,24 @@ class AlertManager:
         由守护进程周期调用，保证缓冲告警不会滞留。
         """
         now = timezone.now()
-        for key in list(self._aggregation_timestamps.keys()):
-            start = self._aggregation_timestamps[key]
-            buffered = self._aggregation_buffer.get(key, [])
-            elapsed = (now - start).total_seconds()
-            if len(buffered) >= self.AGGREGATION_MIN_COUNT or (
-                buffered and elapsed >= self.AGGREGATION_WINDOW_SEC
-            ):
-                self._send_aggregated_alert(key, buffered)
-                self._aggregation_buffer.pop(key, None)
-                self._aggregation_timestamps.pop(key, None)
-            elif buffered and elapsed >= self.AGGREGATION_WINDOW_SEC:
-                # 窗口到期但不足最小条数，也冲刷（避免滞留）
-                self._send_aggregated_alert(key, buffered)
-                self._aggregation_buffer.pop(key, None)
-                self._aggregation_timestamps.pop(key, None)
+        pending = []
+        with _AGG_LOCK:
+            for key in list(self._aggregation_timestamps.keys()):
+                start = self._aggregation_timestamps[key]
+                buffered = self._aggregation_buffer.get(key, [])
+                elapsed = (now - start).total_seconds()
+                # 达到最小条数，或窗口到期（不足条数也冲刷，避免滞留）
+                if (len(buffered) >= self.AGGREGATION_MIN_COUNT
+                        or elapsed >= self.AGGREGATION_WINDOW_SEC):
+                    # BUG-115(a): 无论 buffered 是否为空都要清掉时间戳，
+                    # 否则空窗口的时间戳会永久滞留并关闭该 key 的聚合能力。
+                    self._aggregation_buffer.pop(key, None)
+                    self._aggregation_timestamps.pop(key, None)
+                    if buffered:
+                        pending.append((key, buffered))
+        # BUG-134: 原先的 elif 分支恒不可达（条件已被 if 的右半覆盖）且体完全相同，已删除
+        for key, buffered in pending:
+            self._send_aggregated_alert(key, buffered)
 
     def run_escalation_scan(self):
         """
