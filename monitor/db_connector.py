@@ -153,19 +153,40 @@ class DbConnector:
 
     @staticmethod
     def _apply_mysql_session_limits(conn, timeout_ms: int) -> None:
-        """会话级语句超时。max_execution_time 需 MySQL 5.7.8+，老版本静默跳过。"""
+        """会话级语句超时。
+
+        REVIEW-06: 原实现只尝试 `max_execution_time`（MySQL 5.7.8+，单位毫秒），
+        失败就静默跳过。而 **MariaDB 根本没有这个变量** —— 它用
+        `max_statement_time`（单位秒，浮点）。于是在整个 MariaDB 系
+        （含部分 GBase/TDSQL 部署）上，BUG-109 的语句超时保护**完全不存在**，
+        而且毫无痕迹：目标库一慢就会把 Web worker 拖死，正是 BUG-109 的原状。
+        这个缺陷是拿真实 MariaDB 10.11 跑 W3 方言测试才暴露的。
+        """
+        from monitor import degrade
+        applied = None
         try:
             with conn.cursor() as c:
+                # MySQL 5.7.8+ / Percona：毫秒
                 try:
                     c.execute("SET SESSION max_execution_time=%s", (int(timeout_ms),))
-                except Exception as e:
-                    logger.debug(f"MySQL 不支持 max_execution_time(版本较老): {e}")
+                    applied = 'max_execution_time'
+                except Exception:
+                    # MariaDB：秒（浮点），最小 0.001
+                    try:
+                        c.execute("SET SESSION max_statement_time=%s",
+                                  (max(0.001, timeout_ms / 1000.0),))
+                        applied = 'max_statement_time'
+                    except Exception as e2:
+                        degrade.note('db_connector.mysql_statement_timeout',
+                                     '两种语句超时变量均不支持，目标库慢查询无法被中断', e2)
                 try:
                     c.execute("SET SESSION innodb_lock_wait_timeout=5")
                 except Exception:
                     pass
         except Exception as e:
-            logger.debug(f"MySQL 设置会话限制失败: {e}")
+            degrade.note('db_connector.mysql_session_limits', '会话限制设置失败', e)
+        if applied:
+            logger.debug("MySQL 语句超时已生效: %s", applied)
 
     @staticmethod
     def _connect_postgresql(config, timeout_ms: int = DEFAULT_STATEMENT_TIMEOUT_MS,

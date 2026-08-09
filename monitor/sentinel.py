@@ -38,8 +38,44 @@ def sentinel_interval_sec() -> int:
 
 
 # ---- 逐库 ASH 采样 SQL v2 (phase7/10 §4): 等待类/指纹/锁明细/长事务 ----
+from monitor import degrade  # noqa: E402
 from monitor.detectors.wait_class import classify  # noqa: E402
 from monitor.sqlfingerprint import unified_digest  # noqa: E402
+
+
+# 阻塞边查询双路径（REVIEW-07）。两者返回同样的列名，供 _mysql_blocking_edges 复用。
+# 路径一：MySQL 8.0 的 performance_schema.data_lock_waits
+_BLOCK_SQL_PS = (
+    "SELECT r.trx_mysql_thread_id AS waiter, b.trx_mysql_thread_id AS blocker, "
+    "TIMESTAMPDIFF(SECOND, r.trx_started, NOW()) AS trx_age_secs, "
+    "TIMESTAMPDIFF(SECOND, COALESCE(r.trx_wait_started, NOW()), NOW()) AS lock_wait_secs "
+    "FROM performance_schema.data_lock_waits w "
+    "JOIN information_schema.innodb_trx b ON w.blocking_engine_transaction_id=b.trx_id "
+    "JOIN information_schema.innodb_trx r ON w.requesting_engine_transaction_id=r.trx_id")
+# 路径二：MariaDB / MySQL 5.7 的 information_schema.INNODB_LOCK_WAITS
+_BLOCK_SQL_IS = (
+    "SELECT r.trx_mysql_thread_id AS waiter, b.trx_mysql_thread_id AS blocker, "
+    "TIMESTAMPDIFF(SECOND, r.trx_started, NOW()) AS trx_age_secs, "
+    "TIMESTAMPDIFF(SECOND, COALESCE(r.trx_wait_started, NOW()), NOW()) AS lock_wait_secs "
+    "FROM information_schema.INNODB_LOCK_WAITS w "
+    "JOIN information_schema.INNODB_TRX b ON w.blocking_trx_id = b.trx_id "
+    "JOIN information_schema.INNODB_TRX r ON w.requesting_trx_id = r.trx_id")
+
+
+def _mysql_blocking_edges(cur, rows, sql) -> bool:
+    """执行一条阻塞边查询并回填 rows。成功(哪怕零行)返回 True，SQL 不被支持返回 False。"""
+    try:
+        cur.execute(sql)
+    except Exception:
+        return False
+    for r in cur.fetchall():
+        waiter = str(r['waiter'])
+        if waiter in rows:
+            rows[waiter]['is_blocked'] = True
+            rows[waiter]['blocker_id'] = str(r['blocker'])
+            rows[waiter]['wait_secs'] = r.get('lock_wait_secs') or 0
+            rows[waiter]['trx_age_secs'] = r.get('trx_age_secs')
+    return True
 
 
 def _ash_mysql_family(cur, db_type='mysql'):
@@ -82,30 +118,26 @@ def _ash_mysql_family(cur, db_type='mysql'):
             "JOIN performance_schema.threads t ON t.THREAD_ID = sc.THREAD_ID "
             "WHERE t.PROCESSLIST_ID IS NOT NULL AND sc.DIGEST IS NOT NULL")
         native = {str(r['session_id']): r['digest'] for r in cur.fetchall()}
-    except Exception:
-        pass
+    except Exception as e:
+        # REVIEW-07: MariaDB 默认 performance_schema=OFF，原生 digest 取不到，
+        # 指纹会退化为按 SQL 文本归一化 —— 可用但精度下降，必须留痕
+        degrade.note('ash.mysql_native_digest', 'performance_schema 不可用，指纹降级为文本归一化', e)
     # ③ 阻塞边
     # BUG-123: 原先把 TIMESTAMPDIFF(trx_started, NOW()) —— 也就是**整个事务的年龄**
     # —— 塞进 active_secs 当作"等待秒"。一个跑了 2 小时的事务刚开始等锁 1 秒，
     # 界面会显示"等待 7200 秒"，DBA 无法判断锁等待的真实紧迫度。
     # 现在锁等待时长取 trx_wait_started，事务年龄单独存 trx_age_secs。
-    try:
-        cur.execute(
-            "SELECT r.trx_mysql_thread_id AS waiter, b.trx_mysql_thread_id AS blocker, "
-            "TIMESTAMPDIFF(SECOND, r.trx_started, NOW()) AS trx_age_secs, "
-            "TIMESTAMPDIFF(SECOND, COALESCE(r.trx_wait_started, NOW()), NOW()) AS lock_wait_secs "
-            "FROM performance_schema.data_lock_waits w "
-            "JOIN information_schema.innodb_trx b ON w.blocking_engine_transaction_id=b.trx_id "
-            "JOIN information_schema.innodb_trx r ON w.requesting_engine_transaction_id=r.trx_id")
-        for r in cur.fetchall():
-            waiter = str(r['waiter'])
-            if waiter in rows:
-                rows[waiter]['is_blocked'] = True
-                rows[waiter]['blocker_id'] = str(r['blocker'])
-                rows[waiter]['wait_secs'] = r.get('lock_wait_secs') or 0
-                rows[waiter]['trx_age_secs'] = r.get('trx_age_secs')
-    except Exception:
-        pass
+    #
+    # REVIEW-07: 原实现只查 performance_schema.data_lock_waits（MySQL 8.0 专有），
+    # 失败就静默 pass。而 **MariaDB 压根没有这张表**，且 performance_schema
+    # 默认 OFF —— 于是整个 MariaDB 系上「阻塞分析」这个核心功能**完全不工作**，
+    # 界面永远显示"当前无阻塞链"，和 BUG-111 一样是"数据库在死锁而系统报正常"。
+    # MariaDB 用 information_schema.INNODB_LOCK_WAITS，这里做双路回退。
+    if not _mysql_blocking_edges(cur, rows, _BLOCK_SQL_PS):
+        if not _mysql_blocking_edges(cur, rows, _BLOCK_SQL_IS):
+            degrade.note('ash.mysql_blocking_edges',
+                         'performance_schema 与 information_schema 两条路径均不可用，'
+                         '该实例的阻塞检测处于失效状态')
     # ④ 锁明细 (被阻塞行)
     try:
         cur.execute(
@@ -120,8 +152,8 @@ def _ash_mysql_family(cur, db_type='mysql'):
                 rows[waiter].update({'lock_type': r.get('lock_type'),
                                      'lock_mode': r.get('lock_mode'),
                                      'lock_object': r.get('lock_object')})
-    except Exception:
-        pass
+    except Exception as e:
+        degrade.note('ash.mysql_lock_detail', '锁明细不可用(performance_schema.data_locks)', e)
     out = []
     for r in rows.values():
         nd = native.get(r['session_id'])
@@ -160,8 +192,10 @@ def _ash_pg(cur):
                 "WHERE NOT l.granted")
             for pid, lt, lm, lo in cur.fetchall():
                 lock_detail[str(pid)] = (lt, lm, lo)
-        except Exception:
-            pass
+        except Exception as e:
+            # W6-L2: 取不到锁明细时阻塞页的"争用对象"列会是空的 ——
+            # 看起来像"没有争用"，其实是查不到，必须留痕区分
+            degrade.note('ash.pg_lock_detail', 'pg_locks 不可读(通常是权限不足)', e)
     out = []
     for r in raw_rows:
         sid = str(r.get('session_id'))
@@ -487,8 +521,11 @@ class InstanceSentinel:
                     if e['signal'] == 'conn_high':
                         e['source'] = 'sentinel'
                         emit_event(e)
-            except Exception:
-                pass
+            except Exception as e:
+                # W6-L2: 这里静默会让 conn_high 这条 L1 告警**彻底失效**，
+                # 而连接数打满恰恰是最需要及时发现的故障之一
+                degrade.note('sentinel.golden_metrics',
+                             f'{self.config.name} 黄金指标采集或 L1 检测失败', e)
             finally:
                 self._end_txn()
         except Exception as e:

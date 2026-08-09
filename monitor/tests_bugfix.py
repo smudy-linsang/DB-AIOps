@@ -1424,3 +1424,84 @@ class Review02SystemInstanceHiddenTests(TestCase):
         rows = {d['name']: d for d in self.c.get('/api/v1/databases/').json()['databases']}
         self.assertIn('paused-db', rows)
         self.assertFalse(rows['paused-db']['is_active'])
+
+
+# =============================================================================
+# W6-B3 安全路径必须 fail-closed（回归锁定）
+# =============================================================================
+class W6B3FailClosedTests(TestCase):
+    """安全相关的失败姿态必须是"拒绝"，不能是"放行"。
+
+    这些点在前几轮已陆续改成 fail-closed（BUG-102/122/137 等），
+    但"失败时放行"是极易被后人以"提高健壮性"为名改回去的写法 ——
+    这里把姿态用测试钉死。
+    """
+
+    def test_llm_schema_validation_is_fail_closed_without_jsonschema(self):
+        """BUG-137：jsonschema 缺失时必须拒绝，而不是跳过校验放行。
+
+        LLM 输出会驱动 RCA 结论与自动修复预案，静默放行等于让畸形/被注入的
+        响应直接进入运维决策。
+        """
+        import builtins
+        from monitor.llm.schemas import SchemaValidationError, validate_diagnosis_output
+
+        real_import = builtins.__import__
+
+        def no_jsonschema(name, *a, **k):
+            if name == 'jsonschema':
+                raise ImportError('simulated missing jsonschema')
+            return real_import(name, *a, **k)
+
+        payload = '{"summary": "s", "hypotheses": [{"name": "n", "confidence": 0.5, "reasoning": "r"}]}'
+        with mock.patch.object(builtins, '__import__', side_effect=no_jsonschema):
+            with self.assertRaises(SchemaValidationError) as cm:
+                validate_diagnosis_output(payload)
+        self.assertIn('jsonschema', str(cm.exception))
+
+    def test_sql_whitelist_rejects_dangerous_statements(self):
+        from monitor.auto_remediation_engine import AutoRemediationEngine as E
+        for sql in ('DROP TABLE users', 'TRUNCATE t', 'DELETE FROM users',
+                    'GRANT ALL ON *.* TO x', '', '   '):
+            ok, _ = E._validate_sql_safety(sql)
+            self.assertFalse(ok, f'危险/空语句必须被拒: {sql!r}')
+
+    def test_sql_whitelist_rejects_multi_statement(self):
+        from monitor.auto_remediation_engine import AutoRemediationEngine as E
+        ok, reason = E._validate_sql_safety("KILL 1; DROP TABLE users")
+        self.assertFalse(ok, f'多语句必须被拒，实际放行: {reason}')
+
+    def test_plan_capture_rejects_non_whitelisted_sql(self):
+        from monitor.plan_capture import _sql_allowed
+        self.assertFalse(_sql_allowed('DROP TABLE t'))
+        self.assertFalse(_sql_allowed('SELECT 1; DROP TABLE t'))
+        self.assertFalse(_sql_allowed(''))
+        self.assertTrue(_sql_allowed('SELECT * FROM t WHERE id = 1'))
+
+    def test_decrypt_failure_raises_instead_of_returning_garbage(self):
+        """解密失败必须抛错。返回空串/原文会让系统拿着错密码去连目标库，
+        表现为莫名其妙的认证失败，排查成本极高。"""
+        from monitor.crypto import decrypt_password
+        with self.assertRaises(ValueError):
+            decrypt_password('enc:this-is-not-valid-base64-ciphertext')
+
+    def test_explain_endpoint_rejects_mismatched_fingerprint(self):
+        """BUG-122：提供的 SQL 与 URL 里的 digest 不匹配时必须拒绝，
+        否则任何登录用户都能借 EXPLAIN 枚举目标库表结构。"""
+        cfg = make_db('fc-db')
+        user = make_user('fc', RoleCode.DBA,
+                         [Perm.METRICS_VIEW, Perm.SQL_MONITORING_VIEW])
+        c = Client()
+        login(c, user)
+        r = c.post(f'/api/v1/databases/{cfg.id}/perf/sql/deadbeef/explain/',
+                   data=json.dumps({'sql_text': 'SELECT * FROM secret'}),
+                   content_type='application/json')
+        self.assertEqual(r.status_code, 400)
+
+    def test_missing_profile_does_not_grant_extra_permissions(self):
+        """无 UserProfile 的用户：数据范围不受限是既定语义（沿用 allowed_databases
+        为空即全部可见），但**功能权限**必须为空 —— 两者不能混淆。"""
+        u = User.objects.create_user('noprofile', password='x')
+        self.assertEqual(auth_mod.get_user_permissions(u), [])
+        self.assertFalse(auth_mod.is_super_admin(u))
+        self.assertFalse(auth_mod.has_permission(u, Perm.TICKETS_EXECUTE))

@@ -1723,3 +1723,61 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | §5 验收清单 | **采纳并扩充** | 8 项 → 15 项，覆盖 CI/自监控/配置校验 |
 | §6 风险回滚 | **采纳并扩充** | 补 CI 额度、SQLite 行为差异等风险 |
 | 「不建 CI，本地闭环优先」 | **反对** | 本地钩子对云端 Agent 无效、可 `--no-verify` 跳过、不随仓库分发。CI 是 P1 而非远期 |
+
+---
+
+# 附录 B：W3/W6 落地实测记录（2026-08-09）
+
+## B.1 真库跑起来立刻抓出 3 个静默失效的产品缺陷
+
+W3-L3 的论点是"方言 SQL 只有真库能验，mock 只能证明代码路径走到了"。
+本轮把 **MariaDB 10.11** 拉起来实跑，当场印证：
+
+| 编号 | 缺陷 | 静默程度 |
+|------|------|---------|
+| REVIEW-06 | `_apply_mysql_session_limits` 只试 `max_execution_time`（MySQL 专有），MariaDB 用的是 `max_statement_time` | 失败即 `except` 跳过 —— **整个 MariaDB 系上 BUG-109 的语句超时保护根本不存在**，目标库一慢就拖死 Web worker |
+| REVIEW-07 | 阻塞边只查 `performance_schema.data_lock_waits`（MySQL 8.0 专有），MariaDB 无此表且 P_S 默认 OFF | 失败即 `pass` —— **阻塞分析在 MariaDB 上完全不工作**，界面永远显示"当前无阻塞链"，与 BUG-111 同构 |
+| REVIEW-08 | `SHOW MASTER LOGS` 在未开 binlog 时抛 1381，而 `execute` 写在 `try` 外面 | 异常越过整个 `collect_metrics` —— **该实例这一轮的全部指标丢失**，不只是 binlog 一项 |
+
+三个都属于"在开发者的 MySQL 8 上一切正常、换个部署就整块功能消失且无人知晓"。
+这类缺陷靠读代码很难发现（代码看起来是有容错的），靠 mock 更测不出来。
+
+**修复**
+- REVIEW-06：`max_execution_time`(ms) → 回退 `max_statement_time`(s)，两者都不支持才留痕
+- REVIEW-07：`performance_schema.data_lock_waits` → 回退 `information_schema.INNODB_LOCK_WAITS`
+- REVIEW-08：新增 `checkers/base.py` 的 `safe_execute/safe_scalar/safe_rows` 助手
+
+## B.2 `execute 在 try 外` 是系统性写法问题
+
+统计"`cursor.execute` 紧跟 `try:`（即作者预见了取值失败、却没预见语句本身不被支持）"：
+
+| 文件 | 处数 |
+|------|------|
+| `checkers/mysql.py` | 76 |
+| `checkers/gbase.py` | 14 |
+| 其余 checkers | 0 |
+
+本轮只修了**已实证会炸**的那处（`SHOW MASTER LOGS`）并建立了 `safe_*` 助手模式。
+其余按 W6-B4 的既定策略随功能改动逐步迁移 —— 一次性机械替换 90 处的回归风险
+大于收益，且缺少真库覆盖的情况下无法验证替换是否等价。
+
+## B.3 W6 各批次实际状态
+
+| 批次 | 范围 | 状态 |
+|------|------|------|
+| B1 采集主路径 | `checkers/` + `sentinel.py` | 已接入：MySQL 三条方言路径、PG 锁明细、黄金指标+L1 检测、主循环异常 |
+| B2 通知链路 | `notifications.py` + `alert_manager.py` | 已接入：email/dingtalk/wecom 三渠道 + ES 双写 + SSE 发布 |
+| B3 安全 fail-closed | SQL 校验 / 权限 / schema 校验 | **核查后确认已全部 fail-closed**（BUG-102/122/137 等轮次已完成），本轮补 7 个回归用例把姿态钉死，防止后人以"提高健壮性"为名改回放行 |
+| B4 其余 | ~90 处 | 随功能改动迁移，不单独立项 |
+
+## B.4 测试规模变化
+
+| 指标 | W1–W7 落地时 | 本轮后 |
+|------|-------------|--------|
+| 全量用例 | 173 | **194** |
+| unit 层（零外部依赖） | 77 | **83** |
+| 方言用例 | 7（4 个只能 skip） | **21**（MySQL 5 + PG 6 + checkers 7 + Oracle 4 + 达梦 2） |
+| `checkers/` 真库覆盖 | 0 | MySQL/PG 采集主路径 |
+
+Oracle 与达梦用例本地默认 skip（镜像体积/驱动限制），CI 的 `test-dialect` job
+已接入 `gvenzl/oracle-free:23-slim-faststart` 服务容器，master 推送时会真跑。

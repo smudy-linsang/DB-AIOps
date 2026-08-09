@@ -13,7 +13,7 @@ Redo日志、行锁时间、临时表、排序统计、长事务、死锁记录�
 
 import pymysql
 
-from monitor.checkers.base import BaseDBChecker, LOCK_TIME_THRESHOLD
+from monitor.checkers.base import BaseDBChecker, LOCK_TIME_THRESHOLD, safe_rows, safe_scalar
 
 
 class MySQLChecker(BaseDBChecker):
@@ -655,12 +655,10 @@ class MySQLChecker(BaseDBChecker):
             # =============================================
             # 12. 日志统计 (log) - P1
             # =============================================
-            cursor.execute("SHOW MASTER LOGS")
-            try:
-                cursor.fetchall()
-                binlog_count = cursor.rowcount
-            except Exception:
-                binlog_count = 0
+            # REVIEW-08: 未开启 binlog 时 SHOW MASTER LOGS 直接抛 1381，
+            # 原写法把 execute 放在 try 外面，异常会越过整个 collect_metrics ——
+            # 该实例这一轮的**全部指标**都丢了，而不只是 binlog 这一项。
+            binlog_count = len(safe_rows(cursor, "SHOW MASTER LOGS", 'mysql.binlog'))
 
             cursor.execute("SHOW VARIABLES LIKE 'slow_query_log_file'")
             slow_query_log = cursor.fetchone()['Value']
