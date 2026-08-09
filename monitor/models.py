@@ -2020,3 +2020,41 @@ class AgentTraceStep(models.Model):
         unique_together = [('trace', 'seq')]
         ordering = ['seq']
 
+
+class ComponentHeartbeat(models.Model):
+    """组件心跳（W4 自监控）。
+
+    每个 (component, instance) 一行，upsert 更新，不做时序留存 ——
+    历史趋势不是目标，"现在还活着吗"才是。行数上界 = 组件数 × 副本数，
+    通常 < 20 行，无需分区或清理策略。
+    """
+    COMPONENT_CHOICES = (
+        ('collector', '指标采集器'),
+        ('sentinel', '哨兵/ASH采样'),
+        ('pipeline', '事件流水线消费者'),
+        ('notifier', '通知发送器'),
+    )
+    STATUS_CHOICES = (('up', '正常'), ('down', '失联'))
+
+    component = models.CharField(max_length=32, choices=COMPONENT_CHOICES,
+                                 verbose_name="组件")
+    instance = models.CharField(max_length=128,
+                                verbose_name="实例标识",
+                                help_text="hostname:pid，区分多副本部署")
+    last_beat_at = models.DateTimeField(db_index=True, verbose_name="最后心跳时间")
+    status = models.CharField(max_length=8, choices=STATUS_CHOICES, default='up',
+                              verbose_name="状态")
+    meta = models.JSONField(default=dict, blank=True, verbose_name="附加信息",
+                            help_text="如采集实例数、队列积压等，仅供展示")
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="首次上报")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "组件心跳"
+        verbose_name_plural = "组件心跳列表"
+        unique_together = [('component', 'instance')]
+        indexes = [models.Index(fields=['status', 'last_beat_at'])]
+
+    def __str__(self):
+        return f"{self.get_component_display()}@{self.instance} ({self.status})"
+

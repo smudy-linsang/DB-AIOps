@@ -71,6 +71,9 @@ class BaseDBChecker:
             status = 'DOWN'
             result_data = {"error": str(e)}
             print(f"  X {self.db_label()} [{config.name}]: 失败 - {e}")
+            # W6-L2: 整轮采集失败（实例 DOWN），留痕供 /system/degradations 观察
+            from monitor import degrade
+            degrade.note(f'collect.{self.db_label()}', reason=config.name, exc=e)
         finally:
             if conn:
                 try:

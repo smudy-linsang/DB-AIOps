@@ -52,6 +52,9 @@ def send_email_alert(title: str, body: str) -> bool:
         return True
     except Exception as e:
         logger.warning(f"[Email] 发送失败：{e}")
+        # W6-L2: "告警发不出去"必须可见 —— 计数供 /system/degradations 暴露
+        from monitor import degrade
+        degrade.note('notify.email', exc=e)
         return False
 
 
@@ -109,9 +112,14 @@ def send_dingtalk_alert(title: str, body: str) -> bool:
                 return True
             else:
                 logger.warning(f"[DingTalk] 返回错误：{result}")
+                from monitor import degrade
+                degrade.note('notify.dingtalk', reason=f"errcode={result.get('errcode')}")
                 return False
     except Exception as e:
         logger.warning(f"[DingTalk] 发送失败：{e}")
+        # W6-L2: "告警发不出去"必须可见 —— 计数供 /system/degradations 暴露
+        from monitor import degrade
+        degrade.note('notify.dingtalk', exc=e)
         return False
 
 
@@ -163,9 +171,14 @@ def send_wecom_alert(title: str, body: str, mentioned_mobile: str = None) -> boo
                 return True
             else:
                 logger.warning(f"[WeCom] 返回错误：{result}")
+                from monitor import degrade
+                degrade.note('notify.wecom', reason=f"errcode={result.get('errcode')}")
                 return False
     except Exception as e:
         logger.warning(f"[WeCom] 发送失败：{e}")
+        # W6-L2: "告警发不出去"必须可见 —— 计数供 /system/degradations 暴露
+        from monitor import degrade
+        degrade.note('notify.wecom', exc=e)
         return False
 
 

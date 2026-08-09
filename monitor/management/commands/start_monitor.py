@@ -138,6 +138,14 @@ class Command(BaseCommand):
                     print(f"[ALERT-OPS] {cfg.name}: 升级 {n} 条告警")
             except Exception as e:
                 logger.warning("[ALERT-OPS] %s 告警运维失败: %s", cfg.name, e)
+        # W4 自监控：失联组件扫描（复用 AlertManager 告警链路）
+        try:
+            from monitor.self_monitor import run_heartbeat_check
+            n_stale = run_heartbeat_check()
+            if n_stale:
+                print(f"[ALERT-OPS] 自监控: {n_stale} 个组件失联")
+        except Exception as e:
+            logger.warning("[ALERT-OPS] 自监控扫描失败: %s", e)
 
     def _run_single_check(self, config):
         """在独立线程中执行单个数据库的采集，超时后自动记录 DOWN"""
@@ -212,6 +220,10 @@ class Command(BaseCommand):
             self._celery_dispatch_job(configs)
         else:
             self._threadpool_job(configs)
+
+        # W4 自监控：本轮采集完成，上报采集器心跳
+        from monitor.self_monitor import report
+        report('collector', {'db_count': len(configs)})
 
     def process_result(self, config, current_status, data):
         """统一结果处理和告警逻辑（v3.0：Phase 2 智能引擎集成）"""

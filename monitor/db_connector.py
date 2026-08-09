@@ -29,8 +29,8 @@ DEFAULT_STATEMENT_TIMEOUT_MS = 5000
 def _stmt_timeout_ms(override=None) -> int:
     if override:
         return int(override)
-    return int(getattr(settings, 'TARGET_DB_STATEMENT_TIMEOUT_MS',
-                       DEFAULT_STATEMENT_TIMEOUT_MS))
+    from monitor import appconf
+    return appconf.get('TARGET_DB_STATEMENT_TIMEOUT_MS')
 
 
 class DbConnectionError(Exception):

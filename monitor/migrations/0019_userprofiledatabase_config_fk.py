@@ -29,6 +29,26 @@ def noop(apps, schema_editor):
     """回滚方向无需动作。"""
 
 
+def add_fk(apps, schema_editor):
+    """仅 PostgreSQL 执行原生 DDL；SQLite（unit 测试库）无 ADD CONSTRAINT 语法，
+    跳过即可 —— FK 语义由状态侧模型保证，真实外键行为属 integration 层职责。"""
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    schema_editor.execute(
+        "ALTER TABLE monitor_userprofiledatabase "
+        "ADD CONSTRAINT monitor_upd_config_id_fk "
+        "FOREIGN KEY (config_id) REFERENCES monitor_databaseconfig (id) "
+        "ON DELETE CASCADE")
+
+
+def drop_fk(apps, schema_editor):
+    if schema_editor.connection.vendor != 'postgresql':
+        return
+    schema_editor.execute(
+        "ALTER TABLE monitor_userprofiledatabase "
+        "DROP CONSTRAINT IF EXISTS monitor_upd_config_id_fk")
+
+
 class Migration(migrations.Migration):
 
     dependencies = [
@@ -69,19 +89,7 @@ class Migration(migrations.Migration):
                 ),
             ],
             database_operations=[
-                migrations.RunSQL(
-                    sql="""
-                        ALTER TABLE monitor_userprofiledatabase
-                          ADD CONSTRAINT monitor_upd_config_id_fk
-                          FOREIGN KEY (config_id)
-                          REFERENCES monitor_databaseconfig (id)
-                          ON DELETE CASCADE;
-                    """,
-                    reverse_sql="""
-                        ALTER TABLE monitor_userprofiledatabase
-                          DROP CONSTRAINT IF EXISTS monitor_upd_config_id_fk;
-                    """,
-                ),
+                migrations.RunPython(add_fk, drop_fk),
             ],
         ),
     ]

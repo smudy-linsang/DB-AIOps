@@ -23,7 +23,7 @@ import {
   TeamOutlined, CheckCircleOutlined, RobotOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
-import { authAPI, alertAPI, setUser } from '../services/api';
+import { authAPI, alertAPI, systemAPI, setUser } from '../services/api';
 import useAppStore from '../stores/useAppStore';
 import TargetNavigationTree from './TargetNavigationTree';
 import { hasPermission } from '../utils/permission';
@@ -76,11 +76,24 @@ const EMLayout = ({ children }) => {
     } catch (_) {}
   }, [setAlertCounts]);
 
+  // W4 自监控：系统健康指示灯数据（与告警统计共用下方 60s 定时器，不新增定时器）
+  const [sysHealth, setSysHealth] = useState(null);
+  const loadSystemHealth = useCallback(async () => {
+    try {
+      const res = await systemAPI.health();
+      setSysHealth(res?.data || res || null);
+    } catch (_) {}
+  }, []);
+
   useEffect(() => {
     loadAlertCounts();
-    const timer = setInterval(loadAlertCounts, 60000);
+    loadSystemHealth();
+    const timer = setInterval(() => {
+      loadAlertCounts();
+      loadSystemHealth();
+    }, 60000);
     return () => clearInterval(timer);
-  }, [loadAlertCounts]);
+  }, [loadAlertCounts, loadSystemHealth]);
 
   // SSE 实时连接
   useEffect(() => {
@@ -223,6 +236,25 @@ const EMLayout = ({ children }) => {
         </Space>
 
         <Space size={20}>
+          {/* W4 自监控：系统健康指示灯 ok绿/degraded黄/down红，点击进系统健康页 */}
+          {sysHealth && (
+            <span
+              title={`系统健康：${sysHealth.status}`}
+              onClick={() => navigate('/system/health')}
+              style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
+            >
+              <span style={{
+                width: 10, height: 10, borderRadius: '50%', display: 'inline-block',
+                background: sysHealth.status === 'ok' ? '#52c41a'
+                  : sysHealth.status === 'degraded' ? '#faad14' : '#f5222d',
+              }} />
+              {sysHealth.status === 'degraded' && (
+                <Text style={{ color: '#faad14', fontSize: 12, lineHeight: '52px' }}>
+                  {(sysHealth.components || []).filter(c => c.status === 'down').length} 组件失联
+                </Text>
+              )}
+            </span>
+          )}
           <Badge count={totalAlerts} size="small" offset={[-2, 2]}>
             <BellOutlined
               style={{ fontSize: 18, color: totalAlerts > 0 ? '#faad14' : 'rgba(255,255,255,0.7)', cursor: 'pointer' }}

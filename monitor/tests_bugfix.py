@@ -11,7 +11,7 @@ from datetime import timedelta
 from unittest import mock
 
 from django.contrib.auth.models import User
-from django.test import Client, TestCase, override_settings
+from django.test import Client, TestCase, override_settings, tag
 from django.utils import timezone
 
 from monitor import auth as auth_mod
@@ -35,7 +35,7 @@ def make_role(code, perms):
 
 
 def make_user(username, role_code, perms=(), allowed_dbs=None):
-    user = User.objects.create_user(username=username, password='Pw!23456')
+    user = User.objects.create_user(username=username, password='Pw!23456')  # noqa: secret 测试夹具
     profile = UserProfile.objects.create(user=user, role=make_role(role_code, perms))
     if allowed_dbs is not None:
         profile.allowed_databases = allowed_dbs
@@ -59,6 +59,7 @@ def login(client, user):
 # =============================================================================
 # BUG-101 时序库连接池：并发安全 + 坏连接不回池
 # =============================================================================
+@tag('unit')
 class Bug101TimeseriesPoolTests(TestCase):
     def _storage(self):
         from monitor.timeseries import TimeseriesStorage
@@ -141,6 +142,7 @@ class Bug101TimeseriesPoolTests(TestCase):
 # =============================================================================
 # BUG-128 批量写：execute_values + 非法数值过滤
 # =============================================================================
+@tag('unit')
 class Bug128BatchWriteTests(TestCase):
     def _storage_with_cursor(self):
         from monitor.timeseries import TimeseriesStorage
@@ -183,6 +185,7 @@ class Bug128BatchWriteTests(TestCase):
 # =============================================================================
 # BUG-129 drop_hypertable 覆盖 7A 之后新增的对象
 # =============================================================================
+@tag('unit')
 class Bug129DropHypertableTests(TestCase):
     def test_drops_all_objects_in_dependency_order(self):
         from monitor import timeseries as ts_mod
@@ -204,6 +207,7 @@ class Bug129DropHypertableTests(TestCase):
 # =============================================================================
 # BUG-112 Redis 客户端单例
 # =============================================================================
+@tag('unit')
 class Bug112RedisBusTests(TestCase):
     def tearDown(self):
         from monitor.redis_bus import reset_bus
@@ -237,12 +241,13 @@ class Bug112RedisBusTests(TestCase):
     TRUSTED_PROXY_IPS=[], LOGIN_MAX_ATTEMPTS=3,
     LOGIN_MAX_ATTEMPTS_PER_USER=100, LOGIN_LOCKOUT_SEC=900,
     CACHES={'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}})
+@tag('unit')
 class Bug106LoginThrottleTests(TestCase):
     def setUp(self):
         from django.core.cache import cache
         cache.clear()
         self.client = Client()
-        User.objects.create_user(username='victim', password='CorrectPw!1')
+        User.objects.create_user(username='victim', password='CorrectPw!1')  # noqa: secret 测试夹具
 
     def _try(self, xff=None):
         headers = {'HTTP_X_FORWARDED_FOR': xff} if xff else {}
@@ -325,6 +330,7 @@ class Bug106LoginThrottleTests(TestCase):
 # =============================================================================
 # BUG-103 性能中心权限 + 数据范围隔离
 # =============================================================================
+@tag('integration')
 class Bug103PerfAuthorizationTests(TestCase):
     def setUp(self):
         self.db1 = make_db('prod-db', port=3306)
@@ -409,6 +415,7 @@ class Bug103PerfAuthorizationTests(TestCase):
 # =============================================================================
 # BUG-111 阻塞树死锁环检测
 # =============================================================================
+@tag('unit')
 class Bug111DeadlockCycleTests(TestCase):
     def _rows(self, edges, extra=None):
         rows = []
@@ -472,6 +479,7 @@ class Bug111DeadlockCycleTests(TestCase):
 # =============================================================================
 # BUG-126 AAS 堆叠序列补零点
 # =============================================================================
+@tag('unit')
 class Bug126AasZeroFillTests(TestCase):
     def test_all_series_share_the_same_x_axis(self):
         """两个等待类落在不同时间桶 —— 缺零点会让 ECharts 堆叠错位。"""
@@ -497,6 +505,7 @@ class Bug126AasZeroFillTests(TestCase):
 # =============================================================================
 # BUG-120 时序库异常降级为 502 而非 500
 # =============================================================================
+@tag('unit')
 class Bug120TsdbGuardTests(TestCase):
     def test_query_failure_returns_structured_502(self):
         db = make_db()
@@ -516,6 +525,7 @@ class Bug120TsdbGuardTests(TestCase):
 # =============================================================================
 # BUG-131 期间对比参数校验
 # =============================================================================
+@tag('unit')
 class Bug131CompareValidationTests(TestCase):
     def setUp(self):
         self.db = make_db()
@@ -542,6 +552,7 @@ class Bug131CompareValidationTests(TestCase):
 # =============================================================================
 # BUG-102 工单 dry-run 绝不执行原始 SQL
 # =============================================================================
+@tag('unit')
 class Bug102DryRunTests(TestCase):
     def setUp(self):
         self.admin = make_user('adm', RoleCode.SUPER_ADMIN,
@@ -601,6 +612,7 @@ class Bug102DryRunTests(TestCase):
 # =============================================================================
 # BUG-105 工单职责分离 + 并发执行保护
 # =============================================================================
+@tag('integration')
 class Bug105AuditWorkflowTests(TestCase):
     def setUp(self):
         perms = list(auth_mod.PERMISSION_META.keys())
@@ -681,6 +693,7 @@ class Bug105AuditWorkflowTests(TestCase):
 # =============================================================================
 # BUG-104 执行链必须显式提交
 # =============================================================================
+@tag('unit')
 class Bug104CommitTests(TestCase):
     def setUp(self):
         self.cfg = make_db()
@@ -743,6 +756,7 @@ class Bug104CommitTests(TestCase):
 # =============================================================================
 # BUG-109/110 目标库连接：语句超时 + PG 不留 idle in transaction
 # =============================================================================
+@tag('unit')
 class Bug109110ConnectionTests(TestCase):
     def setUp(self):
         self.cfg = make_db('pg', db_type='pgsql', port=5432)
@@ -790,6 +804,7 @@ class Bug109110ConnectionTests(TestCase):
 # =============================================================================
 # BUG-114 Oracle 对象名缓存按实例隔离
 # =============================================================================
+@tag('unit')
 class Bug114OracleObjCacheTests(TestCase):
     def setUp(self):
         from monitor import sentinel
@@ -836,6 +851,7 @@ class Bug114OracleObjCacheTests(TestCase):
 # =============================================================================
 # BUG-123 锁等待时长与事务年龄分离
 # =============================================================================
+@tag('unit')
 class Bug123WaitSecsTests(TestCase):
     def test_mysql_wait_secs_is_lock_wait_not_trx_age(self):
         """跑了 2 小时的事务刚等锁 3 秒，不能显示"等待 7200 秒"。"""
@@ -887,6 +903,7 @@ class Bug123WaitSecsTests(TestCase):
 # =============================================================================
 # BUG-124 Oracle ASH 采集 sql_text
 # =============================================================================
+@tag('unit')
 class Bug124OracleSqlTextTests(TestCase):
     def test_sql_text_is_backfilled_from_v_sqlstats(self):
         """Oracle 分支此前硬编码 sql_text=None，导致 SQL 详情页与优化建议全空。"""
@@ -933,6 +950,7 @@ class Bug124OracleSqlTextTests(TestCase):
 # =============================================================================
 # BUG-115/134 告警聚合：窗口回收 + 线程安全 + 跨实例路由
 # =============================================================================
+@tag('unit')
 class Bug115AggregationTests(TestCase):
     def setUp(self):
         from monitor.alert_manager import reset_aggregation
@@ -1042,6 +1060,7 @@ class Bug115AggregationTests(TestCase):
 # =============================================================================
 # BUG-118 计划突变需比对 plan_hash
 # =============================================================================
+@tag('unit')
 class Bug118PlanChangedTests(TestCase):
     def setUp(self):
         self.cfg = make_db()
@@ -1093,6 +1112,7 @@ class Bug118PlanChangedTests(TestCase):
 # =============================================================================
 # BUG-119 SqlPlan is_current 并发唯一性
 # =============================================================================
+@tag('integration')
 class Bug119PlanCurrentTests(TestCase):
     def test_only_one_current_plan_after_capture(self):
         from monitor.models import SqlPlan
@@ -1128,6 +1148,7 @@ class Bug119PlanCurrentTests(TestCase):
 # =============================================================================
 # BUG-113/127 哨兵：崩溃自愈、配置变更重建、间隔常量统一
 # =============================================================================
+@tag('unit')
 class Bug113SentinelLifecycleTests(TestCase):
     def test_ash_interval_default_is_consistent(self):
         """__init__ 用 5、启动日志打印 15 —— 同一常量两个值。"""
@@ -1158,7 +1179,10 @@ class Bug113SentinelLifecycleTests(TestCase):
 
         def runner():
             try:
-                with mock.patch.object(sentinel, 'sentinel_interval_sec', return_value=0):
+                # W4 心跳上报是真线程副作用（独立连接提交），会污染后续
+                # TestCase 的事务回滚隔离 —— 本用例只关心循环存活，mock 掉
+                with mock.patch.object(sentinel, 'sentinel_interval_sec', return_value=0), \
+                     mock.patch('monitor.self_monitor.report'):
                     s.run_loop()
             except Exception as e:      # pragma: no cover
                 errors.append(e)
@@ -1230,6 +1254,7 @@ class Bug113SentinelLifecycleTests(TestCase):
 # =============================================================================
 # BUG-130 UserProfileDatabase 外键级联
 # =============================================================================
+@tag('integration')
 class Bug130AllowedDatabaseFkTests(TestCase):
     def test_deleting_instance_cascades_authorization(self):
         """修复前删库后授权残留；若新实例复用同一 ID 会造成静默越权。"""
@@ -1262,6 +1287,7 @@ class Bug130AllowedDatabaseFkTests(TestCase):
 # =============================================================================
 # BUG-135 数据库列表包含已停用实例
 # =============================================================================
+@tag('unit')
 class Bug135InactiveVisibilityTests(TestCase):
     def test_inactive_instance_still_listed(self):
         """停用后从列表消失 → 前端再也无法把它重新启用。"""
@@ -1290,6 +1316,7 @@ class Bug135InactiveVisibilityTests(TestCase):
 # =============================================================================
 # BUG-122 EXPLAIN 端点拒绝与 digest 不匹配的 SQL
 # =============================================================================
+@tag('unit')
 class Bug122ExplainFingerprintTests(TestCase):
     def setUp(self):
         self.cfg = make_db()
@@ -1323,6 +1350,7 @@ class Bug122ExplainFingerprintTests(TestCase):
 # =============================================================================
 # BUG-107 前端权限不再依赖可篡改的 role 短路（后端断言）
 # =============================================================================
+@tag('unit')
 class Bug107BackendIsAuthoritativeTests(TestCase):
     def test_super_admin_permissions_are_complete(self):
         """前端移除 super_admin 短路的前提：服务端为超管下发全量权限。"""
@@ -1345,14 +1373,15 @@ class Bug107BackendIsAuthoritativeTests(TestCase):
 # =============================================================================
 # BUG-132 API Key 有效期
 # =============================================================================
+@tag('unit')
 class Bug132ApiKeyTtlTests(TestCase):
     def test_key_ttl_is_not_the_cache_timeout(self):
         from monitor.auth import APIKeyAuth
-        self.assertGreater(APIKeyAuth.API_KEY_TTL_SEC, APIKeyAuth.CACHE_TIMEOUT)
+        self.assertGreater(APIKeyAuth._api_key_ttl_sec(), APIKeyAuth.CACHE_TIMEOUT)
 
     def test_generated_key_validates(self):
         from monitor.auth import APIKeyAuth
         with mock.patch('monitor.auth.cache') as c:
             APIKeyAuth.generate_api_key('sys', 1, ['metrics.view'])
             timeout = c.set.call_args[1]['timeout']
-        self.assertEqual(timeout, APIKeyAuth.API_KEY_TTL_SEC)
+        self.assertEqual(timeout, APIKeyAuth._api_key_ttl_sec())

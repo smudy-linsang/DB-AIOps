@@ -75,6 +75,9 @@ from monitor.api_views_phase8 import (
 )
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
+from monitor.api_views_system import (
+    SystemHealthView, SystemComponentsView, SystemDegradationsView,
+)
 
 FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
@@ -197,6 +200,11 @@ urlpatterns = [
     # ========== Phase 4: 业务系统 ==========
     path('api/v1/business-systems/', BusinessSystemListView.as_view()),
     path('api/v1/business-systems/<int:pk>/', BusinessSystemDetailView.as_view()),
+
+    # ========== W4: 系统自监控 ==========
+    path('api/v1/system/health', SystemHealthView.as_view()),
+    path('api/v1/system/components', SystemComponentsView.as_view()),
+    path('api/v1/system/degradations', SystemDegradationsView.as_view()),
 
     # ========== Phase 4: 数据库拓扑与影响分析 ==========
     path('api/v1/databases/<int:config_id>/topology/', DatabaseTopologyView.as_view()),

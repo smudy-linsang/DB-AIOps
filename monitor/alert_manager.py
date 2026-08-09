@@ -113,6 +113,9 @@ class AlertManager:
             )
         except Exception as es_err:
             logger.warning(f"[AlertManager] 写入 ES 告警失败: {es_err}")
+            # W6-L2: ES 告警索引缺失 → 告警中心 ES 分支查不到，留痕
+            from monitor import degrade
+            degrade.note('alert.es_write', exc=es_err)
 
         # 3. 检查静默窗口
         if self._is_silenced(alert_type):
@@ -134,8 +137,10 @@ class AlertManager:
                 'severity': severity,
                 'title': title,
             })
-        except Exception:
-            pass
+        except Exception as e:
+            # W6-L2: SSE 推送失败 → 前端实时性降级，留痕
+            from monitor import degrade
+            degrade.note('sse.publish', exc=e)
 
         return alert
 
@@ -194,8 +199,10 @@ class AlertManager:
                 'db_type': self.config.db_type,
                 'title': recovery_title or 'Resolved',
             })
-        except Exception:
-            pass
+        except Exception as e:
+            # W6-L2: SSE 推送失败 → 前端实时性降级，留痕
+            from monitor import degrade
+            degrade.note('sse.publish', exc=e)
 
     def acknowledge(self, alert_id, acknowledged_by, comment=None):
         """
@@ -348,11 +355,19 @@ class AlertManager:
             # 记录每个渠道的通知日志
             if alert:
                 status = 'success' if results.get(channel) else 'failed'
-                error_msg = None if results.get(channel) else f'渠道 {channel} 发送失败'
+                error_msg = None if results.get(channel) else f'渠道 {channel}  发送失败'
                 self._log_notification(
                     alert, channel, status, error_msg,
                     rule_id=rule.id if rule else None
                 )
+
+        # W4 自监控：至少一个渠道发送成功即上报通知器心跳
+        if any(results.values()):
+            try:
+                from monitor.self_monitor import report
+                report('notifier')
+            except Exception:
+                pass
 
         return results
 
@@ -587,8 +602,10 @@ class AlertManager:
                         try:
                             from monitor.elasticsearch_engine import sync_alert
                             sync_alert(alert)
-                        except Exception:
-                            pass
+                        except Exception as e:
+                            # W6-L2: 升级后 ES 同步失败，留痕
+                            from monitor import degrade
+                            degrade.note('alert.es_sync', exc=e)
                         self._send_notification(
                             alert,
                             f"[升级] {alert.title}",

@@ -22,16 +22,19 @@ logger = logging.getLogger("monitor.sentinel")
 # BUG-127: 默认值此前散落两处且不一致 (__init__ 用 5, 启动日志打印 15)。
 # 更要命的是 timeseries 的 session_ash_1m 连续聚合用 COALESCE(sample_gap_sec, 15)
 # 兜底 —— 若 sample_gap_sec 写入失败, AAS 会按 15s 计算, 比真实值高 3 倍。
+# W5: 默认值统一收敛到 monitor/appconf.py（单一事实源），调用时求值。
 DEFAULT_ASH_INTERVAL_SEC = 5
 DEFAULT_SENTINEL_INTERVAL_SEC = 8
 
 
 def ash_interval_sec() -> int:
-    return int(getattr(settings, 'ASH_INTERVAL_SEC', DEFAULT_ASH_INTERVAL_SEC))
+    from monitor import appconf
+    return appconf.get('ASH_INTERVAL_SEC')
 
 
 def sentinel_interval_sec() -> int:
-    return int(getattr(settings, 'SENTINEL_INTERVAL_SEC', DEFAULT_SENTINEL_INTERVAL_SEC))
+    from monitor import appconf
+    return appconf.get('SENTINEL_INTERVAL_SEC')
 
 
 # ---- 逐库 ASH 采样 SQL v2 (phase7/10 §4): 等待类/指纹/锁明细/长事务 ----
@@ -241,8 +244,10 @@ def _ash_oracle(cur, db_type='oracle', config_id=None):
                         f"WHERE object_id IN ({binds})", chunk)
             for oid, name in cur.fetchall():
                 _obj_cache_put(config_id, int(oid), name)
-        except Exception:
-            pass
+        except Exception as e:
+            # W6-L2: 可选字段补查失败不中断采样，但必须留痕
+            from monitor import degrade
+            degrade.note('ash.oracle_objname', exc=e)
     # BUG-124: Oracle 分支此前硬编码 sql_text=None，连锁导致 _raw_sql_text() 在
     # ASH/sql_stat 里都找不到 Oracle 原文 → SQL 详情页 sql_text_sample 为空 →
     # 索引优化建议整块失效。Oracle 是本项目最重要的纳管对象，SQL 监控 Tab
@@ -258,6 +263,9 @@ def _ash_oracle(cur, db_type='oracle', config_id=None):
             sql_texts = {sid: txt for sid, txt in cur.fetchall()}
         except Exception as e:
             logger.debug("[ASH] Oracle sql_text 补查失败: %s", e)
+            # W6-L2: 补查失败 → SQL 详情页原文缺失，属功能降级，留痕
+            from monitor import degrade
+            degrade.note('ash.oracle_sqltext', exc=e)
     # 锁类型/模式补查 (被阻塞行)
     lock_detail = {}
     blocked_sids = [int(r['sid_only']) for r in raw_rows if r.get('is_blocked')]
@@ -269,8 +277,10 @@ def _ash_oracle(cur, db_type='oracle', config_id=None):
                         f"WHERE sid IN ({binds}) AND request > 0", chunk)
             for sid, ltype, req in cur.fetchall():
                 lock_detail[int(sid)] = (ltype, f"req:{req}")
-        except Exception:
-            pass
+        except Exception as e:
+            # W6-L2: 锁明细补查失败不中断，留痕
+            from monitor import degrade
+            degrade.note('ash.oracle_lockdetail', exc=e)
     out = []
     for r in raw_rows:
         objno = int(r['wait_objno']) if r.get('wait_objno') else 0
@@ -346,6 +356,9 @@ def golden_metrics(cur, db_type: str) -> dict:
             m['conn_usage_pct'] = round(tc / mc * 100, 2) if mc else 0
     except Exception as e:
         logger.debug("golden_metrics(%s) 部分失败: %s", db_type, e)
+        # W6-L2: 黄金状态量部分缺失，仪表盘数据不完整，留痕
+        from monitor import degrade
+        degrade.note(f'sentinel.golden_metrics.{db_type}', exc=e)
     return m
 
 
@@ -394,7 +407,8 @@ class InstanceSentinel:
     def _recycle_if_stale(self):
         """BUG-110: 长连接定期重建，避免任何形式的资源累积（游标句柄、
         服务端会话内存、以及驱动侧未回收的事务状态）。"""
-        max_age = int(getattr(settings, 'SENTINEL_CONN_MAX_AGE_SEC', 1800))
+        from monitor import appconf
+        max_age = appconf.get('SENTINEL_CONN_MAX_AGE_SEC')
         if self.conn and max_age > 0 and (time.time() - self._conn_created_at) > max_age:
             logger.debug("[哨兵] %s 连接超龄(%ds), 重建", self.config.name, max_age)
             self._close_conn()
@@ -482,7 +496,8 @@ class InstanceSentinel:
             if self.first_fail_at is None:
                 self.first_fail_at = timezone.now()
             self._close_conn()
-            threshold = int(getattr(settings, 'SENTINEL_FAIL_THRESHOLD', 3))
+            from monitor import appconf
+            threshold = appconf.get('SENTINEL_FAIL_THRESHOLD')
             if self.consecutive_fail >= threshold and not self.down_reported:
                 if not self._recent_collect_success(90):
                     self._emit_down(recovered=False)
@@ -532,6 +547,9 @@ class InstanceSentinel:
                 cur.close()
         except Exception as e:
             logger.debug("ASH 采样失败 %s: %s", self.config.name, e)
+            # W6-L2: 单次采样失败本轮跳过，但性能数据出现断点，留痕
+            from monitor import degrade
+            degrade.note('ash.sample', reason=self.config.name, exc=e)
             return
         finally:
             self._end_txn()
@@ -547,6 +565,9 @@ class InstanceSentinel:
             get_timeseries_storage().write_session_samples(self.config.id, self.db_type, rows)
         except Exception as e:
             logger.debug("session_sample 写入失败: %s", e)
+            # W6-L2: 采样成功但时序写入失败 → 图表断点，留痕
+            from monitor import degrade
+            degrade.note('ash.write_samples', exc=e)
         # 即时阻塞检测 + 长事务检测 (7D-02)
         try:
             from monitor.detectors.l1_hard import (detect_blocked_from_ash,
@@ -558,6 +579,9 @@ class InstanceSentinel:
                 emit_event(e)
         except Exception as e:
             logger.debug("阻塞检测失败: %s", e)
+            # W6-L2: 阻塞/长事务检测失败 → 告警缺口，留痕
+            from monitor import degrade
+            degrade.note('ash.blocking_detect', exc=e)
 
     def run_loop(self):
         """采样主循环。
@@ -583,11 +607,17 @@ class InstanceSentinel:
             except Exception as e:
                 logger.exception("[哨兵] %s 主循环异常，本轮跳过: %s",
                                  self.config.name, e)
+                # W6-L2: 主循环异常留痕（BUG-113 的教训：静默停止不可接受）
+                from monitor import degrade
+                degrade.note('sentinel.loop', reason=self.config.name, exc=e)
             finally:
                 try:
                     dj_conn.close()
                 except Exception:
                     pass
+            # W4 自监控：上报哨兵心跳（失败不影响主循环）
+            from monitor.self_monitor import report as _hb_report
+            _hb_report('sentinel', {'config_id': self.config.id})
             # 步进 = 两周期的较小者 (ASH 5s < 探活 8s 时以 ASH 为准)
             self._stop.wait(max(1, min(probe_interval, self.ash_interval_eff)))
         self._close_conn()
@@ -662,6 +692,9 @@ class SentinelManager:
                 self._refresh()
             except Exception as e:
                 logger.error("哨兵刷新实例失败: %s", e)
+            # W4 自监控：管理器级心跳（含当前哨兵数）
+            from monitor.self_monitor import report as _hb_report
+            _hb_report('sentinel', {'instances': len(self.sentinels)})
             self._stop.wait(60)
 
     def stop(self):

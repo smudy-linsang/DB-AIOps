@@ -112,6 +112,7 @@ export const ROUTE_PERMISSION_MAP = {
   '/notification-settings': Perm.NOTIFICATION_VIEW,
   '/business-systems': Perm.BUSINESS_TOPOLOGY_VIEW,
   '/reports': Perm.REPORTS_VIEW,
+  '/system/health': Perm.DASHBOARD_VIEW,
   '/user-management': Perm.USERS_VIEW,
 };
 

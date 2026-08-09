@@ -567,4 +567,11 @@ export const perfAPI = {
   killSession: (id, sessionId, reason) => api.post(`/databases/${id}/perf/sessions/${sessionId}/kill/`, { reason }),
 }
 
+// W4: 系统自监控 (契约 PROJECT_IMPROVEMENT_DESIGN.md §4.1)
+export const systemAPI = {
+  health: () => api.get('/system/health'),
+  components: (params = {}) => api.get('/system/components', { params }),
+  degradations: () => api.get('/system/degradations'),
+}
+
 export default api

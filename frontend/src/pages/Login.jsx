@@ -60,7 +60,7 @@ const Login = () => {
           size="large"
           initialValues={{
             username: 'admin',
-            password: 'admin123'
+            password: 'admin123' // noqa: secret 开发环境默认填充值，非凭据
           }}
         >
           <Form.Item

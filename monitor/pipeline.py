@@ -107,8 +107,14 @@ class Pipeline:
             self.threads.append(t)
         logger.info("pipeline_worker 启动 (3 消费组)")
         try:
+            # W4 自监控：每 ~60s（12 × 5s）上报一次心跳
+            _tick = 0
             while not self.stop_event.is_set():
                 self.stop_event.wait(5)
+                _tick += 1
+                if _tick % 12 == 0:
+                    from monitor.self_monitor import report
+                    report('pipeline')
         except (KeyboardInterrupt, SystemExit):
             self.stop()
 

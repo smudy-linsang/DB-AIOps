@@ -12,7 +12,7 @@ import threading
 from unittest import mock
 
 from django.db import connection, connections
-from django.test import TransactionTestCase
+from django.test import TransactionTestCase, tag
 
 from monitor.crypto import encrypt_password
 from monitor.models import AuditLog, DatabaseConfig, SqlPlan
@@ -48,6 +48,7 @@ def run_threads(target, n, *args):
 # =============================================================================
 # BUG-101 时序库连接池并发
 # =============================================================================
+@tag('integration')
 class TimeseriesPoolConcurrencyTests(TransactionTestCase):
     def test_no_connection_shared_between_concurrent_borrowers(self):
         """并发借出的连接必须两两不同。
@@ -98,6 +99,7 @@ class TimeseriesPoolConcurrencyTests(TransactionTestCase):
 # =============================================================================
 # BUG-105 工单执行 TOCTOU
 # =============================================================================
+@tag('integration')
 class AuditExecuteConcurrencyTests(TransactionTestCase):
     def setUp(self):
         self.cfg = make_db('audit-db')
@@ -137,6 +139,7 @@ class AuditExecuteConcurrencyTests(TransactionTestCase):
 # =============================================================================
 # BUG-119 SqlPlan is_current 并发唯一性
 # =============================================================================
+@tag('integration')
 class PlanCaptureConcurrencyTests(TransactionTestCase):
     def test_at_most_one_current_plan(self):
         """10 线程并发采集不同 plan_hash，最终只能有一个 is_current=True。"""
@@ -165,6 +168,7 @@ class PlanCaptureConcurrencyTests(TransactionTestCase):
 # =============================================================================
 # BUG-115 告警聚合共享状态
 # =============================================================================
+@tag('integration')
 class AggregationConcurrencyTests(TransactionTestCase):
     def setUp(self):
         from monitor.alert_manager import reset_aggregation
@@ -232,6 +236,7 @@ class AggregationConcurrencyTests(TransactionTestCase):
 # =============================================================================
 # BUG-112 Redis 客户端单例
 # =============================================================================
+@tag('integration')
 class RedisBusConcurrencyTests(TransactionTestCase):
     def tearDown(self):
         from monitor.redis_bus import reset_bus
@@ -262,6 +267,7 @@ class RedisBusConcurrencyTests(TransactionTestCase):
 # =============================================================================
 # BUG-114 Oracle 对象名缓存并发
 # =============================================================================
+@tag('integration')
 class OracleObjCacheConcurrencyTests(TransactionTestCase):
     def setUp(self):
         from monitor import sentinel

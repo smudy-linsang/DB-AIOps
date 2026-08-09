@@ -747,21 +747,26 @@ def logout_user(token: str) -> bool:
 # 注意：这些阈值必须在**调用时**读取 settings，不能在模块导入时求值。
 # 模块级 getattr(settings, ...) 会把值固化在 import 那一刻，导致运行期
 # 无法调整、override_settings 也完全失效（配置项形同虚设）。
+# W5: 默认值与校验统一收敛到 monitor/appconf.py（单一事实源）。
 def _login_max_attempts() -> int:
-    return int(getattr(settings, 'LOGIN_MAX_ATTEMPTS', 5))
+    from monitor import appconf
+    return appconf.get('LOGIN_MAX_ATTEMPTS')
 
 
 def _login_fail_window_sec() -> int:
-    return int(getattr(settings, 'LOGIN_FAIL_WINDOW_SEC', 600))   # 计数窗口 10 分钟
+    from monitor import appconf
+    return appconf.get('LOGIN_FAIL_WINDOW_SEC')   # 计数窗口 10 分钟
 
 
 def _login_lockout_sec() -> int:
-    return int(getattr(settings, 'LOGIN_LOCKOUT_SEC', 900))       # 锁定 15 分钟
+    from monitor import appconf
+    return appconf.get('LOGIN_LOCKOUT_SEC')       # 锁定 15 分钟
 
 
 def _login_max_attempts_per_user() -> int:
     """账号维度上限（跨 IP）：防止攻击者换 IP 绕过 (用户名,IP) 维度的计数。"""
-    return int(getattr(settings, 'LOGIN_MAX_ATTEMPTS_PER_USER', 20))
+    from monitor import appconf
+    return appconf.get('LOGIN_MAX_ATTEMPTS_PER_USER')
 
 
 def _digest(raw: str) -> str:
@@ -832,7 +837,8 @@ def _client_ip(request: HttpRequest) -> str:
     if not parts:
         return remote
     # 从右往左跳过 depth 跳可信代理，取真实客户端
-    depth = max(1, int(getattr(settings, 'TRUSTED_PROXY_DEPTH', 1)))
+    from monitor import appconf
+    depth = max(1, appconf.get('TRUSTED_PROXY_DEPTH'))
     idx = len(parts) - depth
     return parts[idx] if 0 <= idx < len(parts) else parts[0]
 
@@ -913,7 +919,12 @@ class APIKeyAuth:
     # BUG-132: Key 有效期此前误用 CACHE_TIMEOUT，生成 5 分钟后即失效，
     # 作为"外部系统集成"凭证毫无意义。有效期独立可配。
     # 注意：当前仍仅存于缓存，Redis 重启后失效；持久化(ApiKey 模型)列入后续迭代。
-    API_KEY_TTL_SEC = getattr(settings, 'API_KEY_TTL_SEC', 90 * 86400)
+    # W5: 原类属性在类定义（import）时求值，配置项写了不生效（BUG-138 模式）；
+    # 改为调用时经 appconf 求值。
+    @classmethod
+    def _api_key_ttl_sec(cls) -> int:
+        from monitor import appconf
+        return appconf.get('API_KEY_TTL_SEC')
 
     @classmethod
     def generate_api_key(cls, name: str, user_id: int, permissions: List[str] = None) -> str:
@@ -930,7 +941,7 @@ class APIKeyAuth:
             'user_id': user_id,
             'permissions': permissions or [],
             'created_at': datetime.now().isoformat()
-        }, timeout=cls.API_KEY_TTL_SEC)
+        }, timeout=cls._api_key_ttl_sec())
 
         return api_key
     

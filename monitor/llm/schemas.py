@@ -141,6 +141,9 @@ def _validate(text: str, schema: dict, what: str) -> dict:
                 f"{what}: jsonschema 未安装，无法校验 LLM 输出结构。"
                 f"这是硬依赖，请检查部署环境 (pip install jsonschema)") from e
         logger.warning("[llm] jsonschema 未安装, 已按配置跳过结构校验")
+        # W6-L2: 即便按配置放行，跳过校验这一降级也必须留痕可见
+        from monitor import degrade
+        degrade.note('llm.schema_validation_skipped', reason='jsonschema missing')
         return obj
     try:
         jsonschema.validate(obj, schema)

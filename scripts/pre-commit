@@ -1,0 +1,21 @@
+#!/usr/bin/env bash
+# pre-commit: 秒级本地反馈。
+#
+# 定位说明（相对 Agent H 方案的调整）：
+# 本钩子**不是**质量门禁 —— 它是本地文件、不随仓库分发、可用 --no-verify 跳过、
+# 且对在云端容器里工作的 Agent 完全无效。真正的门禁是 GitHub Actions + 分支保护。
+# 这里只做秒级检查，帮开发者在本地提前发现低级错误。
+set -uo pipefail
+cd "$(git rev-parse --show-toplevel)" || exit 0
+for v in .venv venv; do [ -f "$v/bin/activate" ] && { . "$v/bin/activate"; break; }; done
+
+STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
+if [ -n "$STAGED_PY" ]; then
+  echo "[pre-commit] 语法检查 $(echo "$STAGED_PY" | wc -l | tr -d ' ') 个文件"
+  # shellcheck disable=SC2086
+  python -m compileall -q $STAGED_PY || { echo "[pre-commit] 语法错误"; exit 1; }
+  python manage.py check >/dev/null 2>&1 || { echo "[pre-commit] manage.py check 未通过"; exit 1; }
+fi
+python scripts/scan_secrets.py >/dev/null 2>&1 || {
+  echo "[pre-commit] 疑似密钥，运行 python scripts/scan_secrets.py 查看"; exit 1; }
+echo "[pre-commit] PASS"

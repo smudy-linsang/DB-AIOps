@@ -55,9 +55,10 @@ class TimeseriesStorage:
                         from psycopg2 import pool as pgpool
                         stmt_timeout = int(getattr(
                             settings, 'TIMESCALEDB_STATEMENT_TIMEOUT_MS', 15000))
+                        from monitor import appconf
                         self._pool = pgpool.ThreadedConnectionPool(
                             minconn=1,
-                            maxconn=int(getattr(settings, 'TIMESCALEDB_POOL_MAX', 16)),
+                            maxconn=appconf.get('TIMESCALEDB_POOL_MAX'),
                             host=getattr(settings, 'TIMESCALEDB_HOST', 'localhost'),
                             port=getattr(settings, 'TIMESCALEDB_PORT', 5432),
                             dbname=getattr(settings, 'TIMESCALEDB_NAME', 'timeseriesdb'),

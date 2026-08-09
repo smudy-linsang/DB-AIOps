@@ -6,6 +6,7 @@ import zhCN from 'antd/locale/zh_CN';
 import EMLayout from './components/EMLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
+import SystemHealth from './pages/SystemHealth';
 import DatabaseList from './pages/DatabaseList';
 import DatabaseDetail from './pages/DatabaseDetail';
 import DatabasePerformanceHub from './pages/DatabasePerformanceHub';
@@ -120,6 +121,7 @@ function LayoutRoutes() {
           <Route path="/notification-settings" element={<PermissionRoute path="/notification-settings"><NotificationSettings /></PermissionRoute>} />
           <Route path="/business-systems" element={<PermissionRoute path="/business-systems"><BusinessSystems /></PermissionRoute>} />
           <Route path="/reports" element={<PermissionRoute path="/reports"><ReportList /></PermissionRoute>} />
+          <Route path="/system/health" element={<PermissionRoute path="/system/health"><SystemHealth /></PermissionRoute>} />
           <Route path="/user-management" element={<PermissionRoute path="/user-management"><UserManagement /></PermissionRoute>} />
           <Route path="/403" element={<ForbiddenPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
