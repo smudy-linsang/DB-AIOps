@@ -30,8 +30,21 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
 
 Agent 消费结果请加 `--json`，读 `exit_code` 与首个 `status=="fail"` 的 `name`。
 
-**CI 才是强制门禁**：PR 必须通过 `.github/workflows/ci.yml` 的静态检查、单元测试、
-集成测试、前端构建四项。本地验证只是提前发现问题，不能替代 CI。
+**CI 是事后信号，不是合并门禁 —— 所以本地验证是你唯一的闸。**
+
+本仓库的工作流是**直推 master**，仓库没有 ruleset、没有必需状态检查
+（「允许直推」与「必需检查」在 GitHub 上互斥；且没有 PR 可拦，配了也是空转，
+理由见 `PROJECT_IMPROVEMENT_DESIGN.md` 附录 B.6.2）。这意味着：
+
+- **没有任何机制会在你推送前拦住你。** 推坏了就是 master 坏了。
+- `.github/workflows/ci.yml` 在 push 之后才跑（静态检查、单元、集成、
+  方言 MySQL/PG、方言 Oracle、安全扫描、前端，共 7 项）。它能告诉你推坏了，
+  但拦不住你推。
+- 因此**推之前请自己跑 `scripts/validate.sh`**；改到采集/方言相关代码时，
+  尽量连方言测试一起跑（见 `PROJECT_IMPROVEMENT_DESIGN.md` W3 的本地运行说明）。
+- **推完请回头看一眼 CI。** master 挂红就是真红 —— Oracle job 已摘掉
+  `continue-on-error`，且有"确认用例真的跑了"守住绿灯含义，不存在
+  "红了也没关系"的 job。看到红请立刻修或回滚，别留给下一个人。
 
 ## 改动数据库模型时
 1. 先出设计文档（参考 `BUGFIX_DESIGN.md` 的粒度）
