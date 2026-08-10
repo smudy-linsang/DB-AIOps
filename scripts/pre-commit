@@ -5,6 +5,10 @@
 # 本钩子**不是**质量门禁 —— 它是本地文件、不随仓库分发、可用 --no-verify 跳过、
 # 且对在云端容器里工作的 Agent 完全无效。真正的门禁是 GitHub Actions + 分支保护。
 # 这里只做秒级检查，帮开发者在本地提前发现低级错误。
+#
+# 2026-08-10：接入 scripts/validate.sh unit —— 将验证从声明状态（AGENTS.md /
+# .qoder/rules/validation.md 文档）接入实际执行路径。每次提交 Python 文件时
+# 自动跑单元测试（~10s，零外部依赖，SQLite 内存库）。
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 0
 for v in .venv venv; do [ -f "$v/bin/activate" ] && { . "$v/bin/activate"; break; }; done
@@ -15,6 +19,10 @@ if [ -n "$STAGED_PY" ]; then
   # shellcheck disable=SC2086
   python -m compileall -q $STAGED_PY || { echo "[pre-commit] 语法错误"; exit 1; }
   python manage.py check >/dev/null 2>&1 || { echo "[pre-commit] manage.py check 未通过"; exit 1; }
+  # 接入验证脚本：unit 层测试（~10s，零外部依赖）
+  scripts/validate.sh unit --json >/dev/null 2>&1 || {
+    echo "[pre-commit] 单元测试未通过，运行 scripts/validate.sh unit 查看详情"; exit 1; }
+  echo "[pre-commit] 单元测试 PASS"
 fi
 python scripts/scan_secrets.py >/dev/null 2>&1 || {
   echo "[pre-commit] 疑似密钥，运行 python scripts/scan_secrets.py 查看"; exit 1; }

@@ -30,6 +30,10 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
 
 Agent 消费结果请加 `--json`，读 `exit_code` 与首个 `status=="fail"` 的 `name`。
 
+> `scripts/validate.sh unit` 已接入 pre-commit 钩子（`scripts/pre-commit`），
+> 提交 Python 文件时自动执行单元测试。`backend` / `frontend` / `all` 仍需手动运行。
+> 安装或更新钩子：`bash scripts/install-hooks.sh`
+
 **CI 是事后信号，不是合并门禁 —— 所以本地验证是你唯一的闸。**
 
 本仓库的工作流是**直推 master**，仓库没有 ruleset、没有必需状态检查
