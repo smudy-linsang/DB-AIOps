@@ -140,7 +140,8 @@ query
 scripts/.dev-pids.json
 
 # Qoder IDE
-.qoder/
+.qoder/*
+!.qoder/rules/
 
 # MemPalace
 mempalace.yaml

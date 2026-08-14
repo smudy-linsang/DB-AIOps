@@ -20,19 +20,25 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
     python manage.py migrate && python manage.py runserver 0.0.0.0:8000
     cd frontend && npm run dev
 
-## 编辑后验证（强制）
-| 改动范围 | 命令 | 耗时 |
-|---------|------|------|
-| 编辑循环中随时 | `scripts/validate.sh unit` | ~10s，无需 Docker |
+## 代码编辑后验证（强制）
+
+**每次完成代码编辑（Write、SearchReplace 等文件修改操作）后，立即运行：**
+
+    cd db-aiops && scripts/validate.sh unit --json
+
+退出码 0 → 可继续下一步；非 0 → 先修复失败项并重新验证，禁止提交。
+
+| 场景 | 命令 | 耗时 |
+|------|------|------|
+| 每次代码编辑后（强制） | `scripts/validate.sh unit --json` | ~10s，零外部依赖 |
 | 提交前（后端） | `scripts/validate.sh backend` | ~1min，需 PostgreSQL |
 | 提交前（前端） | `scripts/validate.sh frontend` | ~30s |
 | 两侧都改 | `scripts/validate.sh all` | ~2min |
 
-Agent 消费结果请加 `--json`，读 `exit_code` 与首个 `status=="fail"` 的 `name`。
+读取 JSON 输出的 `exit_code` 与首个 `status=="fail"` 的 `name` 定位失败项。
 
-> `scripts/validate.sh unit` 已接入 pre-commit 钩子（`scripts/pre-commit`），
-> 提交 Python 文件时自动执行单元测试。`backend` / `frontend` / `all` 仍需手动运行。
-> 安装或更新钩子：`bash scripts/install-hooks.sh`
+> pre-commit 钩子（`scripts/pre-commit`）已接入 `validate.sh unit`，仅作辅助安全网。
+> 主要依赖编辑后验证，不替代它。安装或更新钩子：`bash scripts/install-hooks.sh`
 
 **CI 是事后信号，不是合并门禁 —— 所以本地验证是你唯一的闸。**
 
