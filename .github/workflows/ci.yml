@@ -300,9 +300,9 @@ jobs:
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-      - name: 组件测试（存在时）
+      - name: 前端单元测试
         working-directory: frontend
-        run: npm test --if-present -- --run
+        run: npm run test:run
 
   # ── 安全 ───────────────────────────────────────────────
   security:
