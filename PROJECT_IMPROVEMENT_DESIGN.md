@@ -539,7 +539,7 @@ if __name__ == '__main__':
 # 退出码: 0=全部通过; 1=任一检查失败; 2=用法/环境错误
 #
 # 与 CI 的关系：本脚本与 .github/workflows/ci.yml 检查同一批内容，
-# 本地先跑一遍可以避免把必然失败的 PR 推上去。CI 才是强制门禁。
+# 本地先跑一遍可以避免把必然失败的提交推上去。CI 是事后信号，不是合并门禁——本地验证是唯一的闸。
 #
 # 注：用 bash 而非 zsh —— CI runner 与多数 Linux 开发机默认无 zsh。
 set -uo pipefail
@@ -664,8 +664,9 @@ Agent 只需读 `exit_code` 与首个 `status == "fail"` 的 `name`，无需解�
 # pre-commit: 秒级本地反馈。
 #
 # 定位说明（相对 Agent H 方案的调整）：
-# 本钩子**不是**质量门禁 —— 它是本地文件、不随仓库分发、可用 --no-verify 跳过、
-# 且对在云端容器里工作的 Agent 完全无效。真正的门禁是 GitHub Actions + 分支保护。
+# 本钩子只是辅助安全网 —— 它是本地文件、不随仓库分发、可用 --no-verify 跳过、
+# 且对在云端容器里工作的 Agent 完全无效。CI 是事后信号，不是合并门禁
+# （本仓库直推 master，无 ruleset、无分支保护），本地验证是唯一的闸。
 # 这里只做秒级检查，帮开发者在本地提前发现低级错误。
 set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 0
@@ -1359,8 +1360,9 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
 
 Agent 消费结果请加 `--json`，读 `exit_code` 与首个 `status=="fail"` 的 `name`。
 
-**CI 才是强制门禁**：PR 必须通过 `.github/workflows/ci.yml` 的静态检查、单元测试、
-集成测试、前端构建四项。本地验证只是提前发现问题，不能替代 CI。
+**CI 是事后信号，不是合并门禁——本地验证是唯一的闸**：本仓库直推 master，无 ruleset、
+无必需状态检查，`.github/workflows/ci.yml` 在 push 之后才跑（共 7 项），能告诉你推坏了但拦不住你推。
+推前请自己跑 `scripts/validate.sh`，推后回头看一眼 CI，见红立刻修或回滚。
 
 ## 改动数据库模型时
 1. 先出设计文档（参考 `BUGFIX_DESIGN.md` 的粒度）
@@ -1631,7 +1633,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | 检查 | staged `.py` 的 `compileall` + `manage.py check` + 全仓密钥扫描 |
 | 退出码 | `0` 放行；`1` 拦截 |
 | 跳过 | `git commit --no-verify` |
-| 定位 | **本地快速反馈，非门禁**。门禁在 CI + 分支保护 |
+| 定位 | **辅助安全网，非门禁**。CI 是事后信号，不是合并门禁；本地验证是唯一的闸（见 §2.1.2） |
 
 ---
 
@@ -1726,7 +1728,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | §2.1 AGENTS.md | **采纳并扩充**（W7.1） | 修正测试用例数（55→150）；补"已知陷阱"章节；补 unit/backend 分层命令 |
 | §2.2 validate.sh | **重写**（W2.1） | 改 bash；测试改自动发现；加迁移漂移与依赖检查；加 unit 模式与 `--json` |
 | §2.3 Qoder Rule | **采纳** | 内容微调以对齐新的分层命令 |
-| §2.4 pre-commit | **采纳但降级定位**（W2.3） | 从"门禁"降为"本地快速反馈"，门禁移至 CI；补密钥扫描 |
+| §2.4 pre-commit | **采纳但降级定位**（W2.3） | 从"门禁"降为"本地快速反馈"，门禁移至 CI（后续演进：CI 降为事后信号，见 §2.1.2）；补密钥扫描 |
 | §2.5 Memory 治理 | **完全采纳** | 无异议 |
 | §3.1 无 DB 变更 | **部分采纳** | 工具链部分确实无变更；但 W4 自监控需要 1 张表 |
 | §3.2 validation_record 表 | **不采纳** | 反对把工具链遥测写进业务库（S.3）；改用 JSONL + CI artifact |
