@@ -9,7 +9,7 @@
 # 退出码: 0=全部通过; 1=任一检查失败; 2=用法/环境错误
 #
 # 与 CI 的关系：本脚本与 .github/workflows/ci.yml 检查同一批内容，
-# 本地先跑一遍可以避免把必然失败的 PR 推上去。CI 才是强制门禁。
+# 本地先跑一遍可以避免把必然失败的提交推上去。CI 是事后信号，不是合并门禁——本地验证是唯一的闸。
 #
 # 注：用 bash 而非 zsh —— CI runner 与多数 Linux 开发机默认无 zsh。
 set -uo pipefail
@@ -77,8 +77,10 @@ run_backend() {
   # 新增（H 方案缺失）：模型改了没生成 migration 是最高频的"本地能跑、部署即炸"
   _run "迁移漂移检查" python manage.py makemigrations --check --dry-run || return 1
   _run "依赖完整性"  python scripts/check_deps.py               || return 1
-  # 改动（H 方案硬编码了测试模块清单，已漏掉 tests_phase7 等）：
-  # 改为自动发现，新增测试文件无需改脚本
+  # Django 自动发现 monitor 下所有 TestCase/SimpleTestCase 模块
+  # （tests.py, tests_self_monitor.py, tests_phase8.py 等）。
+  # tests_phase7.py 是纯函数脚本（非 TestCase），不在自动发现范围内，
+  # 由 verify_phase7.py 手动运行。新增 Django 测试文件无需改脚本。
   _run "全量测试"    python manage.py test monitor -v 1         || return 1
   return 0
 }
