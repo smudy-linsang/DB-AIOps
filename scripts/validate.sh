@@ -66,6 +66,7 @@ _run() {   # _run <阶段名> <命令...>
 run_unit() {
   # 关键改动（对比 H 方案）：unit 层用独立 settings，走 SQLite 内存库，
   # 不需要 Docker、不需要 PostgreSQL。降低验证门槛才能真正提高验证率。
+  _run "红线扫描"  python scripts/lint_redlines.py || return 1
   DJANGO_SETTINGS_MODULE=dbmonitor.settings_test_unit \
     _run "unit 测试" python manage.py test monitor --tag unit -v 1
 }
