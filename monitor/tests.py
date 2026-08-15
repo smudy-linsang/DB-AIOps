@@ -2,7 +2,7 @@ import json
 from contextlib import ExitStack
 from unittest import mock
 
-from django.test import TestCase
+from django.test import TestCase, tag
 
 from monitor.alert_manager import AlertManager, reset_aggregation
 from monitor.crypto import decrypt_password, encrypt_password, is_encrypted
@@ -33,6 +33,7 @@ def _total_channel_calls(mocks) -> int:
     return sum(m.call_count for m in mocks)
 
 
+@tag('unit')
 class CryptoTests(TestCase):
     def test_encrypt_decrypt_roundtrip(self):
         plaintext = "secret-pass-123"
@@ -51,6 +52,7 @@ class CryptoTests(TestCase):
         self.assertEqual(decrypt_password("plain_old_value"), "plain_old_value")
 
 
+@tag('unit')
 class PgCapacityTests(TestCase):
     def test_used_pct_proxy(self):
         self.assertEqual(postgresql_db_used_pct(300, 1000), 30.0)
@@ -59,6 +61,7 @@ class PgCapacityTests(TestCase):
         self.assertIsNone(postgresql_db_used_pct(100, 0))
 
 
+@tag('unit')
 class AlertManagerTests(TestCase):
     def setUp(self):
         reset_aggregation()
@@ -101,6 +104,7 @@ class AlertManagerTests(TestCase):
         self.assertEqual(_total_channel_calls(mocks), 6)
 
 
+@tag('unit')
 class ProcessResultTests(TestCase):
     def setUp(self):
         reset_aggregation()
@@ -153,6 +157,7 @@ class ProcessResultTests(TestCase):
         self.assertEqual(stored["conn_usage_pct"], 1)
 
 
+@tag('unit')
 class AlertConsistencyTests(TestCase):
     """告警模块 PG/ES 一致性与通知健壮性测试"""
 
@@ -203,6 +208,7 @@ class AlertConsistencyTests(TestCase):
         self.assertTrue(result["email"])
 
 
+@tag('unit')
 class AlertOpsTests(TestCase):
     """告警自动升级与聚合功能测试（接通的功能缺口）"""
 
