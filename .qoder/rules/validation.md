@@ -29,6 +29,20 @@ trigger: always_on
 | 提交前（前端改动） | `scripts/validate.sh frontend` | ~30s |
 | 两侧都改 | `scripts/validate.sh all` | ~2min |
 
+## 编辑时刻 Qoder Hook（确定性强制层）
+
+`scripts/validate.sh unit --json` 已接入 Qoder 编辑时刻触发面：工作区根
+`.qoder/settings.json` 注册 `PostToolUse` 钩子（matcher `Write|Edit|SearchReplace`），
+脚本为工作区根 `.qoder/hooks/post-edit-validate.sh`。db-aiops 内文件被编辑后钩子自动运行 unit 验证：
+
+- validate.sh 退出码 0 → 钩子放行（exit 0）
+- validate.sh 退出码 1 → 钩子以 exit 2 阻断，stderr 注入会话并给出首个失败阶段名与修复指引
+- validate.sh 退出码 2 → 上报环境/用法错误，不阻断
+- 每次运行留痕于 `db-aiops/logs/qoder-edit-validate.log`（已被 .gitignore 忽略）
+
+钩子不改变 validate.sh 的分层结构与退出码语义，只做触发面接入；
+钩子配置在 Qoder 启动加载后生效（通常需新会话）。pre-commit 仍是提交时刻辅助安全网。
+
 ## pre-commit 钩子（辅助安全网）
 
 `scripts/validate.sh unit` 已接入 pre-commit 钩子（`scripts/pre-commit`），提交 Python 文件时自动执行。
