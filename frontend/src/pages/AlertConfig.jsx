@@ -10,7 +10,7 @@ import {
   CopyOutlined, ThunderboltOutlined, AppstoreOutlined,
   UnorderedListOutlined, SwapOutlined
 } from '@ant-design/icons'
-import { alertRuleAPI, alertTemplateAPI, databaseAPI } from '../services/api'
+import { alertRuleAPI, alertTemplateAPI, collectTemplateAPI, databaseAPI } from '../services/api'
 import { PermissionGuard } from '../components/AuthGuard'
 import { Perm } from '../utils/permission'
 import { Spin } from 'antd'
