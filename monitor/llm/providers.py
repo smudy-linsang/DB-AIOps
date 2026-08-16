@@ -82,7 +82,12 @@ class OpenAICompatProvider:
     # ------------------------------------------------------------------
     def _post(self, path: str, payload: dict, timeout: int = None) -> dict:
         import requests
-        url = f"{self.base_url}{path}"
+        base = self.base_url
+        if base.endswith('/v1') and path.startswith('/v1/'):
+            base = base[:-3]
+        elif not base.endswith('/v1') and not self._is_gemini_native() and ('api.deepseek.com' in base or 'api.openai.com' in base or 'api.minimax.chat' in base):
+            base = f"{base}/v1"
+        url = f"{base}{path}"
         headers = {'Content-Type': 'application/json'}
         if self.api_key:
             headers['Authorization'] = f"Bearer {self.api_key}"
@@ -158,14 +163,23 @@ class OpenAICompatProvider:
             if gen_config:
                 gemini_payload['generationConfig'] = gen_config
 
-            # Gemini URL 格式: /models/{model}:generateContent
+            # 智能规范化 Gemini Base URL: 移除末尾多余的 /interactions, 确保指向 /v1beta
+            clean_base = self.base_url.rstrip('/')
+            if clean_base.endswith('/interactions'):
+                clean_base = clean_base[:-len('/interactions')]
+            if not ('/v1' in clean_base or '/v1beta' in clean_base or '/v1alpha' in clean_base):
+                clean_base = f"{clean_base}/v1beta"
+
             path = f"/models/{self.model}:generateContent"
             import requests
-            url = f"{self.base_url}{path}"
+            url = f"{clean_base}{path}"
             headers = {'Content-Type': 'application/json'}
             if self.api_key:
                 headers['x-goog-api-key'] = self.api_key
                 headers['Authorization'] = f"Bearer {self.api_key}"
+                # 兼容 Google 部分代理：同时在 URL query 挂载 key
+                if '?' not in url:
+                    url = f"{url}?key={self.api_key}"
 
             proxies = None
             if self.proxy_url:

@@ -205,11 +205,13 @@ export default function LLMConfigSettings() {
       if (data.ok) {
         message.success(`【${record.name}】连通正常！耗时: ${data.latency_ms}ms 回复: ${data.reply}`);
       } else {
-        message.error(`【${record.name}】连通异常: ${data.error || '未知错误'}`);
+        message.error(`【${record.name}】连通异常: ${data.error || data.message || '未知错误'}`);
       }
       loadData();
     } catch (e) {
-      message.error('探活异常: ' + e.message);
+      const errMsg = e.response?.data?.message || e.response?.data?.error || e.message || '网络连接超时';
+      message.error(`【${record.name}】探活异常: ${errMsg}`);
+      loadData();
     } finally {
       setPingingId(null);
     }

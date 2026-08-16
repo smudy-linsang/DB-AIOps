@@ -805,6 +805,10 @@ class LlmCredentialPingView(_BaseView):
             cred.consecutive_fails += 1
             cred.last_error_message = str(e)[:250]
             cred.save(update_fields=['consecutive_fails', 'last_error_message'])
+            return self.err('BAD_REQUEST', f"连通异常: {result['error']}", 400)
+
+        if not result['ok']:
+            return self.err('BAD_REQUEST', f"连通异常: {result.get('error') or '模型未返回有效文本'}", 400)
 
         return self.ok(**result)
 
