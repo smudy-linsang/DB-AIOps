@@ -1157,13 +1157,404 @@ function AssignmentTab() {
         rowClassName={r => r.override ? 'row-overridden' : ''}
       />
 
-      <OverrideModal
-        open={modalOpen}
-        initial={editingRow}
-        onOk={handleSave}
-        onCancel={() => setModalOpen(false)}
+// ─────────────────────────────────────────────
+// 采集与连接配置模板 编辑/新建弹窗
+// ─────────────────────────────────────────────
+function CollectTemplateModal({ open, initial, onOk, onCancel, alertTemplates = [] }) {
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    if (open) {
+      if (initial) {
+        form.setFieldsValue({
+          name: initial.name,
+          db_type: initial.db_type,
+          default_port: initial.default_port,
+          collect_interval_sec: initial.collect_interval_sec,
+          default_service_name: initial.default_service_name,
+          is_default: initial.is_default,
+          description: initial.description,
+          associated_alert_template_id: initial.associated_alert_template_id || undefined,
+        })
+      } else {
+        form.setFieldsValue({
+          db_type: 'oracle',
+          default_port: 1521,
+          collect_interval_sec: 60,
+          default_service_name: '',
+          is_default: false,
+          description: '',
+        })
+      }
+    }
+  }, [open, initial, form])
+
+  const handleDbTypeChange = (val) => {
+    const portMap = { oracle: 1521, mysql: 3306, pgsql: 5432, dm: 5236, tdsql: 15002, gbase: 5258, mongo: 27017, redis: 6379 }
+    form.setFieldsValue({ default_port: portMap[val] || 3306 })
+  }
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields()
+      onOk(values)
+    } catch (_) {}
+  }
+
+  return (
+    <Modal
+      title={initial?.id ? `编辑采集模板：${initial.name}` : '新建采集与连接配置模板'}
+      open={open}
+      onOk={handleOk}
+      onCancel={onCancel}
+      width={560}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="模板名称" rules={[{ required: true, message: '请输入模板名称' }]}>
+          <Input placeholder="如：Oracle 核心交易高频模板、MySQL 秒杀大促模板" />
+        </Form.Item>
+
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item name="db_type" label="数据库类型" rules={[{ required: true }]}>
+              <Select onChange={handleDbTypeChange} disabled={!!initial?.id}>
+                {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
+              </Select>
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="default_port" label="推荐默认端口" rules={[{ required: true }]}>
+              <InputNumber style={{ width: '100%' }} min={1} max={65535} />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Row gutter={16}>
+          <Col span={12}>
+            <Form.Item
+              name="collect_interval_sec"
+              label="推荐采集周期(秒)"
+              rules={[{ required: true, message: '请输入采集周期' }]}
+              extra="支持 5s - 3600s（高频推荐 10s-15s）"
+            >
+              <InputNumber style={{ width: '100%' }} min={5} max={3600} placeholder="60" />
+            </Form.Item>
+          </Col>
+          <Col span={12}>
+            <Form.Item name="default_service_name" label="预设服务名/SID" extra="Oracle 服务名或 PG 库名">
+              <Input placeholder="可选，如 orcl / postgres" />
+            </Form.Item>
+          </Col>
+        </Row>
+
+        <Form.Item
+          noStyle
+          shouldUpdate={(prev, cur) => prev.db_type !== cur.db_type}
+        >
+          {({ getFieldValue }) => {
+            const currentType = getFieldValue('db_type')
+            const matchedAlertTpls = alertTemplates.filter(at => at.db_type === currentType)
+            return (
+              <Form.Item name="associated_alert_template_id" label="推荐绑定告警模板组 (可选)">
+                <Select placeholder="选择联动绑定的告警模板组" allowClear>
+                  {matchedAlertTpls.map(at => (
+                    <Option key={at.id} value={at.id}>
+                      {at.name} {at.is_default ? '(默认)' : ''}
+                    </Option>
+                  ))}
+                </Select>
+              </Form.Item>
+            )
+          }}
+        </Form.Item>
+
+        <Form.Item name="description" label="模板用途说明">
+          <Input.TextArea rows={2} placeholder="如：针对核心账务库的高频锁树探查与表空间预警" />
+        </Form.Item>
+
+        <Form.Item name="is_default" label="设为该类型默认模板" valuePropName="checked">
+          <Switch />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─────────────────────────────────────────────
+// 采集模板 克隆弹窗
+// ─────────────────────────────────────────────
+function CloneCollectModal({ open, source, onOk, onCancel }) {
+  const [form] = Form.useForm()
+
+  useEffect(() => {
+    if (open && source) {
+      form.setFieldsValue({
+        name: `${source.name}（副本）`,
+        description: source.description || '',
+      })
+    }
+  }, [open, source, form])
+
+  const handleOk = async () => {
+    try {
+      const values = await form.validateFields()
+      onOk(values)
+    } catch (_) {}
+  }
+
+  return (
+    <Modal
+      title={`克隆采集模板：${source?.name || ''}`}
+      open={open}
+      onOk={handleOk}
+      onCancel={onCancel}
+      width={480}
+      destroyOnClose
+    >
+      <Form form={form} layout="vertical">
+        <Form.Item name="name" label="新模板名称" rules={[{ required: true }]}>
+          <Input />
+        </Form.Item>
+        <Form.Item name="description" label="描述">
+          <Input.TextArea rows={2} />
+        </Form.Item>
+      </Form>
+    </Modal>
+  )
+}
+
+// ─────────────────────────────────────────────
+// 采集与连接配置模板 标签页组件
+// ─────────────────────────────────────────────
+function CollectTemplateTab() {
+  const [templates, setTemplates] = useState([])
+  const [alertTemplates, setAlertTemplates] = useState([])
+  const [loading, setLoading] = useState(false)
+  const [filterType, setFilterType] = useState('all')
+
+  const [editModalOpen, setEditModalOpen] = useState(false)
+  const [editingTemplate, setEditingTemplate] = useState(null)
+  const [cloneModalOpen, setCloneModalOpen] = useState(false)
+  const [cloningTemplate, setCloningTemplate] = useState(null)
+
+  const loadData = useCallback(async () => {
+    setLoading(true)
+    try {
+      const [resCollect, resAlert] = await Promise.all([
+        collectTemplateAPI.list(filterType !== 'all' ? { db_type: filterType } : {}),
+        alertTemplateAPI.list(),
+      ])
+      setTemplates(resCollect.templates || [])
+      setAlertTemplates(resAlert.templates || [])
+    } catch (e) {
+      message.error('加载采集模板失败: ' + (e.message || '网络异常'))
+    } finally {
+      setLoading(false)
+    }
+  }, [filterType])
+
+  useEffect(() => {
+    loadData()
+  }, [loadData])
+
+  const handleSave = async (values) => {
+    try {
+      if (editingTemplate?.id) {
+        await collectTemplateAPI.update(editingTemplate.id, values)
+        message.success('采集模板更新成功')
+      } else {
+        await collectTemplateAPI.create(values)
+        message.success('采集模板创建成功')
+      }
+      setEditModalOpen(false)
+      loadData()
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '操作失败')
+    }
+  }
+
+  const handleClone = async (values) => {
+    if (!cloningTemplate) return
+    try {
+      await collectTemplateAPI.clone(cloningTemplate.id, values)
+      message.success('模板克隆成功')
+      setCloneModalOpen(false)
+      loadData()
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '克隆失败')
+    }
+  }
+
+  const handleDelete = async (id) => {
+    try {
+      await collectTemplateAPI.delete(id)
+      message.success('模板已删除')
+      loadData()
+    } catch (e) {
+      message.error(e.response?.data?.error || e.message || '删除失败')
+    }
+  }
+
+  const columns = [
+    {
+      title: '模板名称',
+      dataIndex: 'name',
+      key: 'name',
+      width: 260,
+      render: (name, r) => (
+        <Space direction="vertical" size={2}>
+          <Space>
+            <Text strong>{name}</Text>
+            {r.is_builtin && <Tag color="blue">内置</Tag>}
+            {r.is_default && <Tag color="green">默认</Tag>}
+          </Space>
+          <Text type="secondary" style={{ fontSize: 12 }}>
+            编码: {r.code}
+          </Text>
+        </Space>
+      ),
+    },
+    {
+      title: '数据库类型',
+      dataIndex: 'db_type',
+      key: 'db_type',
+      width: 120,
+      render: (t) => <Tag color="geekblue">{DB_TYPE_LABELS[t] || t}</Tag>,
+    },
+    {
+      title: '采集周期',
+      dataIndex: 'collect_interval_sec',
+      key: 'collect_interval_sec',
+      width: 110,
+      render: (sec) => (
+        <Tag color={sec <= 15 ? 'purple' : 'cyan'} style={{ fontWeight: 600 }}>
+          ⏱️ {sec} 秒
+        </Tag>
+      ),
+    },
+    {
+      title: '默认端口 / 服务名',
+      key: 'port_srv',
+      width: 160,
+      render: (_, r) => (
+        <Text style={{ fontSize: 13 }}>
+          :{r.default_port} {r.default_service_name ? `(${r.default_service_name})` : ''}
+        </Text>
+      ),
+    },
+    {
+      title: '推荐关联告警组',
+      dataIndex: 'associated_alert_template_name',
+      key: 'associated_alert_template_name',
+      width: 160,
+      render: (name) => name ? <Tag color="orange">🔔 {name}</Tag> : <Text type="secondary">—</Text>,
+    },
+    {
+      title: '描述',
+      dataIndex: 'description',
+      key: 'description',
+      ellipsis: true,
+      render: (d) => d || <Text type="secondary">—</Text>,
+    },
+    {
+      title: '操作',
+      key: 'ops',
+      width: 180,
+      render: (_, r) => (
+        <Space size={8}>
+          <Button
+            type="link"
+            size="small"
+            icon={<EditOutlined />}
+            onClick={() => {
+              setEditingTemplate(r)
+              setEditModalOpen(true)
+            }}
+          >
+            编辑
+          </Button>
+          <Button
+            type="link"
+            size="small"
+            icon={<CopyOutlined />}
+            onClick={() => {
+              setCloningTemplate(r)
+              setCloneModalOpen(true)
+            }}
+          >
+            克隆
+          </Button>
+          {!r.is_builtin && (
+            <Popconfirm
+              title={`确定要删除模板 "${r.name}" 吗？`}
+              onConfirm={() => handleDelete(r.id)}
+              okText="删除"
+              cancelText="取消"
+              okButtonProps={{ danger: true }}
+            >
+              <Button type="link" size="small" danger icon={<DeleteOutlined />}>
+                删除
+              </Button>
+            </Popconfirm>
+          )}
+        </Space>
+      ),
+    },
+  ]
+
+  return (
+    <div>
+      <Row justify="space-between" align="middle" style={{ marginBottom: 16 }}>
+        <Col>
+          <Space>
+            <Text strong>数据库类型：</Text>
+            <Select value={filterType} onChange={setFilterType} style={{ width: 140 }}>
+              <Option value="all">全部类型</Option>
+              {DB_TYPES.map(t => <Option key={t} value={t}>{DB_TYPE_LABELS[t]}</Option>)}
+            </Select>
+            <Button icon={<ReloadOutlined />} onClick={loadData}>刷新</Button>
+          </Space>
+        </Col>
+        <Col>
+          <Button
+            type="primary"
+            icon={<PlusOutlined />}
+            onClick={() => {
+              setEditingTemplate(null)
+              setEditModalOpen(true)
+            }}
+          >
+            新建采集与连接模板
+          </Button>
+        </Col>
+      </Row>
+
+      <Table
+        rowKey="id"
+        size="middle"
+        loading={loading}
+        dataSource={templates}
+        columns={columns}
+        pagination={false}
+        bordered
       />
-    </>
+
+      <CollectTemplateModal
+        open={editModalOpen}
+        initial={editingTemplate}
+        onOk={handleSave}
+        onCancel={() => setEditModalOpen(false)}
+        alertTemplates={alertTemplates}
+      />
+
+      <CloneCollectModal
+        open={cloneModalOpen}
+        source={cloningTemplate}
+        onOk={handleClone}
+        onCancel={() => setCloneModalOpen(false)}
+      />
+    </div>
   )
 }
 
@@ -1173,12 +1564,12 @@ function AssignmentTab() {
 export default function AlertConfig() {
   return (
     <div>
-      <Title level={4} style={{ marginBottom: 16 }}>
+      <Title level={4} style={{ marginBottom: 8 }}>
         <SettingOutlined style={{ marginRight: 8 }} />
-        告警阈值配置
+        模板与策略配置中心 (Template & Policy Center)
       </Title>
       <Text type="secondary" style={{ display: 'block', marginBottom: 20 }}>
-        多层告警配置体系：创建「模板组」→ 在模板组中配置「规则」→ 为数据库「分配」模板组并可按需「覆盖」个别指标
+        全流程配置体系：维护「采集与连接模板」→ 配置「告警阈值/基线模板组」→ 在数据库纳管中「一键套用」与按需覆盖
       </Text>
 
       <style>{`
@@ -1186,16 +1577,21 @@ export default function AlertConfig() {
       `}</style>
 
       <Tabs
-        defaultActiveKey="groups"
+        defaultActiveKey="collect_templates"
         items={[
           {
+            key: 'collect_templates',
+            label: <span><ThunderboltOutlined /> 采集与连接模板</span>,
+            children: <CollectTemplateTab />,
+          },
+          {
             key: 'groups',
-            label: <span><AppstoreOutlined /> 模板组管理</span>,
+            label: <span><AppstoreOutlined /> 告警模板组管理</span>,
             children: <TemplateGroupTab />,
           },
           {
             key: 'rules',
-            label: <span><UnorderedListOutlined /> 规则配置</span>,
+            label: <span><UnorderedListOutlined /> 告警规则配置</span>,
             children: <RuleConfigTab />,
           },
           {

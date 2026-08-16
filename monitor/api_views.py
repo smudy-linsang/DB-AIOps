@@ -2476,6 +2476,195 @@ class AlertTemplateRuleBatchToggleView(JSONResponseMixin, View):
         return self.json_response({'updated_count': updated})
 
 
+# =============================================================================
+# 采集与连接配置模板 CRUD API（一体化模板中心）
+# =============================================================================
+
+def _collect_template_to_dict(ct):
+    return {
+        'id': ct.id,
+        'code': ct.code,
+        'name': ct.name,
+        'db_type': ct.db_type,
+        'default_port': ct.default_port,
+        'collect_interval_sec': ct.collect_interval_sec,
+        'default_service_name': ct.default_service_name or '',
+        'is_builtin': ct.is_builtin,
+        'is_default': ct.is_default,
+        'description': ct.description or '',
+        'associated_alert_template_id': ct.associated_alert_template_id,
+        'associated_alert_template_name': ct.associated_alert_template.name if ct.associated_alert_template else None,
+        'create_time': ct.create_time.isoformat() if ct.create_time else None,
+        'update_time': ct.update_time.isoformat() if ct.update_time else None,
+    }
+
+
+class DBCollectTemplateListView(JSONResponseMixin, View):
+    """
+    GET  /api/v1/collect-templates/      列出所有采集配置模板（可按 db_type 过滤）
+    POST /api/v1/collect-templates/      创建新自定义采集模板
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def get(self, request):
+        from .models import DBCollectTemplate
+        db_type = request.GET.get('db_type', '').strip()
+        qs = DBCollectTemplate.objects.all().select_related('associated_alert_template')
+        if db_type and db_type != 'all':
+            qs = qs.filter(db_type=db_type)
+        templates = [_collect_template_to_dict(ct) for ct in qs]
+        return self.json_response({'templates': templates, 'total': len(templates)})
+
+    def post(self, request):
+        from .models import DBCollectTemplate, AlertTemplate
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        name = (data.get('name') or '').strip()
+        db_type = (data.get('db_type') or '').strip()
+        if not name or not db_type:
+            return self.error_response('name and db_type are required', 400)
+
+        import uuid
+        code = (data.get('code') or f"custom_{db_type}_{uuid.uuid4().hex[:6]}").strip()
+        if DBCollectTemplate.objects.filter(code=code).exists():
+            return self.error_response(f'模板标识编码 "{code}" 已存在', 409)
+
+        default_port = int(data.get('default_port') or 3306)
+        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        default_service_name = (data.get('default_service_name') or '').strip()
+        is_default = bool(data.get('is_default', False))
+        description = (data.get('description') or '').strip()
+        associated_alert_template_id = data.get('associated_alert_template_id')
+
+        alert_tpl = None
+        if associated_alert_template_id:
+            alert_tpl = AlertTemplate.objects.filter(id=associated_alert_template_id).first()
+
+        if is_default:
+            # 清理该库型其他默认标记
+            DBCollectTemplate.objects.filter(db_type=db_type, is_default=True).update(is_default=False)
+
+        ct = DBCollectTemplate.objects.create(
+            name=name,
+            code=code,
+            db_type=db_type,
+            default_port=default_port,
+            collect_interval_sec=collect_interval_sec,
+            default_service_name=default_service_name,
+            is_builtin=False,
+            is_default=is_default,
+            description=description,
+            associated_alert_template=alert_tpl
+        )
+        return self.json_response({'template': _collect_template_to_dict(ct)}, status=201)
+
+
+class DBCollectTemplateDetailView(JSONResponseMixin, View):
+    """
+    GET    /api/v1/collect-templates/<id>/       获取采集模板详情
+    PUT    /api/v1/collect-templates/<id>/       更新采集模板参数
+    DELETE /api/v1/collect-templates/<id>/       删除采集模板（内置模板拒绝删除）
+    POST   /api/v1/collect-templates/<id>/clone/ 克隆采集模板
+    """
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    def dispatch(self, *args, **kwargs):
+        return super().dispatch(*args, **kwargs)
+
+    def _get_template(self, tpl_id):
+        from .models import DBCollectTemplate
+        try:
+            return DBCollectTemplate.objects.get(pk=tpl_id)
+        except DBCollectTemplate.DoesNotExist:
+            return None
+
+    def get(self, request, tpl_id):
+        ct = self._get_template(tpl_id)
+        if not ct:
+            return self.error_response('采集模板不存在', 404)
+        return self.json_response({'template': _collect_template_to_dict(ct)})
+
+    def put(self, request, tpl_id):
+        from .models import DBCollectTemplate, AlertTemplate
+        ct = self._get_template(tpl_id)
+        if not ct:
+            return self.error_response('采集模板不存在', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            return self.error_response('Invalid JSON', 400)
+
+        if 'name' in data:
+            ct.name = data['name'].strip()
+        if 'default_port' in data:
+            ct.default_port = int(data['default_port'])
+        if 'collect_interval_sec' in data:
+            ct.collect_interval_sec = int(data['collect_interval_sec'])
+        if 'default_service_name' in data:
+            ct.default_service_name = data['default_service_name'].strip()
+        if 'description' in data:
+            ct.description = data['description'].strip()
+        if 'associated_alert_template_id' in data:
+            aid = data['associated_alert_template_id']
+            ct.associated_alert_template = AlertTemplate.objects.filter(id=aid).first() if aid else None
+        if 'is_default' in data:
+            ct.is_default = bool(data['is_default'])
+            if ct.is_default:
+                DBCollectTemplate.objects.filter(db_type=ct.db_type, is_default=True).exclude(pk=ct.pk).update(is_default=False)
+
+        ct.save()
+        return self.json_response({'template': _collect_template_to_dict(ct)})
+
+    def delete(self, request, tpl_id):
+        ct = self._get_template(tpl_id)
+        if not ct:
+            return self.error_response('采集模板不存在', 404)
+        if ct.is_builtin:
+            return self.error_response('系统内置模板不允许删除', 400)
+
+        ct.delete()
+        return self.json_response({'message': f'模板 "{ct.name}" 已成功删除'})
+
+    def post(self, request, tpl_id):
+        """克隆模板: POST /api/v1/collect-templates/<tpl_id>/clone/"""
+        from .models import DBCollectTemplate
+        import uuid
+        ct = self._get_template(tpl_id)
+        if not ct:
+            return self.error_response('采集模板不存在', 404)
+
+        try:
+            data = json.loads(request.body)
+        except Exception:
+            data = {}
+
+        new_name = (data.get('name') or f"{ct.name}（副本）").strip()
+        new_code = f"custom_{ct.db_type}_{uuid.uuid4().hex[:6]}"
+
+        new_ct = DBCollectTemplate.objects.create(
+            name=new_name,
+            code=new_code,
+            db_type=ct.db_type,
+            default_port=ct.default_port,
+            collect_interval_sec=ct.collect_interval_sec,
+            default_service_name=ct.default_service_name,
+            is_builtin=False,
+            is_default=False,
+            description=data.get('description', ct.description or ''),
+            associated_alert_template=ct.associated_alert_template
+        )
+        return self.json_response({'template': _collect_template_to_dict(new_ct)}, status=201)
+
+
 class DatabaseTemplateAssignmentView(JSONResponseMixin, View):
     """
     GET  /api/v1/databases/<config_id>/assigned-template/  获取数据库当前使用的模板

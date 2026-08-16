@@ -14,7 +14,7 @@ import {
   ArrowUpOutlined, ArrowDownOutlined, SyncOutlined,
   InfoCircleOutlined, FireOutlined, EditOutlined
 } from '@ant-design/icons'
-import { databaseAPI, alertAPI } from '../services/api'
+import { databaseAPI, alertAPI, collectTemplateAPI } from '../services/api'
 import { PermissionGuard } from '../components/AuthGuard'
 import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
@@ -176,12 +176,18 @@ const DatabaseList = () => {
   const [editingDb, setEditingDb] = useState(null) // 当前正在编辑的数据库
   const [editForm] = Form.useForm()
 
-  // 获取数据库列表
+  const [collectTemplates, setCollectTemplates] = useState([])
+
+  // 获取数据库列表与采集模板列表
   const fetchDatabases = useCallback(async () => {
     setLoading(true)
     try {
-      const response = await databaseAPI.list()
-      setDatabases(response?.databases || [])
+      const [dbRes, tplRes] = await Promise.all([
+        databaseAPI.list(),
+        collectTemplateAPI.list().catch(() => ({ templates: [] }))
+      ])
+      setDatabases(dbRes?.databases || [])
+      setCollectTemplates(tplRes?.templates || [])
     } catch (error) {
       console.error('获取数据失败:', error)
       message.error('获取数据失败')
@@ -238,12 +244,35 @@ const DatabaseList = () => {
     }
   }
 
+  // 辅助方法：获取当前库型的所有可用模板 (API优先, 静态预置兜底)
+  const getAvailableTemplates = useCallback((dbType) => {
+    const apiMatched = collectTemplates.filter(t => t.db_type === dbType)
+    if (apiMatched.length > 0) {
+      return apiMatched.map(t => ({
+        label: `${t.name} (${t.collect_interval_sec}s)`,
+        value: t.code,
+        port: t.default_port,
+        interval: t.collect_interval_sec,
+        service_name: t.default_service_name,
+        desc: t.description
+      }))
+    }
+    return (DB_CONFIG_TEMPLATES[dbType] || []).map(t => ({
+      label: t.label,
+      value: t.value,
+      port: t.port,
+      interval: t.interval,
+      service_name: t.service_name,
+      desc: t.desc
+    }))
+  }, [collectTemplates])
+
   // 数据库类型变更时自动设置默认端口与模板
   const handleDbTypeChange = (dbType) => {
-    const templates = DB_CONFIG_TEMPLATES[dbType] || []
+    const templates = getAvailableTemplates(dbType)
     const defaultTpl = templates[0]
     form.setFieldsValue({
-      port: DEFAULT_PORTS[dbType] || 3306,
+      port: defaultTpl?.port || DEFAULT_PORTS[dbType] || 3306,
       template_name: defaultTpl ? defaultTpl.value : '',
       collect_interval_sec: defaultTpl ? defaultTpl.interval : 60,
       service_name: (dbType === 'oracle' && defaultTpl?.service_name) ? defaultTpl.service_name : form.getFieldValue('service_name')
@@ -253,7 +282,7 @@ const DatabaseList = () => {
   // 选择配置模板时自动联动端口、采集周期与服务名
   const handleTemplateChange = (templateVal) => {
     const currentDbType = form.getFieldValue('db_type')
-    const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+    const templates = getAvailableTemplates(currentDbType)
     const selected = templates.find(t => t.value === templateVal)
     if (selected) {
       form.setFieldsValue({
@@ -266,7 +295,7 @@ const DatabaseList = () => {
 
   const handleEditTemplateChange = (templateVal) => {
     const currentDbType = editForm.getFieldValue('db_type')
-    const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+    const templates = getAvailableTemplates(currentDbType)
     const selected = templates.find(t => t.value === templateVal)
     if (selected) {
       editForm.setFieldsValue({
@@ -1398,7 +1427,7 @@ const DatabaseList = () => {
           >
             {({ getFieldValue }) => {
               const currentDbType = getFieldValue('db_type') || 'oracle'
-              const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+              const templates = getAvailableTemplates(currentDbType)
               return (
                 <Form.Item
                   name="template_name"
@@ -1571,7 +1600,7 @@ const DatabaseList = () => {
           >
             {({ getFieldValue }) => {
               const currentDbType = getFieldValue('db_type') || 'oracle'
-              const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+              const templates = getAvailableTemplates(currentDbType)
               return (
                 <Form.Item
                   name="template_name"

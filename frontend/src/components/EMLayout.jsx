@@ -162,7 +162,7 @@ const EMLayout = ({ children }) => {
       { key: '/', icon: <DashboardOutlined />, label: '仪表盘', perm: Perm.DASHBOARD_VIEW },
       { key: '/databases', icon: <DatabaseOutlined />, label: '数据库管理', perm: Perm.DATABASES_VIEW },
       { key: '/alerts', icon: <AlertOutlined />, label: '告警中心', perm: Perm.ALERTS_VIEW },
-      { key: '/alert-config', icon: <ToolOutlined />, label: '告警配置', perm: Perm.ALERT_CONFIG_VIEW },
+      { key: '/alert-config', icon: <ToolOutlined />, label: '模板配置中心', perm: Perm.ALERT_CONFIG_VIEW },
       { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', perm: Perm.SQL_MONITORING_VIEW },
       { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', perm: Perm.CAPACITY_VIEW },
       { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },

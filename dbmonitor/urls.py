@@ -24,6 +24,7 @@ from monitor.api_views import (
     AlertTemplateGroupListView, AlertTemplateGroupDetailView,
     AlertTemplateRuleListView, AlertTemplateRuleDetailView,
     AlertTemplateRuleBatchToggleView,
+    DBCollectTemplateListView, DBCollectTemplateDetailView,
     DatabaseAlertOverrideListView, DatabaseAlertOverrideDetailView,
     DatabaseTemplateAssignmentView,
     DatabaseSlowQueriesView, DatabaseSlowQueryAnalysisView,
@@ -154,6 +155,12 @@ urlpatterns = [
     # 告警模板组 CRUD
     path('api/v1/alert-templates/', AlertTemplateGroupListView.as_view()),
     path('api/v1/alert-templates/<int:template_id>/', AlertTemplateGroupDetailView.as_view()),
+    path('api/v1/alert-templates/<int:template_id>/clone/', AlertTemplateGroupDetailView.as_view()),
+
+    # 采集与连接配置模板 CRUD (一体化模板中心)
+    path('api/v1/collect-templates/', DBCollectTemplateListView.as_view()),
+    path('api/v1/collect-templates/<int:tpl_id>/', DBCollectTemplateDetailView.as_view()),
+    path('api/v1/collect-templates/<int:tpl_id>/clone/', DBCollectTemplateDetailView.as_view()),
 
     # 模板组内规则管理
     path('api/v1/alert-templates/<int:template_id>/rules/', AlertTemplateRuleListView.as_view()),

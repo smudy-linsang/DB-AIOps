@@ -696,6 +696,38 @@ class AlertTemplate(models.Model):
         ordering = ['db_type', 'name']
 
 
+# ==========================================
+# 采集与连接配置模板（一体化模板中心）
+# ==========================================
+class DBCollectTemplate(models.Model):
+    """数据库采集与连接配置模板，定义推荐默认端口、采集周期、服务名及关联推荐告警模板"""
+
+    name = models.CharField(max_length=100, verbose_name="模板名称", help_text="例如：Oracle 核心高频模板")
+    code = models.CharField(max_length=64, unique=True, verbose_name="模板编码", help_text="如 oracle_core_high_freq")
+    db_type = models.CharField(max_length=20, choices=DB_TYPES, verbose_name="数据库类型")
+    default_port = models.IntegerField(default=3306, verbose_name="推荐端口")
+    collect_interval_sec = models.IntegerField(default=60, verbose_name="推荐采集周期(秒)", help_text="10-3600秒")
+    default_service_name = models.CharField(max_length=100, blank=True, default='', verbose_name="默认服务名/SID")
+    is_builtin = models.BooleanField(default=False, verbose_name="是否为系统内置模板")
+    is_default = models.BooleanField(default=False, verbose_name="是否为该类型默认模板")
+    description = models.TextField(blank=True, default='', verbose_name="模板描述")
+    associated_alert_template = models.ForeignKey(
+        AlertTemplate, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='associated_collect_templates', verbose_name="推荐关联告警模板组"
+    )
+    create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    update_time = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    def __str__(self):
+        builtin_tag = ' [内置]' if self.is_builtin else ''
+        return f"[{self.db_type}] {self.name} ({self.collect_interval_sec}s){builtin_tag}"
+
+    class Meta:
+        verbose_name = "采集配置模板"
+        verbose_name_plural = "采集配置模板列表"
+        ordering = ['db_type', '-is_default', 'name']
+
+
 class AlertThresholdTemplate(models.Model):
     """告警阈值规则，属于某个告警模板组，定义单个指标的多级告警规则"""
 

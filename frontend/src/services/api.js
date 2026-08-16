@@ -346,6 +346,36 @@ export const alertTemplateAPI = {
 }
 
 // ==========================================
+// 采集与连接配置模板 API (一体化模板中心)
+// ==========================================
+
+export const collectTemplateAPI = {
+  // 列出所有采集模板 (可按 db_type 过滤)
+  list: (params = {}) =>
+    api.get('/collect-templates/', { params }),
+
+  // 获取单个采集模板详情
+  getDetail: (id) =>
+    api.get(`/collect-templates/${id}/`),
+
+  // 创建自定义采集模板
+  create: (data) =>
+    api.post('/collect-templates/', data),
+
+  // 更新采集模板
+  update: (id, data) =>
+    api.put(`/collect-templates/${id}/`, data),
+
+  // 删除采集模板
+  delete: (id) =>
+    api.delete(`/collect-templates/${id}/`),
+
+  // 克隆采集模板
+  clone: (id, data) =>
+    api.post(`/collect-templates/${id}/clone/`, data),
+}
+
+// ==========================================
 // SQL 监控 API（Phase 5: SQL Monitoring）
 // ==========================================
 
