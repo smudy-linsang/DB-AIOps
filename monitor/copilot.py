@@ -106,7 +106,7 @@ def _get_database_context(config: DatabaseConfig) -> Dict[str, Any]:
         'autonomy_level': config.autonomy_level,
     }
 
-    # 最新指标
+    # 最新指标与表空间/容量快照
     latest_log = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
     if latest_log:
         try:
@@ -116,6 +116,18 @@ def _get_database_context(config: DatabaseConfig) -> Dict[str, Any]:
                 if isinstance(v, (int, float, str)) and not isinstance(v, bool):
                     filtered[k] = v
             ctx['latest_metrics'] = filtered
+            
+            # 完整透传表空间/磁盘/容量实时状态数据
+            if isinstance(msg, dict):
+                if 'tablespaces' in msg:
+                    ctx['tablespaces'] = msg['tablespaces']
+                if 'tablespace_usage' in msg:
+                    ctx['tablespace_usage'] = msg['tablespace_usage']
+                if 'database_sizes' in msg:
+                    ctx['database_sizes'] = msg['database_sizes']
+                if 'space_usage_pct' in msg:
+                    ctx['space_usage_pct'] = msg['space_usage_pct']
+
             ctx['status'] = latest_log.status
             ctx['last_check_time'] = latest_log.create_time.isoformat()
         except Exception:

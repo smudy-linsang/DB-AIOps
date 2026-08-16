@@ -30,6 +30,7 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
   const [assessing, setAssessing] = useState(false);
   const [assessmentResult, setAssessmentResult] = useState(null);
   const [actionExecuting, setActionExecuting] = useState(false);
+  const [drawerWidth, setDrawerWidth] = useState(720); // 默认宽度 720，支持动态调节
 
   const [messages, setMessages] = useState([
     {
@@ -58,8 +59,8 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
       if (!selectedDbId && list.length > 0) {
         setSelectedDbId(list[0].id);
       }
-    } catch (e) {
-      // 容错兜底：从 localStorage 或已有缓存读取
+    } catch (err) {
+      message.error('加载实例列表失败');
     }
   };
 
@@ -165,13 +166,14 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
               config_id: card.config_id,
               params: card.params
             });
-            message.success(res?.data?.message || '自愈动作已执行成功！');
+            const successMsg = res?.message || res?.data?.message || '自愈动作已成功执行，资源已安全扩展！';
+            message.success(successMsg);
             // 回显执行成功消息
             setMessages(prev => [
               ...prev,
               {
                 role: 'assistant',
-                content: `✅ **自愈执行成功**：已针对实例 **${card.db_name}** 执行预案 \`${card.playbook_code}\`，阻塞已释放。`,
+                content: `✅ **【自愈动作执行成功】**\n- **目标实例**：${card.db_name}\n- **预案类型**：\`${card.playbook_code}\`\n- **执行结果**：${successMsg}\n- **执行时间**：${new Date().toLocaleString()}\n\n已成功完成处置，系统将持续追踪容量指标与运行状态。`,
                 time: new Date().toLocaleTimeString(),
                 source: 'system'
               }
@@ -228,7 +230,7 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
   return (
     <Drawer
       title={
-        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', width: '100%' }}>
           <Space>
             <Avatar style={{ backgroundColor: '#6366f1' }} icon={<RobotOutlined />} />
             <div>
@@ -239,20 +241,44 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
               </div>
             </div>
           </Space>
-          <Select
-            style={{ width: 220 }}
-            placeholder="选择目标数据库"
-            value={selectedDbId}
-            onChange={setSelectedDbId}
-            options={databases.map(d => ({
-              label: `${d.name} (${d.db_type})`,
-              value: d.id
-            }))}
-          />
+          <Space size="small">
+            {/* 抽屉宽度快捷调节按钮 */}
+            <Space.Compact size="small">
+              <Button
+                type={drawerWidth === 640 ? 'primary' : 'default'}
+                onClick={() => setDrawerWidth(640)}
+              >
+                标准
+              </Button>
+              <Button
+                type={drawerWidth === 920 ? 'primary' : 'default'}
+                onClick={() => setDrawerWidth(920)}
+              >
+                加宽
+              </Button>
+              <Button
+                type={drawerWidth === 1280 ? 'primary' : 'default'}
+                onClick={() => setDrawerWidth(1280)}
+              >
+                全景
+              </Button>
+            </Space.Compact>
+
+            <Select
+              style={{ width: 190 }}
+              placeholder="选择目标数据库"
+              value={selectedDbId}
+              onChange={setSelectedDbId}
+              options={databases.map(d => ({
+                label: `${d.name} (${d.db_type})`,
+                value: d.id
+              }))}
+            />
+          </Space>
         </div>
       }
       placement="right"
-      width={660}
+      width={drawerWidth}
       onClose={onClose}
       open={visible}
       styles={{ body: { padding: '12px 16px', display: 'flex', flexDirection: 'column', height: '100%', backgroundColor: '#f8fafc' } }}
