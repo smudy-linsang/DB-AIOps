@@ -1327,7 +1327,10 @@ const DatabaseList = () => {
           layout="vertical"
           onFinish={handleAddDatabase}
           initialValues={{
-            port: 3306
+            db_type: 'oracle',
+            port: 1521,
+            collect_interval_sec: 60,
+            template_name: 'oracle_standard'
           }}
         >
           <Form.Item
@@ -1390,17 +1393,32 @@ const DatabaseList = () => {
           </Form.Item>
 
           <Form.Item
-            name="template_name"
-            label="配置模板 (推荐)"
-            extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.db_type !== currentValues.db_type}
           >
-            <Select placeholder="请选择或自定义配置模板" allowClear onChange={handleTemplateChange}>
-              {(DB_CONFIG_TEMPLATES[form.getFieldValue('db_type')] || []).map(t => (
-                <Select.Option key={t.value} value={t.value}>
-                  {t.label}
-                </Select.Option>
-              ))}
-            </Select>
+            {({ getFieldValue }) => {
+              const currentDbType = getFieldValue('db_type') || 'oracle'
+              const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+              return (
+                <Form.Item
+                  name="template_name"
+                  label="配置模板 (推荐)"
+                  extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
+                >
+                  <Select
+                    placeholder="请选择配置模板"
+                    allowClear
+                    onChange={handleTemplateChange}
+                  >
+                    {templates.map(t => (
+                      <Select.Option key={t.value} value={t.value}>
+                        {t.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              )
+            }}
           </Form.Item>
 
           <Row gutter={16}>
@@ -1548,17 +1566,32 @@ const DatabaseList = () => {
           </Form.Item>
 
           <Form.Item
-            name="template_name"
-            label="配置模板 (推荐)"
-            extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
+            noStyle
+            shouldUpdate={(prevValues, currentValues) => prevValues.db_type !== currentValues.db_type}
           >
-            <Select placeholder="请选择或自定义配置模板" allowClear onChange={handleEditTemplateChange}>
-              {(DB_CONFIG_TEMPLATES[editForm.getFieldValue('db_type')] || []).map(t => (
-                <Select.Option key={t.value} value={t.value}>
-                  {t.label}
-                </Select.Option>
-              ))}
-            </Select>
+            {({ getFieldValue }) => {
+              const currentDbType = getFieldValue('db_type') || 'oracle'
+              const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+              return (
+                <Form.Item
+                  name="template_name"
+                  label="配置模板 (推荐)"
+                  extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
+                >
+                  <Select
+                    placeholder="请选择配置模板"
+                    allowClear
+                    onChange={handleEditTemplateChange}
+                  >
+                    {templates.map(t => (
+                      <Select.Option key={t.value} value={t.value}>
+                        {t.label}
+                      </Select.Option>
+                    ))}
+                  </Select>
+                </Form.Item>
+              )
+            }}
           </Form.Item>
 
           <Row gutter={16}>
