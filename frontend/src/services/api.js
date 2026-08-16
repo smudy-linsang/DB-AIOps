@@ -550,6 +550,8 @@ export const aiOpsAPI = {
   getAutonomy: (configId) => api.get(`/databases/${configId}/autonomy/`),
   setAutonomy: (configId, level) => api.put(`/databases/${configId}/autonomy/`, { level }),
   causalGraph: (configId) => api.get(`/databases/${configId}/causal-graph/`),
+  quickAssessment: (configId) => api.get(`/databases/${configId}/quick-assessment/`),
+  chat: (data) => api.post('/copilot/chat/', data),
 }
 
 // Phase 7B: 性能中心 (契约 phase7/20)

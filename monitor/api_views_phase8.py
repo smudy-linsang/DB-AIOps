@@ -570,3 +570,55 @@ class LlmTestConnectionView(_BaseView):
             except Exception as e:
                 result['embed_error'] = str(e)[:300]
         return self.ok(**result)
+
+
+# =============================================================================
+# Copilot 智能问答与一键智能体检 API
+# =============================================================================
+
+class CopilotChatView(_BaseView):
+    """POST /api/v1/copilot/chat/ (Copilot 智能问答与交互)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.METRICS_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def post(self, request):
+        from monitor.copilot import run_copilot_chat
+        data = self.body(request)
+        query = (data.get('query') or '').strip()
+        if not query:
+            return self.err('BAD_REQUEST', '提问内容不能为空', 400)
+
+        config_id = data.get('config_id')
+        if config_id:
+            cfg = _get_config(request, config_id)
+            if not cfg:
+                return self.err('NOT_FOUND', f'数据库 {config_id} 不存在或无权访问', 404)
+
+        history = data.get('history') or []
+        res = run_copilot_chat(query, config_id=config_id, history=history)
+        return self.ok(**res)
+
+
+class QuickAssessmentView(_BaseView):
+    """GET /api/v1/databases/<config_id>/quick-assessment/ (一键智能体检)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def get(self, request, config_id):
+        from monitor.copilot import generate_quick_health_assessment
+        cfg = _get_config(request, config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', f'数据库 {config_id} 不存在或无权访问', 404)
+
+        assessment = generate_quick_health_assessment(cfg.id)
+        if 'error' in assessment:
+            return self.err('INTERNAL', assessment['error'], 500)
+        return self.ok(assessment=assessment)

@@ -26,6 +26,7 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, systemAPI, setUser } from '../services/api';
 import useAppStore from '../stores/useAppStore';
 import TargetNavigationTree from './TargetNavigationTree';
+import CopilotDrawer from './CopilotDrawer';
 import { hasPermission } from '../utils/permission';
 import { Perm } from '../utils/permission';
 
@@ -41,6 +42,7 @@ const EMLayout = ({ children }) => {
     connectSSE, disconnectSSE,
   } = useAppStore();
 
+  const [copilotVisible, setCopilotVisible] = useState(false);
   const [userName, setUserName] = useState('');
   const [userRole, setUserRole] = useState('');
   const [permVersion, setPermVersion] = useState(0); // 权限版本号，用于触发 useMemo 重算
@@ -255,6 +257,29 @@ const EMLayout = ({ children }) => {
               )}
             </span>
           )}
+
+          {/* Copilot 悬浮/顶部入口 */}
+          <span
+            onClick={() => setCopilotVisible(true)}
+            style={{
+              cursor: 'pointer',
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              background: 'linear-gradient(135deg, #1890ff 0%, #722ed1 100%)',
+              padding: '2px 10px',
+              borderRadius: 16,
+              color: '#fff',
+              fontSize: 12,
+              fontWeight: 500,
+              boxShadow: '0 2px 6px rgba(114, 46, 209, 0.4)',
+              transition: 'all 0.3s'
+            }}
+          >
+            <RobotOutlined style={{ fontSize: 14 }} />
+            <span>AI Copilot</span>
+          </span>
+
           <Badge count={totalAlerts} size="small" offset={[-2, 2]}>
             <BellOutlined
               style={{ fontSize: 18, color: totalAlerts > 0 ? '#faad14' : 'rgba(255,255,255,0.7)', cursor: 'pointer' }}
@@ -350,6 +375,12 @@ const EMLayout = ({ children }) => {
           </div>
         </Content>
       </Layout>
+
+      {/* 全局 AI Copilot 抽屉 */}
+      <CopilotDrawer
+        visible={copilotVisible}
+        onClose={() => setCopilotVisible(false)}
+      />
     </Layout>
   );
 };

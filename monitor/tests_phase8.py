@@ -385,3 +385,43 @@ class FeedbackCalibrationDbTests(TestCase):
                                        user=f'u{i}', verdict='wrong', source='rule')
         recompute_rule_stats()
         self.assertEqual(RuleStat.objects.get(rule_id='R010').calibrated_base, 0.2)
+
+
+# ==========================================================================
+# 7. Copilot & Quick Assessment 单元测试
+# ==========================================================================
+class CopilotTests(TestCase):
+
+    def setUp(self):
+        from monitor.models import DatabaseConfig, MonitorLog
+        self.cfg = DatabaseConfig.objects.create(
+            name='test-oracle-prod',
+            db_type='oracle',
+            host='10.0.0.10',
+            port=1521,
+            username='sys',
+            password='enc:test_encrypted_pwd',  # noqa: secret
+            is_active=True,
+            cpu_cores=16,
+        )
+        MonitorLog.objects.create(
+            config=self.cfg,
+            status='UP',
+            message='{"cpu_usage": 45, "conn_usage_pct": 30, "disk_usage_pct": 50}',
+        )
+
+    def test_copilot_fallback_chat(self):
+        from monitor.copilot import run_copilot_chat
+        res = run_copilot_chat(query="查看当前数据库的CPU指标与状态", config_id=self.cfg.id)
+        self.assertIn('answer', res)
+        self.assertEqual(res['source'], 'rule_fallback')
+        self.assertTrue(res['context_used'])
+        self.assertIn('指标', res['answer'])
+
+    def test_quick_health_assessment(self):
+        from monitor.copilot import generate_quick_health_assessment
+        assessment = generate_quick_health_assessment(self.cfg.id)
+        self.assertIn('overall_score', assessment)
+        self.assertIn('grade', assessment)
+        self.assertGreaterEqual(assessment['overall_score'], 80)
+        self.assertEqual(len(assessment['dimensions']), 5)
