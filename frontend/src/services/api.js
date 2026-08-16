@@ -546,6 +546,16 @@ export const aiOpsAPI = {
   getLlmConfig: () => api.get('/llm/config/'),
   updateLlmConfig: (data) => api.put('/llm/config/', data),
   testLlm: (data = {}) => api.post('/llm/test-connection/', data),
+  
+  // v2.0: 多大模型凭据池与场景路由 API
+  getCredentials: () => api.get('/llm/credentials/'),
+  createCredential: (data) => api.post('/llm/credentials/', data),
+  updateCredential: (id, data) => api.put(`/llm/credentials/${id}/`, data),
+  deleteCredential: (id) => api.delete(`/llm/credentials/${id}/`),
+  pingCredential: (id) => api.post(`/llm/credentials/${id}/ping/`, {}),
+  getRoutes: () => api.get('/llm/routes/'),
+  updateRoute: (data) => api.put('/llm/routes/', data),
+
   createChange: (data) => api.post('/changes/', data),
   changes: (configId, params = {}) => api.get(`/databases/${configId}/changes/`, { params }),
   getAutonomy: (configId) => api.get(`/databases/${configId}/autonomy/`),

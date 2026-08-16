@@ -2198,3 +2198,90 @@ class PlaybookRunRecord(models.Model):
     def __str__(self):
         return f"{self.run_id} - {self.template.name} ({self.status})"
 
+
+# =============================================================================
+# v2.0: 多大模型智能路由与凭据连接池 (LLM Smart Router & Credentials Pool)
+# =============================================================================
+
+class LLMProviderCredential(models.Model):
+    """v2.0: 大模型服务商与 API 凭据池"""
+    PROVIDER_CHOICES = (
+        ('minimax', 'MiniMax 名之梦'),
+        ('gemini', 'Google Gemini'),
+        ('deepseek', 'DeepSeek 深度求索'),
+        ('openai', 'OpenAI 官方'),
+        ('qwen', '阿里通义千问'),
+        ('moonshot', '月之暗面 Kimi'),
+        ('ollama', '本地私有 Ollama'),
+        ('custom', '自定义兼容端点'),
+    )
+
+    name = models.CharField(max_length=64, verbose_name="配置名称", help_text="如 MiniMax-主力账号01")
+    provider_type = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default='custom', verbose_name="供应商类型")
+    base_url = models.CharField(max_length=255, verbose_name="API 接入端点 Base URL")
+    api_key = models.CharField(max_length=255, blank=True, default='', verbose_name="加密存储的 API Key")
+    model_name = models.CharField(max_length=64, verbose_name="模型 ID", help_text="如 MiniMax-Text-01 / gemini-1.5-pro")
+    
+    # 状态与调度
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name="是否启用")
+    priority = models.IntegerField(default=10, verbose_name="优先级", help_text="数字越小优先级越高 (1-100)")
+    weight = models.IntegerField(default=1, verbose_name="负载权重")
+    
+    # 熔断与健康状态
+    is_healthy = models.BooleanField(default=True, verbose_name="是否健康")
+    cooldown_until = models.DateTimeField(null=True, blank=True, verbose_name="429 冷却截止时间")
+    consecutive_fails = models.IntegerField(default=0, verbose_name="连续失败计数")
+    last_error_message = models.TextField(blank=True, default='', verbose_name="最近一次错误")
+    last_latency_ms = models.IntegerField(default=0, verbose_name="最近一次响应耗时(ms)")
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = 'llm_provider_credential'
+        ordering = ['priority', '-weight', 'id']
+        verbose_name = "LLM 提供商凭据"
+        verbose_name_plural = "LLM 提供商凭据列表"
+
+    def __str__(self):
+        return f"{self.name} ({self.provider_type} / {self.model_name})"
+
+
+class LLMSceneRoutingRule(models.Model):
+    """v2.0: 运维场景与模型调度映射规则"""
+    SCENE_CHOICES = (
+        ('global_default', '全局默认兜底'),
+        ('copilot_chat', 'Copilot 专家日常对话'),
+        ('rca_deep_reasoning', 'RCA 3.0 根因深度推理'),
+        ('sql_explain_opt', 'SQL 执行计划与索引优化'),
+        ('incident_warroom', '排障作战室自愈决策'),
+    )
+
+    scene_code = models.CharField(max_length=64, unique=True, choices=SCENE_CHOICES, verbose_name="场景编码")
+    scene_name = models.CharField(max_length=64, verbose_name="场景名称")
+    description = models.CharField(max_length=255, blank=True, default='', verbose_name="场景说明")
+    
+    primary_credential = models.ForeignKey(
+        LLMProviderCredential, on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='primary_routes', verbose_name="主选模型凭据"
+    )
+    fallback_credentials = models.ManyToManyField(
+        LLMProviderCredential, blank=True,
+        related_name='fallback_routes', verbose_name="备选模型凭据链"
+    )
+    
+    # 场景超参数覆盖
+    temperature = models.FloatField(default=0.1, verbose_name="发散度 Temperature")
+    timeout_sec = models.IntegerField(default=20, verbose_name="超时时间(秒)")
+    max_tokens = models.IntegerField(default=2048, verbose_name="最大 Tokens")
+    
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = 'llm_scene_routing_rule'
+        verbose_name = "LLM 场景路由规则"
+        verbose_name_plural = "LLM 场景路由规则列表"
+
+    def __str__(self):
+        return f"{self.scene_name} ({self.scene_code})"
+

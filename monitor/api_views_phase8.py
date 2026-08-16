@@ -642,9 +642,235 @@ class LlmConfigView(_BaseView):
         return self.ok(message="大模型与 API Key 配置已成功更新并生效！")
 
 
+class LlmCredentialsView(_BaseView):
+    """GET / POST /api/v1/llm/credentials/ (多大模型凭据池管理)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def get(self, request):
+        from monitor.models import LLMProviderCredential
+        creds = LLMProviderCredential.objects.all().order_by('priority', '-weight', 'id')
+        items = []
+        for c in creds:
+            api_key = c.api_key or ''
+            masked = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else ("****" if api_key else "")
+            items.append({
+                'id': c.id,
+                'name': c.name,
+                'provider_type': c.provider_type,
+                'base_url': c.base_url,
+                'model_name': c.model_name,
+                'api_key_masked': masked,
+                'has_key': bool(api_key),
+                'is_active': c.is_active,
+                'priority': c.priority,
+                'weight': c.weight,
+                'is_healthy': c.is_healthy,
+                'cooldown_until': c.cooldown_until.isoformat() if c.cooldown_until else None,
+                'consecutive_fails': c.consecutive_fails,
+                'last_latency_ms': c.last_latency_ms,
+                'last_error_message': c.last_error_message,
+                'updated_at': c.updated_at.isoformat() if c.updated_at else None,
+            })
+        return self.ok(credentials=items, total=len(items))
+
+    def post(self, request):
+        if not request.user.is_superuser:
+            return self.err('FORBIDDEN', '仅超级管理员可添加大模型凭据', 403)
+
+        from monitor.models import LLMProviderCredential
+        data = self.body(request)
+        name = (data.get('name') or '').strip()
+        provider_type = data.get('provider_type') or 'custom'
+        base_url = (data.get('base_url') or '').strip()
+        api_key = (data.get('api_key') or '').strip()
+        model_name = (data.get('model_name') or '').strip()
+
+        if not name or not base_url or not model_name:
+            return self.err('BAD_REQUEST', '名称、接入端点(Base URL)与模型名称为必填项', 400)
+
+        cred = LLMProviderCredential.objects.create(
+            name=name,
+            provider_type=provider_type,
+            base_url=base_url,
+            api_key=api_key,
+            model_name=model_name,
+            is_active=bool(data.get('is_active', True)),
+            priority=int(data.get('priority', 10)),
+            weight=int(data.get('weight', 1)),
+        )
+        return self.ok(id=cred.id, message="大模型凭据已成功创建并加入连接池！")
+
+
+class LlmCredentialDetailView(_BaseView):
+    """PUT / DELETE /api/v1/llm/credentials/<id>/ (修改与删除指定模型凭据)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def put(self, request, cred_id):
+        if not request.user.is_superuser:
+            return self.err('FORBIDDEN', '仅超级管理员可修改大模型凭据', 403)
+
+        from monitor.models import LLMProviderCredential
+        cred = LLMProviderCredential.objects.filter(id=cred_id).first()
+        if not cred:
+            return self.err('NOT_FOUND', '该凭据不存在', 404)
+
+        data = self.body(request)
+        if 'name' in data and data['name'].strip():
+            cred.name = data['name'].strip()
+        if 'provider_type' in data:
+            cred.provider_type = data['provider_type']
+        if 'base_url' in data and data['base_url'].strip():
+            cred.base_url = data['base_url'].strip()
+        if 'api_key' in data and data['api_key'].strip():
+            cred.api_key = data['api_key'].strip()
+        if 'model_name' in data and data['model_name'].strip():
+            cred.model_name = data['model_name'].strip()
+        if 'is_active' in data:
+            cred.is_active = bool(data['is_active'])
+        if 'priority' in data:
+            cred.priority = int(data['priority'])
+        if 'weight' in data:
+            cred.weight = int(data['weight'])
+
+        cred.save()
+        return self.ok(message="凭据配置已成功更新！")
+
+    def delete(self, request, cred_id):
+        if not request.user.is_superuser:
+            return self.err('FORBIDDEN', '仅超级管理员可删除大模型凭据', 403)
+
+        from monitor.models import LLMProviderCredential
+        deleted, _ = LLMProviderCredential.objects.filter(id=cred_id).delete()
+        if not deleted:
+            return self.err('NOT_FOUND', '凭据不存在或已被删除', 404)
+        return self.ok(message="凭据已安全移除。")
+
+
+class LlmCredentialPingView(_BaseView):
+    """POST /api/v1/llm/credentials/<id>/ping/ (单个凭据一键在线探活)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def post(self, request, cred_id):
+        from monitor.models import LLMProviderCredential
+        from monitor.llm.providers import OpenAICompatProvider
+
+        cred = LLMProviderCredential.objects.filter(id=cred_id).first()
+        if not cred:
+            return self.err('NOT_FOUND', '凭据不存在', 404)
+
+        provider = OpenAICompatProvider(
+            base_url=cred.base_url,
+            api_key=cred.api_key,
+            model=cred.model_name,
+            timeout=15
+        )
+        t0 = time.time()
+        result = {'ok': False, 'latency_ms': 0, 'model': cred.model_name}
+        try:
+            res = provider.chat(
+                [{'role': 'user', 'content': "ping, 请确认连通并回复 pong"}],
+                scene='ping', max_tokens=16, json_mode=False
+            )
+            result['ok'] = bool(res and res.content)
+            result['reply'] = res.content if res else ''
+            result['latency_ms'] = int((time.time() - t0) * 1000)
+            cred.is_healthy = True
+            cred.consecutive_fails = 0
+            cred.last_latency_ms = result['latency_ms']
+            cred.last_error_message = ''
+            cred.save(update_fields=['is_healthy', 'consecutive_fails', 'last_latency_ms', 'last_error_message'])
+        except Exception as e:
+            result['error'] = str(e)[:250]
+            cred.consecutive_fails += 1
+            cred.last_error_message = str(e)[:250]
+            cred.save(update_fields=['consecutive_fails', 'last_error_message'])
+
+        return self.ok(**result)
+
+
+class LlmRoutesView(_BaseView):
+    """GET / PUT /api/v1/llm/routes/ (场景智能分流策略管理)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def get(self, request):
+        from monitor.models import LLMSceneRoutingRule, LLMProviderCredential
+        # 初始化默认场景规则（若不存在）
+        default_scenes = [
+            ('copilot_chat', 'Copilot 专家日常对话', '处理 DBA 日常交互问答、等待事件探查与执行建议'),
+            ('rca_deep_reasoning', 'RCA 3.0 根因深度推理', '针对 P1/P2 重大事故进行多跳因果链分析与证据挖掘'),
+            ('sql_explain_opt', 'SQL 执行计划与索引优化', '解析慢查询执行计划树并推导复合索引优化方案'),
+            ('incident_warroom', '排障作战室自愈决策', '作战室自愈剧本 Dry-Run 预演与影响面安全评估'),
+        ]
+        for code, name, desc in default_scenes:
+            LLMSceneRoutingRule.objects.get_or_create(scene_code=code, defaults={'scene_name': name, 'description': desc})
+
+        rules = LLMSceneRoutingRule.objects.all()
+        items = []
+        for r in rules:
+            items.append({
+                'id': r.id,
+                'scene_code': r.scene_code,
+                'scene_name': r.scene_name,
+                'description': r.description,
+                'primary_credential_id': r.primary_credential_id,
+                'primary_credential_name': r.primary_credential.name if r.primary_credential else '默认继承连接池优先级',
+                'fallback_credential_ids': list(r.fallback_credentials.values_list('id', flat=True)),
+                'temperature': r.temperature,
+                'timeout_sec': r.timeout_sec,
+                'max_tokens': r.max_tokens,
+            })
+        return self.ok(routes=items)
+
+    def put(self, request):
+        if not request.user.is_superuser:
+            return self.err('FORBIDDEN', '仅超级管理员可调整场景路由规则', 403)
+
+        from monitor.models import LLMSceneRoutingRule
+        data = self.body(request)
+        scene_code = data.get('scene_code')
+        rule = LLMSceneRoutingRule.objects.filter(scene_code=scene_code).first()
+        if not rule:
+            return self.err('NOT_FOUND', f'场景 {scene_code} 不存在', 404)
+
+        if 'primary_credential_id' in data:
+            rule.primary_credential_id = data['primary_credential_id']
+        if 'temperature' in data:
+            rule.temperature = float(data['temperature'])
+        if 'timeout_sec' in data:
+            rule.timeout_sec = int(data['timeout_sec'])
+        if 'max_tokens' in data:
+            rule.max_tokens = int(data['max_tokens'])
+
+        rule.save()
+
+        if 'fallback_credential_ids' in data:
+            rule.fallback_credentials.set(data['fallback_credential_ids'])
+
+        return self.ok(message="场景路由规则已更新生效！")
+
+
 class LlmTestConnectionView(_BaseView):
-    """POST /api/v1/llm/test-connection/ (phase8/30 §3.9)。
-    直接用当前 settings 打一次 ping, 不受 LLM_ENABLED 开关限制 (供上线前验证)。"""
+    """POST /api/v1/llm/test-connection/ (大模型全局单点在线连通性测试)"""
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)

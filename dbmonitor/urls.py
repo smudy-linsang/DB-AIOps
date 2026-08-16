@@ -68,11 +68,12 @@ from monitor.api_views_perf import (
 )
 from monitor.sse_views import SSEView
 from monitor.api_views_phase8 import (
-    # Phase 8: AI 智能化
+    # Phase 8: AI 智能化与多大模型路由
     RcaFeedbackView, PlanFeedbackView, InvestigateView, AgentTraceListView,
     ChangeCreateView, ChangeListView, AiOpsStatsView, LlmCallListView,
     RuleStatListView, AutonomyView, CausalGraphView, LlmTestConnectionView,
-    LlmConfigView, CopilotChatView, QuickAssessmentView,
+    LlmConfigView, LlmCredentialsView, LlmCredentialDetailView, LlmCredentialPingView,
+    LlmRoutesView, CopilotChatView, QuickAssessmentView,
 )
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
@@ -299,6 +300,10 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/causal-graph/', CausalGraphView.as_view()),
     path('api/v1/databases/<int:config_id>/quick-assessment/', QuickAssessmentView.as_view()),
     path('api/v1/llm/config/', LlmConfigView.as_view()),
+    path('api/v1/llm/credentials/', LlmCredentialsView.as_view()),
+    path('api/v1/llm/credentials/<int:cred_id>/', LlmCredentialDetailView.as_view()),
+    path('api/v1/llm/credentials/<int:cred_id>/ping/', LlmCredentialPingView.as_view()),
+    path('api/v1/llm/routes/', LlmRoutesView.as_view()),
     path('api/v1/llm/test-connection/', LlmTestConnectionView.as_view()),
     path('api/v1/copilot/chat/', CopilotChatView.as_view()),
 

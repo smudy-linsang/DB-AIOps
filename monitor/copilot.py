@@ -251,39 +251,41 @@ def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optio
     # 智能构建交互动作卡片
     action_cards = _build_action_cards(query, config, tool_results)
 
-    # 尝试 LLM 智能生成
-    if llm_enabled():
-        try:
-            provider = get_chat_provider()
-            messages = [{'role': 'system', 'content': COPILOT_SYSTEM_PROMPT}]
+    # 尝试多大模型路由器智能调度生成 (LLMRouterEngine)
+    try:
+        from monitor.llm.router import LLMRouterEngine
+        messages = [{'role': 'system', 'content': COPILOT_SYSTEM_PROMPT}]
 
-            # 注入历史记录（最近 6 轮）
-            if history:
-                for h in history[-6:]:
-                    if h.get('role') in ('user', 'assistant') and h.get('content'):
-                        messages.append({'role': h['role'], 'content': h['content']})
+        # 注入历史记录（最近 6 轮）
+        if history:
+            for h in history[-6:]:
+                if h.get('role') in ('user', 'assistant') and h.get('content'):
+                    messages.append({'role': h['role'], 'content': h['content']})
 
-            # 当前用户问题与工具产出上下文
-            user_prompt = f"用户提问：{query}\n"
-            if context_data:
-                user_prompt += f"\n【当前目标数据库实时上下文】:\n```json\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n```\n"
-            if tool_results:
-                user_prompt += f"\n【Copilot 工具链实时探测产出 (Tool Calling Output)】:\n```json\n{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n```\n"
+        # 当前用户问题与工具产出上下文
+        user_prompt = f"用户提问：{query}\n"
+        if context_data:
+            user_prompt += f"\n【当前目标数据库实时上下文】:\n```json\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n```\n"
+        if tool_results:
+            user_prompt += f"\n【Copilot 工具链实时探测产出 (Tool Calling Output)】:\n```json\n{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n```\n"
 
-            messages.append({'role': 'user', 'content': user_prompt})
+        messages.append({'role': 'user', 'content': user_prompt})
 
-            res = provider.chat(messages, scene='copilot', timeout=30)
-            return {
-                'answer': res.content,
-                'model': res.model,
-                'source': 'llm',
-                'latency_ms': res.latency_ms,
-                'context_used': bool(context_data),
-                'tool_results': tool_results,
-                'action_cards': action_cards,
-            }
-        except Exception as e:
-            logger.warning("Copilot LLM 调用失败，降级至专家引擎: %s", e)
+        # 智能匹配 copilot_chat 场景并执行多模型自动降级调用
+        router_res = LLMRouterEngine.chat(messages, scene='copilot_chat')
+        return {
+            'answer': router_res['content'],
+            'model': router_res['model'],
+            'provider_name': router_res.get('provider_name', ''),
+            'source': 'llm_router',
+            'latency_ms': router_res['latency_ms'],
+            'failover_traces': router_res.get('failover_traces', []),
+            'context_used': bool(context_data),
+            'tool_results': tool_results,
+            'action_cards': action_cards,
+        }
+    except Exception as e:
+        logger.warning("Copilot 多大模型路由调用异常或未配置，平滑降级至 DBA 专家规则引擎: %s", e)
 
     # 离线/降级模式：基于专家引擎与工具产出生成结构化回复
     fallback_res = _fallback_copilot_response(query, config, context_data, tool_results)

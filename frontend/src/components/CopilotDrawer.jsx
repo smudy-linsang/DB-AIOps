@@ -442,15 +442,31 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
                     marginTop: 6,
                     display: 'flex',
                     justifyContent: 'space-between',
-                    alignItems: 'center'
+                    alignItems: 'center',
+                    flexWrap: 'wrap',
+                    gap: 4,
                   }}
                 >
                   <span>{msg.time}</span>
-                  {msg.model && (
-                    <Tag bordered={false} color="default" style={{ fontSize: 10, margin: 0, padding: '0 4px' }}>
-                      {msg.model} {msg.latency_ms ? `· ${msg.latency_ms}ms` : ''}
-                    </Tag>
-                  )}
+                  <Space size={4} wrap>
+                    {msg.provider_name && (
+                      <Tag color="purple" style={{ fontSize: 10, margin: 0, padding: '0 4px' }}>
+                        🧠 {msg.provider_name}
+                      </Tag>
+                    )}
+                    {msg.model && (
+                      <Tag bordered={false} color="default" style={{ fontSize: 10, margin: 0, padding: '0 4px' }}>
+                        {msg.model} {msg.latency_ms ? `· ${msg.latency_ms}ms` : ''}
+                      </Tag>
+                    )}
+                    {msg.failover_traces?.length > 0 && (
+                      <Tooltip title={`触发容灾降级: ${msg.failover_traces.map(t => `${t.provider}(${t.error || t.reason})`).join(' -> ')}`}>
+                        <Tag color="warning" style={{ fontSize: 10, margin: 0, padding: '0 4px', cursor: 'pointer' }}>
+                          ⚡ 容灾降级 ({msg.failover_traces.length}跳)
+                        </Tag>
+                      </Tooltip>
+                    )}
+                  </Space>
                 </div>
               </div>
               {msg.role === 'user' && (
