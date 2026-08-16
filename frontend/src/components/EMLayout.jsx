@@ -20,7 +20,7 @@ import {
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
   BellFilled, ApartmentOutlined, FileTextOutlined,
-  TeamOutlined, CheckCircleOutlined, RobotOutlined,
+  TeamOutlined, CheckCircleOutlined, RobotOutlined, FireOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, systemAPI, setUser } from '../services/api';
