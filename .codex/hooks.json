@@ -1,0 +1,40 @@
+{
+  "hooks": {
+    "PreCompact": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/pre-compact.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ],
+    "SessionStart": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/session-start.py",
+            "timeout": 15
+          }
+        ]
+      }
+    ],
+    "SessionEnd": [
+      {
+        "matcher": "",
+        "hooks": [
+          {
+            "type": "command",
+            "command": "C:/Users/linsa/claude-memory-compiler/.venv/Scripts/python.exe C:/Users/linsa/claude-memory-compiler/hooks/session-end.py",
+            "timeout": 10
+          }
+        ]
+      }
+    ]
+  }
+}

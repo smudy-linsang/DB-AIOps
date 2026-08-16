@@ -1157,6 +1157,16 @@ function AssignmentTab() {
         rowClassName={r => r.override ? 'row-overridden' : ''}
       />
 
+      <OverrideModal
+        open={modalOpen}
+        initial={editingRow}
+        onOk={handleSave}
+        onCancel={() => setModalOpen(false)}
+      />
+    </>
+  )
+}
+
 // ─────────────────────────────────────────────
 // 采集与连接配置模板 编辑/新建弹窗
 // ─────────────────────────────────────────────
