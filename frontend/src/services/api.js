@@ -599,7 +599,7 @@ export const aiOpsAPI = {
   setAutonomy: (configId, level) => api.put(`/databases/${configId}/autonomy/`, { level }),
   causalGraph: (configId) => api.get(`/databases/${configId}/causal-graph/`),
   quickAssessment: (configId) => api.get(`/databases/${configId}/quick-assessment/`),
-  chat: (data) => api.post('/copilot/chat/', data),
+  chat: (data) => api.post('/copilot/chat/', data, { timeout: 90000 }),
 }
 
 // ==========================================

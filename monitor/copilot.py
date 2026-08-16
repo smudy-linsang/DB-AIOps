@@ -470,8 +470,8 @@ def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optio
 
         messages.append({'role': 'user', 'content': user_prompt})
 
-        # 智能匹配 copilot_chat 场景并执行多模型自动降级调用
-        router_res = LLMRouterEngine.chat(messages, scene='copilot_chat')
+        # 智能匹配 copilot_chat 场景并执行多模型自动降级调用 (单凭据 15s 超时迅速故障转移)
+        router_res = LLMRouterEngine.chat(messages, scene='copilot_chat', timeout=15)
         return {
             'answer': router_res['content'],
             'model': router_res['model'],
