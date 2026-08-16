@@ -113,14 +113,107 @@ class OpenAICompatProvider:
             raise LLMBadResponse(f"LLM 响应非 JSON: {resp.text[:200]}") from e
 
     # ------------------------------------------------------------------
+    def _is_gemini_native(self) -> bool:
+        """判断是否为 Google Gemini 官方原生端点"""
+        return 'generativelanguage.googleapis.com' in self.base_url and not self.base_url.endswith('/openai')
+
     def chat(self, messages: List[dict], *, temperature: float = None,
              max_tokens: int = None, json_mode: bool = True,
              scene: str = 'diagnosis', incident_id: str = '',
              timeout: int = None) -> ChatResult:
-        """Chat Completions。json_mode=True 时请求 response_format=json_object。
+        """Chat Completions。支持 OpenAI 规范与 Gemini 原生 REST 规范。"""
+        prompt_chars = sum(len(m.get('content') or '') for m in messages)
+        t0 = time.time()
 
-        超时/不可用直接抛异常不重试 (设计: 重试留给调用方按场景决定)。
-        """
+        # =========================================================
+        # 1. Google Gemini 原生 REST 规范 (generativelanguage.googleapis.com)
+        # =========================================================
+        if self._is_gemini_native():
+            # 格式化 contents
+            contents = []
+            system_instruction = None
+            for m in messages:
+                role = m.get('role', 'user')
+                content_text = m.get('content', '')
+                if role == 'system':
+                    system_instruction = {'parts': [{'text': content_text}]}
+                elif role in ('user', 'assistant'):
+                    gemini_role = 'user' if role == 'user' else 'model'
+                    contents.append({
+                        'role': gemini_role,
+                        'parts': [{'text': content_text}]
+                    })
+
+            gemini_payload = {'contents': contents}
+            if system_instruction:
+                gemini_payload['system_instruction'] = system_instruction
+
+            gen_config = {}
+            if temperature is not None:
+                gen_config['temperature'] = float(temperature)
+            if max_tokens:
+                gen_config['maxOutputTokens'] = int(max_tokens)
+            if json_mode:
+                gen_config['responseMimeType'] = 'application/json'
+            if gen_config:
+                gemini_payload['generationConfig'] = gen_config
+
+            # Gemini URL 格式: /models/{model}:generateContent
+            path = f"/models/{self.model}:generateContent"
+            import requests
+            url = f"{self.base_url}{path}"
+            headers = {'Content-Type': 'application/json'}
+            if self.api_key:
+                headers['x-goog-api-key'] = self.api_key
+                headers['Authorization'] = f"Bearer {self.api_key}"
+
+            proxies = None
+            if self.proxy_url:
+                proxies = {'http': self.proxy_url, 'https': self.proxy_url}
+
+            try:
+                resp = requests.post(url, json=gemini_payload, headers=headers,
+                                     timeout=timeout or self.timeout, proxies=proxies)
+            except requests.Timeout as e:
+                raise LLMTimeout(f"Gemini API 请求超时 (>{timeout or self.timeout}s): {url}") from e
+            except requests.RequestException as e:
+                raise LLMUnavailable(f"Gemini API 服务不可达: {e}") from e
+
+            if resp.status_code in (401, 403):
+                raise LLMUnavailable(f"Gemini API 鉴权失败 (HTTP {resp.status_code}): 请检查 API Key 是否有效")
+            if resp.status_code != 200:
+                raise LLMBadResponse(f"Gemini API 非预期响应 (HTTP {resp.status_code}): {resp.text[:300]}")
+
+            try:
+                data = resp.json()
+            except ValueError as e:
+                raise LLMBadResponse(f"Gemini 响应非 JSON: {resp.text[:200]}") from e
+
+            latency_ms = int((time.time() - t0) * 1000)
+            try:
+                cand = data['candidates'][0]
+                content = cand['content']['parts'][0]['text'] or ''
+            except (KeyError, IndexError, TypeError) as e:
+                raise LLMBadResponse(f"Gemini 响应结构异常: {json.dumps(data)[:200]}") from e
+
+            usage = data.get('usageMetadata') or {}
+            result = ChatResult(
+                content=content,
+                model=data.get('modelVersion', self.model),
+                prompt_tokens=int(usage.get('promptTokenCount') or 0),
+                completion_tokens=int(usage.get('candidatesTokenCount') or 0),
+                latency_ms=latency_ms,
+                raw=data,
+            )
+            _log_call(scene, 'ok', incident_id=incident_id, model=result.model,
+                      latency_ms=latency_ms, prompt_tokens=result.prompt_tokens,
+                      completion_tokens=result.completion_tokens,
+                      prompt_chars=prompt_chars, response_text=content)
+            return result
+
+        # =========================================================
+        # 2. OpenAI 标准规范 (/chat/completions)
+        # =========================================================
         payload = {
             'model': self.model,
             'messages': messages,
@@ -130,8 +223,6 @@ class OpenAICompatProvider:
         }
         if json_mode:
             payload['response_format'] = {'type': 'json_object'}
-        prompt_chars = sum(len(m.get('content') or '') for m in messages)
-        t0 = time.time()
         try:
             data = self._post('/chat/completions', payload, timeout=timeout)
         except LLMTimeout as e:

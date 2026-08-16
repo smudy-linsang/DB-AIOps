@@ -31,8 +31,14 @@ const MODEL_PRESETS = [
     model: 'MiniMax-Text-01',
   },
   {
-    label: 'Google Gemini (Gemini 1.5 Pro / Flash 官方兼容端点)',
+    label: 'Google Gemini (官方原生端点 /interactions 或 /v1beta)',
     value: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-1.5-flash',
+  },
+  {
+    label: 'Google Gemini (官方 OpenAI 兼容端点 /openai)',
+    value: 'gemini_openai',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
     model: 'gemini-1.5-pro',
   },
