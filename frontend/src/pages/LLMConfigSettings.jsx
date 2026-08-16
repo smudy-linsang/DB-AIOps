@@ -20,6 +20,18 @@ const { Option } = Select;
 // 常用主流大模型服务预设
 const MODEL_PRESETS = [
   {
+    label: 'MiniMax 名之梦 (TokenPlanPlus / abab6.5s / MiniMax-Text-01)',
+    value: 'minimax',
+    baseUrl: 'https://api.minimax.chat/v1',
+    model: 'MiniMax-Text-01',
+  },
+  {
+    label: 'Google Gemini (Gemini 1.5 Pro / Flash 官方兼容端点)',
+    value: 'gemini',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
+    model: 'gemini-1.5-pro',
+  },
+  {
     label: 'DeepSeek 官方 API (推荐/高性价比)',
     value: 'deepseek',
     baseUrl: 'https://api.deepseek.com/v1',
