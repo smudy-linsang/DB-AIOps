@@ -425,3 +425,61 @@ class CopilotTests(TestCase):
         self.assertIn('grade', assessment)
         self.assertGreaterEqual(assessment['overall_score'], 80)
         self.assertEqual(len(assessment['dimensions']), 5)
+
+
+# ==========================================================================
+# 8. v2.0 RCA 3.0 & Playbook 单元测试
+# ==========================================================================
+class V2OperationsTests(TestCase):
+
+    def setUp(self):
+        from monitor.models import DatabaseConfig, Incident
+        self.cfg = DatabaseConfig.objects.create(
+            name='test-mysql-trade',
+            db_type='mysql',
+            host='127.0.0.1',
+            port=3306,
+            username='trade_user',
+            password='enc:test_encrypted_pwd',  # noqa: secret
+            is_active=True,
+        )
+        self.inc = Incident.objects.create(
+            incident_id='INC-TEST-001',
+            title='MySQL 交易库行锁阻塞与连接激增',
+            priority='P1',
+            category='performance',
+            db_type='mysql',
+            config=self.cfg,
+            status='open',
+            occurred_at=timezone.now(),
+            rca_result={'root_causes': [{'domain': 'lock', 'name': '行锁等待', 'confidence': 0.92}]}
+        )
+
+    def test_rca3_causal_inference(self):
+        from monitor.rca_engine_v3 import CausalInferenceEngine
+        from monitor.models import IncidentCauseChain
+        chains = CausalInferenceEngine.infer_and_build_cause_chain(self.inc)
+        self.assertGreaterEqual(len(chains), 2)
+        self.assertTrue(IncidentCauseChain.objects.filter(incident=self.inc).exists())
+        self.assertEqual(chains[0]['node_type'], 'LOCK')
+
+    def test_playbook_dryrun_and_execution(self):
+        from monitor.playbook_engine_v2 import PlaybookExecutor
+        # 1. 预演保护账号 -> 拒绝
+        rej = PlaybookExecutor.evaluate_dryrun(
+            'KILL_ROOT_BLOCKER', self.cfg, {'username': 'root', 'session_id': '10'}
+        )
+        self.assertEqual(rej['status'], 'REJECTED')
+
+        # 2. 预演普通账号 -> 通过
+        pass_res = PlaybookExecutor.evaluate_dryrun(
+            'KILL_ROOT_BLOCKER', self.cfg, {'username': 'trade_user', 'session_id': '1845'}
+        )
+        self.assertEqual(pass_res['status'], 'PASSED')
+
+        # 3. 正式安全执行
+        exec_res = PlaybookExecutor.execute_playbook(
+            'KILL_ROOT_BLOCKER', self.cfg, 'admin', {'username': 'trade_user', 'session_id': '1845'}, incident=self.inc
+        )
+        self.assertEqual(exec_res['status'], 'success')
+        self.assertIn('RUN-', exec_res['run_id'])

@@ -2058,3 +2058,143 @@ class ComponentHeartbeat(models.Model):
     def __str__(self):
         return f"{self.get_component_display()}@{self.instance} ({self.status})"
 
+
+# =============================================================================
+# v2.0 4NF 扩展模型: 实例画像基线 / 因果推理链 / 自愈剧本模板与执行
+# =============================================================================
+
+class DatabaseMetricProfile(models.Model):
+    """v2.0: 数据库实例多维画像与 168h 基线特征 (4NF)"""
+    PROFILE_TYPE_CHOICES = (
+        ('oltp', '高频联机交易 OLTP'),
+        ('olap', '分析统计报表 OLAP'),
+        ('mixed', '混合负载 MIXED'),
+        ('batch', '夜间批处理 BATCH'),
+    )
+
+    config = models.OneToOneField(
+        DatabaseConfig, on_delete=models.CASCADE,
+        related_name='v2_profile', verbose_name="数据库配置"
+    )
+    profile_type = models.CharField(
+        max_length=32, choices=PROFILE_TYPE_CHOICES, default='mixed',
+        verbose_name="负载分类"
+    )
+    cpu_cores = models.IntegerField(null=True, blank=True, verbose_name="CPU核数")
+    memory_gb = models.DecimalField(max_digits=8, decimal_places=2, null=True, blank=True, verbose_name="内存(GB)")
+    data_disk_gb = models.DecimalField(max_digits=10, decimal_places=2, null=True, blank=True, verbose_name="磁盘空间(GB)")
+    max_qps = models.IntegerField(default=0, verbose_name="峰值QPS")
+    peak_hours_json = models.JSONField(default=list, blank=True, verbose_name="高峰时间段(0-23)")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "实例画像基线"
+        verbose_name_plural = "实例画像基线列表"
+
+    def __str__(self):
+        return f"{self.config.name} Profile ({self.profile_type})"
+
+
+class IncidentCauseChain(models.Model):
+    """v2.0: 故障因果推理链明细表 (4NF)"""
+    NODE_TYPE_CHOICES = (
+        ('CHANGE', '变更事件/DDL'),
+        ('SQL', 'SQL执行/全表扫'),
+        ('RESOURCE', '资源耗尽/水位'),
+        ('LOCK', '锁等待/阻塞源'),
+        ('CLUSTER', '集群节点/复制延迟'),
+    )
+
+    incident = models.ForeignKey(
+        'Incident', on_delete=models.CASCADE,
+        related_name='cause_chains', verbose_name="关联事故"
+    )
+    step_seq = models.IntegerField(verbose_name="步骤序号")
+    node_type = models.CharField(max_length=32, choices=NODE_TYPE_CHOICES, verbose_name="节点类型")
+    node_name = models.CharField(max_length=128, verbose_name="节点名称")
+    description = models.TextField(verbose_name="节点推理描述")
+    evidence_refs = models.JSONField(default=list, blank=True, verbose_name="关联证据编号列表")
+    confidence = models.DecimalField(max_digits=4, decimal_places=3, default=1.000, verbose_name="置信度")
+    metric_snapshot = models.JSONField(default=dict, blank=True, verbose_name="触发时指标快照")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "故障因果链节点"
+        verbose_name_plural = "故障因果链节点列表"
+        unique_together = [('incident', 'step_seq')]
+        ordering = ['incident', 'step_seq']
+
+    def __str__(self):
+        return f"{self.incident.incident_id} [Step {self.step_seq}] {self.node_name}"
+
+
+class PlaybookTemplate(models.Model):
+    """v2.0: 自愈应急剧本模板"""
+    RISK_LEVEL_CHOICES = (
+        ('low', '低风险 (可自愈)'),
+        ('medium', '中风险 (建议确认)'),
+        ('high', '高风险 (需双人审批)'),
+        ('critical', '极高风险 (强制阻断)'),
+    )
+
+    code = models.CharField(max_length=64, unique=True, verbose_name="剧本编码")
+    name = models.CharField(max_length=128, verbose_name="剧本名称")
+    db_types = models.JSONField(default=list, verbose_name="适用数据库类型")
+    risk_level = models.CharField(max_length=16, choices=RISK_LEVEL_CHOICES, default='medium', verbose_name="风险等级")
+    min_autonomy_level = models.IntegerField(default=1, verbose_name="最低自治等级")
+    steps_payload = models.JSONField(default=list, verbose_name="执行步骤序列")
+    rollback_payload = models.JSONField(default=list, blank=True, verbose_name="逆向回滚步骤")
+    description = models.TextField(blank=True, verbose_name="剧本描述")
+    is_active = models.BooleanField(default=True, verbose_name="是否启用")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        verbose_name = "自愈剧本模板"
+        verbose_name_plural = "自愈剧本模板列表"
+
+    def __str__(self):
+        return f"{self.name} ({self.code})"
+
+
+class PlaybookRunRecord(models.Model):
+    """v2.0: 自愈剧本执行记录"""
+    STATUS_CHOICES = (
+        ('dryrun_passed', '预演通过'),
+        ('dryrun_rejected', '预演驳回'),
+        ('approved', '已审批待执行'),
+        ('running', '正在执行'),
+        ('success', '执行成功'),
+        ('failed', '执行失败'),
+        ('rolled_back', '已自动回滚'),
+    )
+
+    run_id = models.CharField(max_length=64, primary_key=True, verbose_name="执行ID")
+    incident = models.ForeignKey(
+        'Incident', on_delete=models.SET_NULL, null=True, blank=True,
+        related_name='playbook_run_records', verbose_name="关联事故"
+    )
+    template = models.ForeignKey(
+        PlaybookTemplate, on_delete=models.PROTECT,
+        related_name='run_records', verbose_name="关联剧本"
+    )
+    config = models.ForeignKey(
+        DatabaseConfig, on_delete=models.CASCADE,
+        related_name='playbook_run_records', verbose_name="目标数据库"
+    )
+    operator = models.CharField(max_length=64, verbose_name="操作人")
+    status = models.CharField(max_length=32, choices=STATUS_CHOICES, default='dryrun_passed', verbose_name="执行状态")
+    dryrun_result = models.JSONField(default=dict, blank=True, verbose_name="预演评估结果")
+    execution_result = models.JSONField(default=dict, blank=True, verbose_name="执行产出结果")
+    started_at = models.DateTimeField(null=True, blank=True, verbose_name="开始时间")
+    finished_at = models.DateTimeField(null=True, blank=True, verbose_name="完成时间")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+
+    class Meta:
+        verbose_name = "自愈执行记录"
+        verbose_name_plural = "自愈执行记录列表"
+
+    def __str__(self):
+        return f"{self.run_id} - {self.template.name} ({self.status})"
+

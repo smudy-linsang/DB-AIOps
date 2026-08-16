@@ -167,6 +167,7 @@ const EMLayout = ({ children }) => {
       { key: '/capacity', icon: <ThunderboltOutlined />, label: '容量规划', perm: Perm.CAPACITY_VIEW },
       { key: '/tickets', icon: <AppstoreOutlined />, label: '工单管理', perm: Perm.TICKETS_VIEW },
       { key: '/incidents', icon: <ThunderboltOutlined />, label: '事故中心', perm: Perm.ALERTS_VIEW },
+      { key: '/incident-warroom', icon: <FireOutlined style={{ color: '#ef4444' }} />, label: '排障作战室', perm: Perm.ALERTS_VIEW },
       { key: '/sla-report', icon: <DashboardOutlined />, label: 'SLA 报表', perm: Perm.ALERTS_VIEW },
       { key: '/ai-ops', icon: <RobotOutlined />, label: 'AI 运营中心', perm: Perm.METRICS_VIEW },
       { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },

@@ -28,6 +28,7 @@ import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
 import SlaReport from './pages/SlaReport';
 import AiOpsCenter from './pages/AiOpsCenter';
+import IncidentWarRoom from './pages/IncidentWarRoom';
 import { canAccessRoute, getUserRole } from './utils/permission';
 import { authAPI, setUser as saveUserToStorage } from './services/api';
 
@@ -107,9 +108,9 @@ function LayoutRoutes() {
           <Route path="/databases/:id/performance" element={<PermissionRoute path="/databases/:id/performance"><PerformanceCenter /></PermissionRoute>} />
           <Route path="/databases/:id/performance-legacy" element={<PermissionRoute path="/databases/:id/performance"><DatabasePerformanceHub /></PermissionRoute>} />
           <Route path="/alerts" element={<PermissionRoute path="/alerts"><AlertList /></PermissionRoute>} />
-          <Route path="/alerts/:id" element={<PermissionRoute path="/alerts"><AlertDetail /></PermissionRoute>} />
           <Route path="/incidents" element={<PermissionRoute path="/alerts"><IncidentList /></PermissionRoute>} />
           <Route path="/incidents/:incidentId" element={<PermissionRoute path="/alerts"><IncidentDetail /></PermissionRoute>} />
+          <Route path="/incident-warroom" element={<PermissionRoute path="/alerts"><IncidentWarRoom /></PermissionRoute>} />
           <Route path="/sla-report" element={<PermissionRoute path="/alerts"><SlaReport /></PermissionRoute>} />
           <Route path="/ai-ops" element={<PermissionRoute path="/ai-ops"><AiOpsCenter /></PermissionRoute>} />
           <Route path="/inspection" element={<PermissionRoute path="/inspection"><InspectionCenter /></PermissionRoute>} />

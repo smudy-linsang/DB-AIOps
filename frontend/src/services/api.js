@@ -554,6 +554,21 @@ export const aiOpsAPI = {
   chat: (data) => api.post('/copilot/chat/', data),
 }
 
+// ==========================================
+// DB-AIOps v2.0 智能运维中枢 API (1-5-15 闭环)
+// ==========================================
+export const apiV2 = {
+  // 1-Min 活跃故障清单
+  getActiveIncidents: () => api.get('/../v2/incidents/realtime-active/'),
+  // 5-Min WarRoom 全景排障上下文
+  getWarRoomContext: (incidentId) => api.get(`/../v2/incidents/${incidentId}/warroom-context/`),
+  // 阻塞拓扑图
+  getBlockingGraph: (configId) => api.get(`/../v2/databases/${configId}/blocking-graph/`),
+  // 15-Min Playbook 预演与自愈执行
+  dryRunPlaybook: (data) => api.post('/../v2/playbooks/execute-dryrun/', data),
+  executePlaybook: (data) => api.post('/../v2/playbooks/execute-safely/', data),
+}
+
 // Phase 7B: 性能中心 (契约 phase7/20)
 export const perfAPI = {
   aas: (id, params = {}) => api.get(`/databases/${id}/perf/aas/`, { params }),

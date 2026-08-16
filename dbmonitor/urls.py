@@ -79,6 +79,10 @@ from monitor.healthcheck import PlatformHealthCheckView
 from monitor.api_views_system import (
     SystemHealthView, SystemComponentsView, SystemDegradationsView,
 )
+from monitor.api_views_v2 import (
+    RealtimeActiveIncidentsView, WarRoomContextView, BlockingGraphView,
+    PlaybookDryRunView, PlaybookExecuteView,
+)
 
 FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
@@ -296,6 +300,13 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/quick-assessment/', QuickAssessmentView.as_view()),
     path('api/v1/llm/test-connection/', LlmTestConnectionView.as_view()),
     path('api/v1/copilot/chat/', CopilotChatView.as_view()),
+
+    # ========== REST API v2.0 (1-5-15 智能运维中枢) ==========
+    path('api/v2/incidents/realtime-active/', RealtimeActiveIncidentsView.as_view()),
+    path('api/v2/incidents/<str:incident_id>/warroom-context/', WarRoomContextView.as_view()),
+    path('api/v2/databases/<int:config_id>/blocking-graph/', BlockingGraphView.as_view()),
+    path('api/v2/playbooks/execute-dryrun/', PlaybookDryRunView.as_view()),
+    path('api/v2/playbooks/execute-safely/', PlaybookExecuteView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),
