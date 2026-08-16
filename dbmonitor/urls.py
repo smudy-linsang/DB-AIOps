@@ -72,7 +72,7 @@ from monitor.api_views_phase8 import (
     RcaFeedbackView, PlanFeedbackView, InvestigateView, AgentTraceListView,
     ChangeCreateView, ChangeListView, AiOpsStatsView, LlmCallListView,
     RuleStatListView, AutonomyView, CausalGraphView, LlmTestConnectionView,
-    CopilotChatView, QuickAssessmentView,
+    LlmConfigView, CopilotChatView, QuickAssessmentView,
 )
 from monitor.observability import prometheus_metrics_view
 from monitor.healthcheck import PlatformHealthCheckView
@@ -298,6 +298,7 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/autonomy/', AutonomyView.as_view()),
     path('api/v1/databases/<int:config_id>/causal-graph/', CausalGraphView.as_view()),
     path('api/v1/databases/<int:config_id>/quick-assessment/', QuickAssessmentView.as_view()),
+    path('api/v1/llm/config/', LlmConfigView.as_view()),
     path('api/v1/llm/test-connection/', LlmTestConnectionView.as_view()),
     path('api/v1/copilot/chat/', CopilotChatView.as_view()),
 

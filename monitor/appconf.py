@@ -42,6 +42,17 @@ SPECS = {
     'LOGIN_MAX_ATTEMPTS_PER_USER': Spec('LOGIN_MAX_ATTEMPTS_PER_USER', 20, int, lambda v: v >= 1),
     'TRUSTED_PROXY_DEPTH':     Spec('TRUSTED_PROXY_DEPTH', 1, int, lambda v: v >= 1),
     'API_KEY_TTL_SEC':         Spec('API_KEY_TTL_SEC', 90 * 86400, int, lambda v: v >= 300),
+    # Phase 8 LLM 大模型配置
+    'LLM_ENABLED':             Spec('LLM_ENABLED', False, bool),
+    'LLM_PROVIDER':            Spec('LLM_PROVIDER', 'openai_compat', str),
+    'LLM_BASE_URL':            Spec('LLM_BASE_URL', 'http://localhost:11434/v1', str),
+    'LLM_API_KEY':             Spec('LLM_API_KEY', 'ollama', str),
+    'LLM_MODEL':               Spec('LLM_MODEL', 'qwen2.5:14b-instruct', str),
+    'LLM_TEMPERATURE':         Spec('LLM_TEMPERATURE', 0.1, float, lambda v: 0.0 <= v <= 2.0),
+    'LLM_MAX_TOKENS':          Spec('LLM_MAX_TOKENS', 2048, int, lambda v: v >= 64),
+    'LLM_TIMEOUT_SEC':         Spec('LLM_TIMEOUT_SEC', 25, int, lambda v: v >= 1),
+    'AGENT_ENABLED':           Spec('AGENT_ENABLED', False, bool),
+    'EMBED_ENABLED':           Spec('EMBED_ENABLED', False, bool),
 }
 
 

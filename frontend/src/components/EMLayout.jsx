@@ -20,7 +20,7 @@ import {
   DatabaseOutlined, DashboardOutlined, AlertOutlined,
   AppstoreOutlined, ThunderboltOutlined, ToolOutlined,
   BellFilled, ApartmentOutlined, FileTextOutlined,
-  TeamOutlined, CheckCircleOutlined, RobotOutlined, FireOutlined,
+  TeamOutlined, CheckCircleOutlined, RobotOutlined, FireOutlined, KeyOutlined,
 } from '@ant-design/icons';
 import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, systemAPI, setUser } from '../services/api';
@@ -170,6 +170,7 @@ const EMLayout = ({ children }) => {
       { key: '/incident-warroom', icon: <FireOutlined style={{ color: '#ef4444' }} />, label: '排障作战室', perm: Perm.ALERTS_VIEW },
       { key: '/sla-report', icon: <DashboardOutlined />, label: 'SLA 报表', perm: Perm.ALERTS_VIEW },
       { key: '/ai-ops', icon: <RobotOutlined />, label: 'AI 运营中心', perm: Perm.METRICS_VIEW },
+      { key: '/llm-config', icon: <KeyOutlined style={{ color: '#8b5cf6' }} />, label: '大模型配置', perm: Perm.ALERT_CONFIG_VIEW },
       { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },
       { type: 'divider' },
       { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },

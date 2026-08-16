@@ -538,37 +538,149 @@ class CausalGraphView(_BaseView):
         return self.ok(edges=edges, fallback_static=not edges)
 
 
+class LlmConfigView(_BaseView):
+    """GET / PUT /api/v1/llm/config/ (查看与动态保存 LLM 大模型及 API Key 配置)"""
+
+    @method_decorator(csrf_exempt)
+    @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    def dispatch(self, *a, **k):
+        return super().dispatch(*a, **k)
+
+    def get(self, request):
+        """获取当前大模型与 API Key 配置状态（脱敏输出）"""
+        api_key = getattr(settings, 'LLM_API_KEY', '')
+        masked_key = ''
+        if api_key:
+            masked_key = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else "****"
+
+        return self.ok(
+            llm_enabled=bool(getattr(settings, 'LLM_ENABLED', False)),
+            llm_provider=getattr(settings, 'LLM_PROVIDER', 'openai_compat'),
+            llm_base_url=getattr(settings, 'LLM_BASE_URL', 'http://localhost:11434/v1'),
+            llm_model=getattr(settings, 'LLM_MODEL', 'qwen2.5:14b-instruct'),
+            llm_api_key_masked=masked_key,
+            has_api_key=bool(api_key),
+            llm_temperature=float(getattr(settings, 'LLM_TEMPERATURE', 0.1)),
+            llm_max_tokens=int(getattr(settings, 'LLM_MAX_TOKENS', 2048)),
+            llm_timeout_sec=int(getattr(settings, 'LLM_TIMEOUT_SEC', 25)),
+            agent_enabled=bool(getattr(settings, 'AGENT_ENABLED', False)),
+            embed_enabled=bool(getattr(settings, 'EMBED_ENABLED', False)),
+        )
+
+    def put(self, request):
+        """在线更新大模型与 API Key 配置，并持久化到 .env 文件"""
+        if not request.user.is_superuser:
+            return self.err('FORBIDDEN', '仅超级管理员可修改全局大模型与 API Key 配置', 403)
+
+        data = self.body(request)
+        llm_enabled_val = data.get('llm_enabled', True)
+        base_url = (data.get('llm_base_url') or '').strip()
+        api_key = (data.get('llm_api_key') or '').strip()
+        model = (data.get('llm_model') or '').strip()
+        temperature = data.get('llm_temperature')
+        max_tokens = data.get('llm_max_tokens')
+        agent_enabled_val = data.get('agent_enabled', True)
+
+        # 动态更新 settings 运行时内存
+        settings.LLM_ENABLED = bool(llm_enabled_val)
+        if base_url:
+            settings.LLM_BASE_URL = base_url
+        if api_key:
+            settings.LLM_API_KEY = api_key
+        if model:
+            settings.LLM_MODEL = model
+        if temperature is not None:
+            settings.LLM_TEMPERATURE = float(temperature)
+        if max_tokens is not None:
+            settings.LLM_MAX_TOKENS = int(max_tokens)
+        settings.AGENT_ENABLED = bool(agent_enabled_val)
+
+        # 重置全局 Provider 单例缓存
+        from monitor.llm import providers
+        with providers._chat_lock:
+            providers._chat_provider = None
+
+        # 同步写入/更新 .env 文件
+        env_path = os.path.join(settings.BASE_DIR, '.env')
+        try:
+            env_lines = []
+            if os.path.exists(env_path):
+                with open(env_path, 'r', encoding='utf-8') as f:
+                    env_lines = f.readlines()
+
+            updated_keys = {
+                'LLM_ENABLED': str(settings.LLM_ENABLED),
+                'LLM_BASE_URL': settings.LLM_BASE_URL,
+                'LLM_MODEL': settings.LLM_MODEL,
+                'AGENT_ENABLED': str(settings.AGENT_ENABLED),
+            }
+            if api_key:
+                updated_keys['LLM_API_KEY'] = api_key
+
+            new_lines = []
+            seen_keys = set()
+            for line in env_lines:
+                k = line.split('=')[0].strip() if '=' in line else ''
+                if k in updated_keys:
+                    new_lines.append(f"{k}={updated_keys[k]}\n")
+                    seen_keys.add(k)
+                else:
+                    new_lines.append(line)
+
+            # 追加新配置项
+            for k, v in updated_keys.items():
+                if k not in seen_keys:
+                    new_lines.append(f"{k}={v}\n")
+
+            with open(env_path, 'w', encoding='utf-8') as f:
+                f.writelines(new_lines)
+
+        except Exception as e:
+            logger.warning("写入 .env 失败: %s", e)
+
+        return self.ok(message="大模型与 API Key 配置已成功更新并生效！")
+
+
 class LlmTestConnectionView(_BaseView):
     """POST /api/v1/llm/test-connection/ (phase8/30 §3.9)。
     直接用当前 settings 打一次 ping, 不受 LLM_ENABLED 开关限制 (供上线前验证)。"""
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.DATABASES_UPDATE))
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request):
-        from monitor.llm.providers import get_chat_provider, get_embed_provider
-        result = {'ok': False, 'model': getattr(settings, 'LLM_MODEL', ''),
-                  'latency_ms': 0, 'embed_ok': False, 'embed_dim': 0}
+        data = self.body(request)
+        override_base = (data.get('llm_base_url') or '').strip()
+        override_key = (data.get('llm_api_key') or '').strip()
+        override_model = (data.get('llm_model') or '').strip()
+
+        from monitor.llm.providers import OpenAICompatProvider
+        result = {
+            'ok': False,
+            'model': override_model or getattr(settings, 'LLM_MODEL', ''),
+            'latency_ms': 0,
+        }
         try:
-            provider = get_chat_provider()
+            provider = OpenAICompatProvider(
+                base_url=override_base or getattr(settings, 'LLM_BASE_URL', ''),
+                api_key=override_key or getattr(settings, 'LLM_API_KEY', ''),
+                model=override_model or getattr(settings, 'LLM_MODEL', ''),
+                timeout=15
+            )
             t0 = time.time()
             res = provider.chat(
-                [{'role': 'user', 'content': "ping, 只需回复 pong"}],
-                scene='test', max_tokens=8, json_mode=False)
+                [{'role': 'user', 'content': "你好！请回复一句：DB-AIOps 智能助手连接测试成功！"}],
+                scene='test', max_tokens=32, json_mode=False)
             result['ok'] = bool(res and res.content)
+            result['reply'] = res.content if res else ''
             result['latency_ms'] = int((time.time() - t0) * 1000)
         except Exception as e:
             result['error'] = str(e)[:300]
-        if getattr(settings, 'EMBED_ENABLED', False):
-            try:
-                vecs = get_embed_provider().embed(['ping'], scene='test')
-                result['embed_ok'] = bool(vecs and vecs[0])
-                result['embed_dim'] = len(vecs[0]) if vecs and vecs[0] else 0
-            except Exception as e:
-                result['embed_error'] = str(e)[:300]
+
         return self.ok(**result)
 
 

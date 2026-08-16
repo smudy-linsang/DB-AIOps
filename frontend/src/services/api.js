@@ -543,8 +543,9 @@ export const incidentAPI = {
 export const aiOpsAPI = {
   stats: (params = {}) => api.get('/ai-ops/stats/', { params }),
   llmCalls: (params = {}) => api.get('/ai-ops/llm-calls/', { params }),
-  ruleStats: () => api.get('/ai-ops/rule-stats/'),
-  testLlm: () => api.post('/llm/test-connection/', {}),
+  getLlmConfig: () => api.get('/llm/config/'),
+  updateLlmConfig: (data) => api.put('/llm/config/', data),
+  testLlm: (data = {}) => api.post('/llm/test-connection/', data),
   createChange: (data) => api.post('/changes/', data),
   changes: (configId, params = {}) => api.get(`/databases/${configId}/changes/`, { params }),
   getAutonomy: (configId) => api.get(`/databases/${configId}/autonomy/`),
