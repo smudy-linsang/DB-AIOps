@@ -175,9 +175,10 @@ class OpenAICompatProvider:
             url = f"{clean_base}{path}"
             headers = {'Content-Type': 'application/json'}
             if self.api_key:
+                # 兼容 Google AI Studio API Key (x-goog-api-key 或 URL ?key=)
                 headers['x-goog-api-key'] = self.api_key
-                headers['Authorization'] = f"Bearer {self.api_key}"
-                # 兼容 Google 部分代理：同时在 URL query 挂载 key
+                if self.api_key.startswith('ya29.'): # OAuth2 Token 才发 Bearer
+                    headers['Authorization'] = f"Bearer {self.api_key}"
                 if '?' not in url:
                     url = f"{url}?key={self.api_key}"
 
@@ -193,8 +194,14 @@ class OpenAICompatProvider:
             except requests.RequestException as e:
                 raise LLMUnavailable(f"Gemini API 服务不可达: {e}") from e
 
-            if resp.status_code in (401, 403):
-                raise LLMUnavailable(f"Gemini API 鉴权失败 (HTTP {resp.status_code}): 请检查 API Key 是否有效")
+            if resp.status_code in (400, 401, 403):
+                err_text = ''
+                try:
+                    err_json = resp.json()
+                    err_text = err_json.get('error', {}).get('message') or resp.text[:200]
+                except Exception:
+                    err_text = resp.text[:200]
+                raise LLMUnavailable(f"Gemini 鉴权/请求异常 (HTTP {resp.status_code}): {err_text}")
             if resp.status_code != 200:
                 raise LLMBadResponse(f"Gemini API 非预期响应 (HTTP {resp.status_code}): {resp.text[:300]}")
 
