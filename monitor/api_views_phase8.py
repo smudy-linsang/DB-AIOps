@@ -790,7 +790,7 @@ class LlmCredentialPingView(_BaseView):
         try:
             res = provider.chat(
                 [{'role': 'user', 'content': "ping, 请确认连通并回复 pong"}],
-                scene='ping', max_tokens=16, json_mode=False
+                scene='ping', max_tokens=150, json_mode=False
             )
             result['ok'] = bool(res and res.content)
             result['reply'] = res.content if res else ''

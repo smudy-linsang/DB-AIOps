@@ -211,11 +211,23 @@ class OpenAICompatProvider:
                 raise LLMBadResponse(f"Gemini 响应非 JSON: {resp.text[:200]}") from e
 
             latency_ms = int((time.time() - t0) * 1000)
+            content = ''
             try:
-                cand = data['candidates'][0]
-                content = cand['content']['parts'][0]['text'] or ''
-            except (KeyError, IndexError, TypeError) as e:
-                raise LLMBadResponse(f"Gemini 响应结构异常: {json.dumps(data)[:200]}") from e
+                cand = data.get('candidates', [{}])[0]
+                parts = cand.get('content', {}).get('parts', [])
+                # 遍历提取所有 text 块（兼容思考模型思维链与正文分离）
+                texts = [p.get('text', '') for p in parts if 'text' in p]
+                content = '\n'.join(texts).strip()
+            except Exception as e:
+                logger.warning("Gemini 响应解析非致命异常: %s", e)
+
+            if not content:
+                # 若因截断等原因 content 为空，提供友好的回退说明
+                finish_reason = data.get('candidates', [{}])[0].get('finishReason', '')
+                if finish_reason:
+                    content = f"[{finish_reason}]"
+                else:
+                    raise LLMBadResponse(f"Gemini 响应缺少有效文本: {json.dumps(data)[:200]}")
 
             usage = data.get('usageMetadata') or {}
             result = ChatResult(

@@ -31,13 +31,19 @@ const MODEL_PRESETS = [
     model: 'MiniMax-Text-01',
   },
   {
-    label: 'Google Gemini (官方原生端点 /v1beta - 推荐 gemini-2.5-flash)',
+    label: 'Google Gemini 3.7 (官方原生端点 /v1beta - gemini-3.7-flash 思考模型)',
+    value: 'gemini_37_flash',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-3.7-flash',
+  },
+  {
+    label: 'Google Gemini 2.5 Flash (官方原生端点 /v1beta - gemini-2.5-flash)',
     value: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     model: 'gemini-2.5-flash',
   },
   {
-    label: 'Google Gemini Pro (官方原生端点 /v1beta - gemini-2.5-pro)',
+    label: 'Google Gemini 2.5 Pro (官方原生端点 /v1beta - gemini-2.5-pro)',
     value: 'gemini_pro',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
     model: 'gemini-2.5-pro',
