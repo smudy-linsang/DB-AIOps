@@ -598,8 +598,7 @@ class LlmConfigView(_BaseView):
 
         # 重置全局 Provider 单例缓存
         from monitor.llm import providers
-        with providers._chat_lock:
-            providers._chat_provider = None
+        providers.reset_providers()
 
         # 同步写入/更新 .env 文件
         env_path = os.path.join(settings.BASE_DIR, '.env')
