@@ -604,19 +604,46 @@ def generate_quick_health_assessment(config_id: int) -> Dict[str, Any]:
         except Exception:
             metrics = {}
 
-    # 5 维度评分推导
-    cpu_val = float(metrics.get('cpu_usage') or metrics.get('cpu_used_pct') or 25)
-    conn_val = float(metrics.get('conn_usage_pct') or metrics.get('active_sessions') or 30)
-    disk_val = float(metrics.get('disk_usage_pct') or metrics.get('tablespace_used_pct') or 45)
+    def _number(*keys):
+        for key in keys:
+            value = metrics.get(key)
+            if value is not None and value != '':
+                try:
+                    return float(value)
+                except (TypeError, ValueError):
+                    continue
+        return None
 
-    perf_score = max(0, int(100 - (cpu_val * 0.6)))
-    conn_score = max(0, int(100 - (conn_val * 0.5)))
-    storage_score = max(0, int(100 - (disk_val * 0.7)))
+    # 只使用有口径的真实指标。绝对连接数必须除以上限后才能作为百分比。
+    cpu_val = _number('cpu_usage', 'cpu_used_pct')
+    conn_val = _number('conn_usage_pct')
+    if conn_val is None:
+        active = _number('threads_connected', 'active_connections', 'active_sessions')
+        maximum = _number('max_connections', 'max_processes')
+        if active is not None and maximum and maximum > 0:
+            conn_val = active / maximum * 100
+    disk_val = _number('disk_usage_pct', 'tablespace_used_pct')
+
+    perf_score = None if cpu_val is None else max(0, int(100 - (cpu_val * 0.6)))
+    conn_score = None if conn_val is None else max(0, int(100 - (conn_val * 0.5)))
+    storage_score = None if disk_val is None else max(0, int(100 - (disk_val * 0.7)))
     alert_score = max(20, 100 - (alerts_count * 15))
-    avail_score = 100 if (latest_log and latest_log.status == 'UP') else 50
+    avail_score = None if latest_log is None else (100 if latest_log.status == 'UP' else 0)
 
-    overall = int((perf_score * 0.25) + (conn_score * 0.2) + (storage_score * 0.2) + (alert_score * 0.2) + (avail_score * 0.15))
-    grade = 'A' if overall >= 90 else ('B' if overall >= 80 else ('C' if overall >= 65 else 'D'))
+    weighted = [(perf_score, .25), (conn_score, .20), (storage_score, .20),
+                (alert_score, .20), (avail_score, .15)]
+    known_weight = sum(weight for score, weight in weighted if score is not None)
+    overall = (int(sum(score * weight for score, weight in weighted
+                       if score is not None) / known_weight)
+               if latest_log is not None and known_weight else None)
+    grade = ('N/A' if overall is None else
+             ('A' if overall >= 90 else ('B' if overall >= 80 else
+              ('C' if overall >= 65 else 'D'))))
+    risk_items = []
+    if conn_val is not None and conn_val >= 85:
+        risk_items.append({'title': '连接池接近饱和', 'value': round(conn_val, 2)})
+    if disk_val is not None and disk_val >= 85:
+        risk_items.append({'title': '容量水位较高', 'value': round(disk_val, 2)})
 
     return {
         'config_id': config.id,
@@ -626,11 +653,17 @@ def generate_quick_health_assessment(config_id: int) -> Dict[str, Any]:
         'grade': grade,
         'dimensions': [
             {'name': '高可用性', 'score': avail_score, 'full': 100},
-            {'name': '性能负载', 'score': perf_score, 'full': 100},
+            {'name': '性能与负载', 'score': perf_score, 'full': 100},
             {'name': '连接健康', 'score': conn_score, 'full': 100},
-            {'name': '容量存储', 'score': storage_score, 'full': 100},
+            {'name': '容量规划', 'score': storage_score, 'full': 100},
             {'name': '告警压力', 'score': alert_score, 'full': 100},
         ],
-        'summary': f"综合体检评分为 {overall} 分 ({grade} 级)。当前活跃告警 {alerts_count} 条，建议关注高负载 SQL 与表空间容量增长趋势。",
+        'risk_items': risk_items,
+        'data_completeness': round(known_weight, 2),
+        'degraded': latest_log is None or any(
+            value is None for value in (cpu_val, conn_val, disk_val)),
+        'summary': (f"综合体检评分为 {overall} 分 ({grade} 级)。当前活跃告警 {alerts_count} 条。"
+                    if overall is not None else
+                    f"暂无有效采集快照，不能生成健康分。当前活跃告警 {alerts_count} 条。"),
         'evaluated_at': timezone.now().isoformat()
     }

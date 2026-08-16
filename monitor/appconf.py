@@ -35,6 +35,9 @@ SPECS = {
     'TARGET_DB_STATEMENT_TIMEOUT_MS': Spec('TARGET_DB_STATEMENT_TIMEOUT_MS', 5000, int,
                                            lambda v: 500 <= v <= 60000),
     'TIMESCALEDB_POOL_MAX':    Spec('TIMESCALEDB_POOL_MAX', 16, int, lambda v: 1 <= v <= 200),
+    'TIMESCALEDB_ENABLED':     Spec('TIMESCALEDB_ENABLED', True, bool),
+    'USE_REDIS_CACHE':         Spec('USE_REDIS_CACHE', False, bool),
+    'ES_ENABLED':              Spec('ES_ENABLED', True, bool),
     # 安全
     'LOGIN_MAX_ATTEMPTS':      Spec('LOGIN_MAX_ATTEMPTS', 5, int, lambda v: v >= 1),
     'LOGIN_FAIL_WINDOW_SEC':   Spec('LOGIN_FAIL_WINDOW_SEC', 600, int, lambda v: v >= 30),
@@ -42,6 +45,8 @@ SPECS = {
     'LOGIN_MAX_ATTEMPTS_PER_USER': Spec('LOGIN_MAX_ATTEMPTS_PER_USER', 20, int, lambda v: v >= 1),
     'TRUSTED_PROXY_DEPTH':     Spec('TRUSTED_PROXY_DEPTH', 1, int, lambda v: v >= 1),
     'API_KEY_TTL_SEC':         Spec('API_KEY_TTL_SEC', 90 * 86400, int, lambda v: v >= 300),
+    'AUTH_ALLOW_COOKIE_TOKEN': Spec('AUTH_ALLOW_COOKIE_TOKEN', False, bool),
+    'READINESS_REQUIRE_WORKERS': Spec('READINESS_REQUIRE_WORKERS', False, bool),
     # Phase 8 LLM 大模型配置
     'LLM_ENABLED':             Spec('LLM_ENABLED', False, bool),
     'LLM_PROVIDER':            Spec('LLM_PROVIDER', 'openai_compat', str),

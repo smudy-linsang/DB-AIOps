@@ -5,9 +5,12 @@ DB-AIOps v2.0: 自愈 Playbook 决策与安全沙箱 (Dry-Run) 引擎
 提供标准化应急处置、Dry-Run 预演影响评估、安全阻断拦截与逆向回滚保障。
 """
 import logging
+import uuid
 from typing import Dict, Any, List, Optional
 from django.utils import timezone
-from monitor.models import PlaybookTemplate, PlaybookRunRecord, Incident, DatabaseConfig
+from monitor.models import (
+    Playbook, PlaybookRun, PlaybookTemplate, Incident, DatabaseConfig,
+)
 
 logger = logging.getLogger("monitor.playbook")
 
@@ -47,9 +50,9 @@ DEFAULT_PLAYBOOKS = [
 
 
 def init_default_playbooks():
-    """初始化预置剧本模板"""
+    """只补建缺失的兼容模板，绝不在请求路径覆盖 DBA 的定制内容。"""
     for item in DEFAULT_PLAYBOOKS:
-        PlaybookTemplate.objects.update_or_create(
+        PlaybookTemplate.objects.get_or_create(
             code=item['code'],
             defaults={
                 'name': item['name'],
@@ -68,6 +71,28 @@ class PlaybookExecutor:
     """自愈 Playbook 预演与安全执行中枢"""
 
     PROTECTED_USERS = {'root', 'sys', 'system', 'rdsadmin', 'postgres', 'administrator'}
+    PLAYBOOK_MAP = {
+        'KILL_ROOT_BLOCKER': 'PB-LOCK-KILL-BLOCKER',
+    }
+
+    @classmethod
+    def _resolve_params(cls, template_code, incident, supplied):
+        """从服务端事故证据解析高风险目标，不信任浏览器提交的用户名/SID。"""
+        params = dict(supplied or {})
+        if template_code != 'KILL_ROOT_BLOCKER':
+            return params, None
+        if incident is None:
+            return {}, '终止阻塞会话必须关联有效事故'
+        blocker_id = None
+        for event in incident.events.order_by('-occurred_at'):
+            chains = (event.detail or {}).get('chains') or []
+            if chains:
+                blocker_id = chains[0].get('blocker') or chains[0].get('blocker_id')
+                if blocker_id:
+                    break
+        if not blocker_id:
+            return {}, '事故证据中没有可复核的根阻塞会话，拒绝执行'
+        return {'blocker_id': str(blocker_id)}, None
 
     @classmethod
     def evaluate_dryrun(cls, template_code: str, config: DatabaseConfig, params: Dict[str, Any], incident: Optional[Incident] = None) -> Dict[str, Any]:
@@ -83,14 +108,10 @@ class PlaybookExecutor:
         if config.db_type not in template.db_types:
             return {'status': 'REJECTED', 'reason': f'该剧本不支持 {config.db_type} 类型数据库'}
 
-        # 2. 针对 KILL_ROOT_BLOCKER 专属安全检查
-        if template_code == 'KILL_ROOT_BLOCKER':
-            target_user = str(params.get('username') or '').lower().strip()
-            if target_user in cls.PROTECTED_USERS:
-                return {
-                    'status': 'REJECTED',
-                    'reason': f'安全熔断拦截：目标用户 [{target_user}] 属于核心系统保留账号，禁止通过自愈脚本自动 Kill！'
-                }
+        # 2. 高风险目标必须来自服务端事故证据，浏览器参数不能充当安全事实。
+        resolved_params, reason = cls._resolve_params(template_code, incident, params)
+        if reason:
+            return {'status': 'REJECTED', 'reason': reason}
 
         # 3. 预演通过，输出影响面评估
         return {
@@ -102,6 +123,7 @@ class PlaybookExecutor:
             'affected_sessions_estimate': 1,
             'released_locks_estimate': 12,
             'rollback_available': bool(template.rollback_payload),
+            'resolved_params': resolved_params,
             'evaluated_at': timezone.now().isoformat()
         }
 
@@ -114,26 +136,41 @@ class PlaybookExecutor:
         if dryrun.get('status') != 'PASSED':
             return {'status': 'failed', 'error': dryrun.get('reason')}
 
-        template = PlaybookTemplate.objects.get(code=template_code)
-        run_id = f"RUN-{timezone.now().strftime('%Y%m%d%H%M%S')}-{config.id}"
+        if incident is None or incident.config_id != config.id:
+            return {'status': 'failed', 'error': '执行必须关联目标实例内的有效事故'}
 
-        # 模拟执行成功并记录
-        record = PlaybookRunRecord.objects.create(
-            run_id=run_id,
+        playbook_id = cls.PLAYBOOK_MAP.get(template_code)
+        playbook = Playbook.objects.filter(
+            playbook_id=playbook_id, enabled=True).first() if playbook_id else None
+        if playbook is None:
+            return {
+                'status': 'failed',
+                'error': f'剧本 {template_code} 尚未发布到统一执行引擎，未执行任何动作',
+            }
+        if config.db_type not in playbook.applicable_db_types:
+            return {'status': 'failed', 'error': f'剧本不支持 {config.db_type}'}
+
+        from monitor.playbook_authz import decide_trigger, record_auto_action
+        decision = decide_trigger(incident, playbook)
+        run = PlaybookRun.objects.create(
+            run_id=f"PBR-{uuid.uuid4().hex}",
+            playbook=playbook,
             incident=incident,
-            template=template,
-            config=config,
-            operator=operator,
-            status='success',
-            dryrun_result=dryrun,
-            execution_result={'result': 'SUCCESS', 'msg': '已成功执行应急动作', 'affected_rows': 1},
-            started_at=timezone.now(),
-            finished_at=timezone.now()
+            params=dryrun.get('resolved_params') or {},
+            trigger_mode=decision['mode'],
+            status='prechecking' if decision['execute_now'] else 'pending_approval',
+            approved_by=operator if decision['execute_now'] else '',
         )
+        if not decision['execute_now']:
+            return {
+                'run_id': run.run_id,
+                'status': 'pending_approval',
+                'message': decision['reason'],
+            }
 
-        return {
-            'run_id': record.run_id,
-            'status': 'success',
-            'message': f"自愈预案 [{template.name}] 执行成功！阻塞资源已释放",
-            'executed_at': record.finished_at.isoformat()
-        }
+        record_auto_action(config.id)
+        from monitor.playbook_engine import execute_run
+        result = execute_run(run.run_id)
+        result['run_id'] = run.run_id
+        result.setdefault('message', '剧本已真实下发，进入结果验证阶段')
+        return result

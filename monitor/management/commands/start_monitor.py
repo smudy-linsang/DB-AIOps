@@ -12,12 +12,14 @@
 from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeoutError
 import datetime
 import json
+import logging
 import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from django.conf import settings
 from django.core.management.base import BaseCommand
 from django.db import connection
+from django.utils import timezone
 
 from monitor.alert_manager import AlertManager
 from monitor.alert_engine import AlertEngine  # Phase 3 智能告警引擎
@@ -27,6 +29,8 @@ from monitor.capacity_engine import CapacityEngine
 from monitor.health_engine import HealthEngine
 from monitor.models import DatabaseConfig, MonitorLog
 from monitor.api_views import get_effective_alert_config
+
+logger = logging.getLogger(__name__)
 
 # Checker 类迁移至独立模块
 from monitor.checkers import (

@@ -984,9 +984,7 @@ class PostgreSQLChecker(BaseDBChecker):
             "log_connections": log_connections,
             "log_disconnections": log_disconnections,
 
-            # 高可用
-            "last_wal_receive_lsn": last_wal_receive_lsn,
-            "last_wal_replay_lsn": last_wal_replay_lsn,
+            # 高可用（LSN 已在上方复制区输出）
             "replication_lag_bytes": wal_lag,
 
             # 前端兼容字段 - 复制

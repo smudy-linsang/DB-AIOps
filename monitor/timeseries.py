@@ -101,23 +101,58 @@ class TimeseriesStorage:
 
     @contextmanager
     def cursor(self):
-        """借出一个游标 (时序库不可用时 yield None)。"""
+        """借出一个游标（时序库不可用时 yield None）。
+
+        只在“连接池/游标获取”阶段降级。进入调用方代码以后发生的 SQL 异常
+        必须原样抛出，不能再次 yield；否则 contextlib 会用
+        ``generator didn't stop after throw()`` 覆盖真正的数据库错误。
+        """
+        p = self._get_pool()
+        if p is None:
+            yield None
+            return
+        conn = None
+        cur = None
         try:
-            with self.connection() as conn:
-                if conn is None:
-                    yield None
-                    return
-                cur = conn.cursor()
-                try:
-                    yield cur
-                finally:
-                    try:
-                        cur.close()
-                    except Exception:
-                        pass
+            conn = p.getconn()
+            conn.autocommit = True
+            cur = conn.cursor()
         except Exception as e:
             logger.error(f"[Timeseries] 获取游标失败: {e}")
+            if conn is not None:
+                try:
+                    p.putconn(conn, close=True)
+                except Exception:
+                    logger.debug("[Timeseries] 销毁不可用连接失败", exc_info=True)
             yield None
+            return
+
+        try:
+            yield cur
+        except BaseException:
+            # SQL/消费端异常意味着本连接的事务或协议状态可能未知，直接淘汰。
+            try:
+                cur.close()
+            except Exception:
+                logger.debug("[Timeseries] 异常路径关闭游标失败", exc_info=True)
+            cur = None
+            try:
+                p.putconn(conn, close=True)
+            except Exception:
+                logger.debug("[Timeseries] 异常路径销毁连接失败", exc_info=True)
+            conn = None
+            raise
+        finally:
+            if cur is not None:
+                try:
+                    cur.close()
+                except Exception:
+                    logger.debug("[Timeseries] 关闭游标失败", exc_info=True)
+            if conn is not None:
+                try:
+                    p.putconn(conn)
+                except Exception:
+                    logger.warning("[Timeseries] 归还连接失败", exc_info=True)
 
     def close_pool(self):
         """关闭连接池 (进程退出 / 测试隔离)。"""

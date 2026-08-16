@@ -1,20 +1,20 @@
 import axios from 'axios'
 
-const API_BASE = '/api/v1'
 const MAX_RETRIES = 2
 const RETRY_DELAY_MS = 1000
 
-// 创建 axios 实例
-const api = axios.create({
-  baseURL: API_BASE,
-  timeout: 30000,
-  headers: {
-    'Content-Type': 'application/json',
-  },
-})
+// v1/v2 共用同一套认证、超时、重试与错误归一化策略。
+const createApiClient = (baseURL) => {
+  const client = axios.create({
+    baseURL,
+    timeout: 30000,
+    headers: {
+      'Content-Type': 'application/json',
+    },
+  })
 
-// 请求拦截器 - 添加 Token
-api.interceptors.request.use(
+  // 请求拦截器 - 添加 Token
+  client.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('auth_token')
     if (token) {
@@ -29,8 +29,8 @@ api.interceptors.request.use(
   }
 )
 
-// 响应拦截器 - 统一错误处理 + 自动重试
-api.interceptors.response.use(
+  // 响应拦截器 - 统一错误处理 + 自动重试
+  client.interceptors.response.use(
   (response) => {
     return response.data
   },
@@ -65,7 +65,7 @@ api.interceptors.response.use(
       // 指数退避延迟
       const delay = RETRY_DELAY_MS * Math.pow(2, cfg.__retryCount - 1)
       await new Promise(resolve => setTimeout(resolve, delay))
-      return api(cfg)
+      return client(cfg)
     }
 
     // BUG-117: 后端有两套错误契约 —— api_views.py 返回 {error: "..."}，
@@ -84,8 +84,14 @@ api.interceptors.response.use(
     err.status = error.response?.status
     err.payload = data
     return Promise.reject(err)
-  }
-)
+    }
+  )
+
+  return client
+}
+
+const api = createApiClient('/api/v1')
+const v2Api = createApiClient('/api/v2')
 
 // ==========================================
 // 认证 API
@@ -607,24 +613,14 @@ export const aiOpsAPI = {
 // ==========================================
 export const apiV2 = {
   // 1-Min 活跃故障清单
-  getActiveIncidents: () => axios.get('/api/v2/incidents/realtime-active/', {
-    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
-  }).then(r => r.data),
+  getActiveIncidents: () => v2Api.get('/incidents/realtime-active/'),
   // 5-Min WarRoom 全景排障上下文
-  getWarRoomContext: (incidentId) => axios.get(`/api/v2/incidents/${incidentId}/warroom-context/`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
-  }).then(r => r.data),
+  getWarRoomContext: (incidentId) => v2Api.get(`/incidents/${incidentId}/warroom-context/`),
   // 阻塞拓扑图
-  getBlockingGraph: (configId) => axios.get(`/api/v2/databases/${configId}/blocking-graph/`, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
-  }).then(r => r.data),
+  getBlockingGraph: (configId) => v2Api.get(`/databases/${configId}/blocking-graph/`),
   // 15-Min Playbook 预演与自愈执行
-  dryRunPlaybook: (data) => axios.post('/api/v2/playbooks/execute-dryrun/', data, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
-  }).then(r => r.data),
-  executePlaybook: (data) => axios.post('/api/v2/playbooks/execute-safely/', data, {
-    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
-  }).then(r => r.data),
+  dryRunPlaybook: (data) => v2Api.post('/playbooks/execute-dryrun/', data),
+  executePlaybook: (data) => v2Api.post('/playbooks/execute-safely/', data),
 }
 
 // Phase 7B: 性能中心 (契约 phase7/20)

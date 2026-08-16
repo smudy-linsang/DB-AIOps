@@ -1,5 +1,6 @@
 # Django Web Framework
-Django>=5.2.0
+# 统一使用 5.2 LTS；上界防止 Python 版本不同导致本地/CI 解析到不同大版本。
+Django>=5.2.17,<5.3
 
 # 数据库驱动
 pymysql>=1.1.0          # MySQL, Gbase8a, TDSQL
@@ -11,7 +12,10 @@ pyodbc>=5.0.0           # 达梦数据库 (DM8 ODBC Driver)
 APScheduler>=3.10.0
 
 # 密码加密
-cryptography>=42.0.0
+cryptography>=50.0.0,<51.0
+
+# WSGI 生产服务器（必须纳入锁文件与供应链审计）
+gunicorn>=26.0.0,<27.0
 
 # 任务队列
 celery>=5.3.0

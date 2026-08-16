@@ -8,11 +8,18 @@ LLM 可用时用 LLM 蒸馏; 不可用时用模板降级蒸馏 (保证 100% 沉�
 """
 import json
 import logging
+import threading
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger("monitor.llm")
+
+# 无 Celery 时 transition 会用后台线程兜底；调用方也可能紧接着手工蒸馏。
+# Django 的线程连接初始化与数据库 identity 取值不能在同一事故上并行竞速。
+# 进程内锁消除线程竞态，下面的 select_for_update 继续负责跨进程串行化。
+_DISTILL_LOCK = threading.RLock()
 
 
 def _already_distilled(incident) -> bool:
@@ -75,6 +82,12 @@ def _llm_distill(incident) -> dict:
 
 
 def distill_incident(incident, force: bool = False):
+    """线程安全的单事故蒸馏入口。"""
+    with _DISTILL_LOCK:
+        return _distill_incident_locked(incident, force=force)
+
+
+def _distill_incident_locked(incident, force: bool = False):
     """单事故蒸馏入口。返回 case_id 或 None (跳过/失败)。"""
     if not getattr(settings, 'CASE_DISTILL_ENABLED', True):
         return None
@@ -93,31 +106,43 @@ def distill_incident(incident, force: bool = False):
     if card is None:
         card = _template_distill(incident)
 
-    from monitor.models import AlertCase
+    from monitor.models import AlertCase, Incident
     ev0 = incident.events.first() if incident.events.exists() else None
     case_id = f"CASE-INC-{incident.incident_id}"
-    obj, created = AlertCase.objects.update_or_create(
-        case_id=case_id,
-        defaults={
-            'title': card['title'][:200],
-            'db_type': incident.db_type,
-            'severity': 'critical' if incident.priority in ('P1', 'P2') else 'warning',
-            'symptom_signature': {
-                'signal': getattr(ev0, 'signal', ''),
-                'metric': getattr(ev0, 'metric_key', ''),
-                'value': getattr(ev0, 'value', None),
-                'symptom_text': card.get('symptom_text', ''),
-            },
-            'root_cause': card['root_cause'],
-            'resolution': card['resolution'],
-            'tags': [t for t in card.get('tags', []) if t][:10],
-            'confidence': 0.6,
-            'source': 'distilled',
-            'source_incident': incident.incident_id,
-            'created_by': 'case_distiller',
-            'embedding_indexed': False,
+    tags = [t for t in card.get('tags', []) if t][:10]
+    defaults = {
+        'title': card['title'][:200],
+        'db_type': incident.db_type,
+        'severity': 'critical' if incident.priority in ('P1', 'P2') else 'warning',
+        'symptom_signature': {
+            'signal': getattr(ev0, 'signal', ''),
+            'metric': getattr(ev0, 'metric_key', ''),
+            'value': getattr(ev0, 'value', None),
+            'symptom_text': card.get('symptom_text', ''),
         },
-    )
+        'root_cause': card['root_cause'],
+        'resolution': card['resolution'],
+        'confidence': 0.6,
+        'source': 'distilled',
+        'source_incident': incident.incident_id,
+        'created_by': 'case_distiller',
+        'embedding_indexed': False,
+    }
+    # transition 的后台线程与补偿/人工调用可能同时蒸馏同一事故。
+    # 锁住事故行后再二次判重，避免两个 update_or_create 并发插入导致唯一键
+    # 或自增主键冲突。若本调用在快速检查后输给并发调用，返回同一 case_id，
+    # 让触发方看到“目标已完成”；正常的后续重复调用仍由上方快速检查返回 None。
+    with transaction.atomic():
+        Incident.objects.select_for_update().get(pk=incident.pk)
+        existing = AlertCase.objects.filter(case_id=case_id).first()
+        if existing is not None and not force:
+            return case_id
+        obj, created = AlertCase.objects.update_or_create(
+            case_id=case_id, defaults=defaults)
+        # tags 是 4NF 子表属性，不是 AlertCase 的具体字段。若把它放进
+        # update_or_create(defaults)，模型构造阶段的 setter 会先保存一次父对象，
+        # 随后的 force_insert 再用同一主键插入，稳定触发主键冲突。
+        obj.tags = tags
     # 投影进 ES (失败不阻断, 补偿任务会重试)
     try:
         from monitor.case_rag_v2 import index_case_to_es

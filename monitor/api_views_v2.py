@@ -13,8 +13,7 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 
 from monitor.auth import Perm, require_auth, require_permission, get_user_database_ids
-from monitor.models import Incident, DatabaseConfig, IncidentCauseChain, PlaybookTemplate, PlaybookRunRecord
-from monitor.rca_engine_v3 import CausalInferenceEngine
+from monitor.models import Incident, DatabaseConfig, IncidentCauseChain
 from monitor.playbook_engine_v2 import PlaybookExecutor
 
 logger = logging.getLogger("monitor.api_v2")
@@ -52,6 +51,39 @@ def _username(request) -> str:
     return getattr(request.user, 'username', '') or str(request.user)
 
 
+ACTIVE_INCIDENT_STATUSES = ('open', 'diagnosing', 'plan_ready', 'executing', 'verifying')
+
+
+def _scoped_database(request, config_id):
+    """按当前用户的数据范围解析实例；越权与不存在统一为 None。"""
+    qs = DatabaseConfig.objects.filter(id=config_id)
+    allowed = get_user_database_ids(request.user)
+    if allowed is not None:
+        qs = qs.filter(id__in=allowed)
+    cfg = qs.first()
+    if cfg is None:
+        logger.warning(
+            "[api-v2] 实例访问被拒 config_id=%s user=%s exists=%s",
+            config_id, _username(request),
+            DatabaseConfig.objects.filter(id=config_id).exists())
+    return cfg
+
+
+def _scoped_incident(request, incident_id):
+    """按当前用户的数据范围解析事故；防止通过事故 ID 绕过实例授权。"""
+    qs = Incident.objects.select_related('config').filter(incident_id=incident_id)
+    allowed = get_user_database_ids(request.user)
+    if allowed is not None:
+        qs = qs.filter(config_id__in=allowed)
+    inc = qs.first()
+    if inc is None:
+        logger.warning(
+            "[api-v2] 事故访问被拒 incident_id=%s user=%s exists=%s",
+            incident_id, _username(request),
+            Incident.objects.filter(incident_id=incident_id).exists())
+    return inc
+
+
 # =============================================================================
 # 1. 故障感知与 WarRoom 接口族
 # =============================================================================
@@ -67,7 +99,8 @@ class RealtimeActiveIncidentsView(_BaseV2View):
 
     def get(self, request):
         allowed = get_user_database_ids(request.user)
-        qs = Incident.objects.select_related('config').filter(status__in=['open', 'investigating'])
+        qs = Incident.objects.select_related('config').filter(
+            status__in=ACTIVE_INCIDENT_STATUSES)
         if allowed is not None:
             qs = qs.filter(config_id__in=allowed)
 
@@ -99,15 +132,12 @@ class WarRoomContextView(_BaseV2View):
         return super().dispatch(*a, **k)
 
     def get(self, request, incident_id):
-        inc = Incident.objects.select_related('config').filter(incident_id=incident_id).first()
+        inc = _scoped_incident(request, incident_id)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
 
-        # 触发/获取 RCA 3.0 因果链
+        # GET 必须无副作用：未生成 RCA 时返回空证据链，由显式重诊断命令生成。
         chains = IncidentCauseChain.objects.filter(incident=inc).order_by('step_seq')
-        if not chains.exists():
-            CausalInferenceEngine.infer_and_build_cause_chain(inc)
-            chains = IncidentCauseChain.objects.filter(incident=inc).order_by('step_seq')
 
         cause_list = [{
             'step': c.step_seq,
@@ -161,30 +191,42 @@ class BlockingGraphView(_BaseV2View):
         return super().dispatch(*a, **k)
 
     def get(self, request, config_id):
-        cfg = DatabaseConfig.objects.filter(id=config_id).first()
+        cfg = _scoped_database(request, config_id)
         if not cfg:
             return self.err('NOT_FOUND', f'数据库 {config_id} 不存在', 404)
 
-        # 构造/查询会话阻塞依赖树
-        graph_data = {
-            'root_blockers': [
-                {
-                    'session_id': '1845',
-                    'serial_num': '49201',
-                    'username': 'app_trade_user',
-                    'client_ip': '10.10.30.12',
-                    'sql_id': '8a7fbc6d',
-                    'sql_text': 'UPDATE trade_order SET status = 2 WHERE batch_id = 90218',
-                    'wait_seconds': 145,
-                    'blocked_sessions_count': 18,
-                    'blocked_children': [
-                        {'session_id': '2019', 'username': 'order_service', 'wait_event': 'enq: TX - row lock contention', 'wait_seconds': 120},
-                        {'session_id': '2044', 'username': 'pay_service', 'wait_event': 'enq: TX - row lock contention', 'wait_seconds': 95}
-                    ]
-                }
-            ]
-        }
-        return self.ok(**graph_data)
+        conn = None
+        try:
+            from monitor.db_connector import DbConnector
+            from monitor.sentinel import sample_sessions
+            from monitor.api_views_perf import _build_blocking_tree
+
+            conn = DbConnector.get_connection(
+                cfg, statement_timeout_ms=3000, readonly=True)
+            cur = conn.cursor()
+            try:
+                rows = sample_sessions(cur, cfg.db_type, config_id=cfg.id)
+            finally:
+                cur.close()
+            return self.ok(
+                degraded=False,
+                observed_at=timezone.now().isoformat(),
+                root_blockers=_build_blocking_tree(rows),
+            )
+        except Exception as e:
+            logger.warning("[api-v2] 实时阻塞图采集失败 config_id=%s: %s", cfg.id, e)
+            return self.ok(
+                degraded=True,
+                observed_at=None,
+                root_blockers=[],
+                reason='目标库不可达或缺少会话/锁视图权限',
+            )
+        finally:
+            if conn is not None:
+                try:
+                    conn.close()
+                except Exception:
+                    logger.debug("[api-v2] 关闭阻塞图目标连接失败", exc_info=True)
 
 
 class PlaybookDryRunView(_BaseV2View):
@@ -200,11 +242,19 @@ class PlaybookDryRunView(_BaseV2View):
         data = self.body(request)
         code = data.get('playbook_code')
         config_id = data.get('config_id')
-        cfg = DatabaseConfig.objects.filter(id=config_id).first()
-        if not cfg or not code:
+        cfg = _scoped_database(request, config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', '目标实例不存在', 404)
+        if not code:
             return self.err('BAD_REQUEST', '缺少 config_id 或 playbook_code 参数', 400)
 
-        res = PlaybookExecutor.evaluate_dryrun(code, cfg, data.get('params') or {})
+        incident = None
+        if data.get('incident_id'):
+            incident = _scoped_incident(request, data['incident_id'])
+            if not incident or incident.config_id != cfg.id:
+                return self.err('NOT_FOUND', '事故不存在或不属于目标实例', 404)
+        res = PlaybookExecutor.evaluate_dryrun(
+            code, cfg, data.get('params') or {}, incident=incident)
         return self.ok(**res)
 
 
@@ -221,11 +271,18 @@ class PlaybookExecuteView(_BaseV2View):
         data = self.body(request)
         code = data.get('playbook_code')
         config_id = data.get('config_id')
-        cfg = DatabaseConfig.objects.filter(id=config_id).first()
-        if not cfg or not code:
+        cfg = _scoped_database(request, config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', '目标实例不存在', 404)
+        if not code:
             return self.err('BAD_REQUEST', '缺少 config_id 或 playbook_code 参数', 400)
 
+        incident_id = data.get('incident_id')
+        incident = _scoped_incident(request, incident_id) if incident_id else None
+        if not incident or incident.config_id != cfg.id:
+            return self.err('NOT_FOUND', '执行必须关联当前目标实例内的有效事故', 404)
+
         res = PlaybookExecutor.execute_playbook(
-            code, cfg, _username(request), data.get('params') or {}
+            code, cfg, _username(request), data.get('params') or {}, incident=incident
         )
         return self.ok(**res)

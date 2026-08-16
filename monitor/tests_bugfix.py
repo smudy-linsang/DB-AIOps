@@ -93,6 +93,27 @@ class Bug101TimeseriesPoolTests(TestCase):
                 raise RuntimeError('server closed the connection unexpectedly')
         pool.putconn.assert_called_once_with(conn, close=True)
 
+    def test_cursor_preserves_consumer_exception(self):
+        """调用方 SQL 异常必须原样抛出，不能被二次 yield 覆盖。"""
+        st = self._storage()
+        st.enabled = True
+        pool, conn = mock.MagicMock(), mock.MagicMock()
+        pool.getconn.return_value = conn
+        st._pool = pool
+        with self.assertRaisesRegex(RuntimeError, 'original sql error'):
+            with st.cursor():
+                raise RuntimeError('original sql error')
+        pool.putconn.assert_called_once_with(conn, close=True)
+
+    def test_cursor_acquisition_failure_degrades_once(self):
+        st = self._storage()
+        st.enabled = True
+        pool = mock.MagicMock()
+        pool.getconn.side_effect = OSError('database unavailable')
+        st._pool = pool
+        with st.cursor() as cur:
+            self.assertIsNone(cur)
+
     def test_concurrent_cursors_each_get_own_connection(self):
         """20 线程并发：每个线程必须拿到独立连接。
 
@@ -137,6 +158,42 @@ class Bug101TimeseriesPoolTests(TestCase):
             for t in threads:
                 t.join()
         self.assertEqual(len(calls), 1, '连接池只应被创建一次')
+
+
+@tag('unit')
+class V25SafetyBaselineTests(TestCase):
+    def test_environment_aliases_and_unknown_value(self):
+        from dbmonitor.settings import _normalise_environment
+        self.assertEqual(_normalise_environment('prod'), 'production')
+        self.assertEqual(_normalise_environment('production'), 'production')
+        self.assertEqual(_normalise_environment('testing'), 'test')
+        with self.assertRaises(ValueError):
+            _normalise_environment('prodution')
+
+    def test_liveness_exposes_single_version_without_dependencies(self):
+        from dbmonitor.version import __version__
+        response = Client().get('/livez')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'alive', 'version': __version__})
+
+    @override_settings(
+        READINESS_REQUIRE_WORKERS=True,
+        TIMESCALEDB_ENABLED=False,
+        ES_ENABLED=False,
+        USE_REDIS_CACHE=False,
+    )
+    def test_readiness_fails_when_required_workers_never_started(self):
+        response = Client().get('/readyz')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(response.json()['checks']['workers']['status'], 'error')
+
+    def test_cookie_token_is_rejected_by_default(self):
+        user = make_user('cookie-only', RoleCode.READONLY)
+        from monitor.auth import TokenManager
+        client = Client()
+        client.cookies['auth_token'] = TokenManager.generate_token(user.id)
+        response = client.get('/api/v1/users/me/')
+        self.assertEqual(response.status_code, 401)
 
 
 # =============================================================================

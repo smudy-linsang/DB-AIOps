@@ -11,6 +11,7 @@ import time
 from concurrent.futures import ThreadPoolExecutor
 
 from django.conf import settings
+from django.db import transaction
 from django.utils import timezone
 
 logger = logging.getLogger("monitor.diagnosis")
@@ -287,10 +288,13 @@ def run_diagnosis(incident_id: str) -> dict:
                                     plan_draft=llm_extra.get('plan_draft') or None)
 
     # 阶段5: 落库 + 状态转移 + 通知
-    inc.rca_result = rca_result
-    inc.impact = impact
-    inc.plans = plans
-    inc.save(update_fields=['rca_result', 'impact', 'plans', 'priority', 'updated_at'])
+    # plans 是 4NF 子表的兼容属性，不是 Incident 的具体字段，不能放进
+    # update_fields。实体文档与方案子表必须在同一事务内提交，避免读到半套诊断。
+    with transaction.atomic():
+        inc.rca_result = rca_result
+        inc.impact = impact
+        inc.save(update_fields=['rca_result', 'impact', 'priority', 'updated_at'])
+        inc.plans = plans
     try:
         if inc.status == 'diagnosing':
             inc.transition('plan_ready', 'system', '诊断完成')

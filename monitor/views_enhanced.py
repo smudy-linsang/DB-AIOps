@@ -27,6 +27,7 @@ from monitor.models import DatabaseConfig, MonitorLog, AuditLog
 from monitor.baseline_engine import BaselineEngine
 from monitor.intelligent_baseline_engine import IntelligentBaselineEngine
 from monitor.rca_engine import RCAEngine
+from monitor.auto_remediation_engine import AutoRemediationEngine
 from monitor.auth import require_auth, require_permission, Perm
 
 logger = logging.getLogger(__name__)

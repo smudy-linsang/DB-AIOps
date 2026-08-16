@@ -68,39 +68,9 @@ class HealthCheckView(JSONResponseMixin, View):
         GET /api/v1/health/
         平台自身健康检查（供外部监控探活）
         """
-        # 检查数据库连接
-        try:
-            from django.db import connection
-            with connection.cursor() as cursor:
-                cursor.execute("SELECT 1")
-            db_status = "ok"
-        except Exception as e:
-            db_status = f"error: {str(e)}"
-        
-        # 检查采集状态（最近5分钟有日志的数据库数）
-        recent_time = timezone.now() - timedelta(minutes=5)
-        active_dbs = MonitorLog.objects.filter(
-            create_time__gte=recent_time
-        ).values('config_id').distinct().count()
-        
-        # 检查活跃告警数
-        active_alerts = AlertLog.objects.filter(status='active').count()
-        
-        data = {
-            'status': 'healthy',
-            'timestamp': timezone.now().isoformat(),
-            'components': {
-                'database': db_status,
-                'api': 'ok',
-                'collector': 'ok'
-            },
-            'metrics': {
-                'active_databases': active_dbs,
-                'active_alerts': active_alerts
-            }
-        }
-        
-        return self.json_response(data)
+        # 兼容旧路径，但语义统一为 readiness；不再无条件写死 healthy/collector ok。
+        from monitor.healthcheck import ReadinessView
+        return ReadinessView().get(request)
 
 
 class LoginView(JSONResponseMixin, View):
@@ -1137,7 +1107,7 @@ class AlertListView(JSONResponseMixin, View):
             queryset = queryset.filter(create_time__lte=end_dt)
         if keyword:
             queryset = queryset.filter(
-                models.Q(title__icontains=keyword) | models.Q(description__icontains=keyword)
+                Q(title__icontains=keyword) | Q(description__icontains=keyword)
             )
         
         queryset = queryset[:limit]

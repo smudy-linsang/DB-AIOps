@@ -12,6 +12,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 import os
+import warnings
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -31,8 +32,8 @@ def _load_dotenv():
             key, value = key.strip(), value.strip().strip('"').strip("'")
             if key:
                 os.environ.setdefault(key, value)
-    except Exception:
-        pass
+    except Exception as exc:
+        warnings.warn(f'读取 .env 失败: {exc}', RuntimeWarning, stacklevel=2)
 
 
 _load_dotenv()
@@ -40,8 +41,22 @@ _load_dotenv()
 # ============================================================================
 # 环境分层配置（新增）
 # ============================================================================
-# 环境选项: dev / test / prod
-ENVIRONMENT = os.environ.get('DJANGO_ENV', 'dev')
+# 环境选项统一为 development / test / production；兼容旧别名一个版本。
+def _normalise_environment(raw):
+    aliases = {
+        'dev': 'development', 'development': 'development',
+        'test': 'test', 'testing': 'test',
+        'prod': 'production', 'production': 'production',
+    }
+    value = str(raw or '').strip().lower()
+    if value not in aliases:
+        raise ValueError(
+            f"不支持的 DJANGO_ENV={raw!r}，仅允许 development/test/production")
+    return aliases[value]
+
+
+ENVIRONMENT = _normalise_environment(os.environ.get('DJANGO_ENV', 'development'))
+IS_PRODUCTION = ENVIRONMENT == 'production'
 
 # ============================================================================
 # 安全配置
@@ -50,13 +65,13 @@ ENVIRONMENT = os.environ.get('DJANGO_ENV', 'dev')
 _SECRET_KEY_FALLBACK = 'django-insecure-change-me-in-production'
 SECRET_KEY = os.environ.get('DJANGO_SECRET_KEY', '')
 if not SECRET_KEY:
-    if ENVIRONMENT == 'prod':
+    if IS_PRODUCTION:
         raise ValueError("生产环境必须配置 DJANGO_SECRET_KEY 环境变量")
     else:
         SECRET_KEY = _SECRET_KEY_FALLBACK
 
 # DEBUG 模式控制
-if ENVIRONMENT == 'prod':
+if IS_PRODUCTION:
     DEBUG = False
 elif ENVIRONMENT == 'test':
     DEBUG = False
@@ -64,7 +79,12 @@ else:
     DEBUG = os.environ.get('DJANGO_DEBUG', 'True').lower() in ('true', '1', 'yes')
 
 # 允许的主机
-ALLOWED_HOSTS = os.environ.get('DJANGO_ALLOWED_HOSTS', 'localhost,127.0.0.1,web,frontend').split(',')
+_allowed_hosts_default = '' if IS_PRODUCTION else 'localhost,127.0.0.1,web,frontend'
+ALLOWED_HOSTS = [h.strip() for h in
+                 os.environ.get('DJANGO_ALLOWED_HOSTS', _allowed_hosts_default).split(',')
+                 if h.strip()]
+if IS_PRODUCTION and not ALLOWED_HOSTS:
+    raise ValueError('生产环境必须配置 DJANGO_ALLOWED_HOSTS')
 
 # CSRF 信任来源
 CSRF_TRUSTED_ORIGINS = [
@@ -80,7 +100,7 @@ CONTENT_SECURITY_POLICY = os.environ.get('CONTENT_SECURITY_POLICY', '')
 
 # 安全中间件配置
 if not DEBUG:
-    SECURE_SSL_REDIRECT = (ENVIRONMENT == 'prod')
+    SECURE_SSL_REDIRECT = IS_PRODUCTION
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
@@ -93,6 +113,10 @@ else:
     SECURE_HSTS_SECONDS = 0
     SECURE_HSTS_INCLUDE_SUBDOMAINS = False
     SECURE_HSTS_PRELOAD = False
+
+SESSION_COOKIE_HTTPONLY = True
+SESSION_COOKIE_SAMESITE = 'Lax'
+CSRF_COOKIE_SAMESITE = 'Lax'
 
 # Admin IP 白名单（新增）
 ADMIN_IP_WHITELIST = [
@@ -114,7 +138,7 @@ METRICS_IP_WHITELIST = [
 # 密码加密密钥（新增）
 DB_MONITOR_SECRET_KEY = os.environ.get('DB_MONITOR_SECRET_KEY', '')
 if not DB_MONITOR_SECRET_KEY:
-    if ENVIRONMENT == 'prod':
+    if IS_PRODUCTION:
         raise ValueError("生产环境必须配置 DB_MONITOR_SECRET_KEY 环境变量")
     else:
         # 开发环境使用默认密钥（仅用于开发）
@@ -185,12 +209,17 @@ if not USE_POSTGRESQL:
         "请设置 USE_POSTGRESQL=True 并确保 PostgreSQL/TimescaleDB 可用。"
     )
 
+_postgres_password_default = '' if IS_PRODUCTION else 'postgres123'
+POSTGRES_PASSWORD = os.environ.get('POSTGRES_PASSWORD', _postgres_password_default)
+if IS_PRODUCTION and not POSTGRES_PASSWORD:
+    raise ValueError('生产环境必须配置 POSTGRES_PASSWORD')
+
 DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.postgresql',
         'NAME': os.environ.get('POSTGRES_DB', 'db_monitor'),
         'USER': os.environ.get('POSTGRES_USER', 'postgres'),
-        'PASSWORD': os.environ.get('POSTGRES_PASSWORD', 'postgres123'),
+        'PASSWORD': POSTGRES_PASSWORD,
         'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
         'CONN_MAX_AGE': 60,  # 持久连接 1 分钟（开发环境，避免连接池耗尽）
@@ -215,7 +244,10 @@ TIMESCALEDB_HOST = os.environ.get('TIMESCALEDB_HOST', 'localhost')
 TIMESCALEDB_PORT = os.environ.get('TIMESCALEDB_PORT', '5432')
 TIMESCALEDB_NAME = os.environ.get('TIMESCALEDB_NAME', 'timeseriesdb')
 TIMESCALEDB_USER = os.environ.get('TIMESCALEDB_USER', 'postgres')
-TIMESCALEDB_PASSWORD = os.environ.get('TIMESCALEDB_PASSWORD', 'postgres123')
+TIMESCALEDB_PASSWORD = os.environ.get(
+    'TIMESCALEDB_PASSWORD', '' if IS_PRODUCTION else 'postgres123')
+if IS_PRODUCTION and TIMESCALEDB_ENABLED and not TIMESCALEDB_PASSWORD:
+    raise ValueError('生产环境启用 TimescaleDB 时必须配置 TIMESCALEDB_PASSWORD')
 
 # TimescaleDB 连接池（BUG-101）：此前是单例单连接被多线程共享，游标交叉污染
 TIMESCALEDB_POOL_MAX = int(os.environ.get('TIMESCALEDB_POOL_MAX', 16))
@@ -234,9 +266,12 @@ TIMESCALEDB_COMPRESSION_INTERVAL = os.environ.get('TIMESCALEDB_COMPRESSION_INTER
 # ============================================================================
 # 缓存配置
 # ============================================================================
-REDIS_URL = os.environ.get('REDIS_URL', 'redis://localhost:6379/0')
+REDIS_URL = os.environ.get(
+    'REDIS_URL', '' if IS_PRODUCTION else 'redis://localhost:6379/0')
+if IS_PRODUCTION and not REDIS_URL:
+    raise ValueError('生产环境必须配置 REDIS_URL（多 worker 共享认证与限流状态）')
 # 生产环境（gunicorn 多 worker）必须使用 Redis 缓存，否则 Token 认证无法跨 worker 共享
-if ENVIRONMENT in ('prod', 'test'):
+if ENVIRONMENT in ('production', 'test'):
     USE_REDIS_CACHE = True
 else:
     USE_REDIS_CACHE = os.environ.get('USE_REDIS_CACHE', 'False').lower() in ('true', '1', 'yes')
@@ -466,6 +501,12 @@ API_RATE_WINDOW = int(os.environ.get('API_RATE_WINDOW', 60))  # 限流时间窗�
 # 全局 API 限流开关（仅作用于 /api/ 路径；生产环境建议 True；BUG-006）
 ENABLE_RATE_LIMIT = os.environ.get('ENABLE_RATE_LIMIT', 'False').lower() in ('true', '1', 'yes')
 API_TOKEN_EXPIRY_HOURS = int(os.environ.get('API_TOKEN_EXPIRY_HOURS', 24))  # Token 过期时间
+# 浏览器当前使用 Authorization header。Cookie token 默认关闭，避免 csrf_exempt
+# 写接口在 Cookie 身份下形成 CSRF；未来切换 Cookie 会话时须成套启用 CSRF。
+AUTH_ALLOW_COOKIE_TOKEN = _envbool('AUTH_ALLOW_COOKIE_TOKEN', False)
+
+# 生产 readiness 是否强制校验 collector/sentinel/pipeline 心跳。
+READINESS_REQUIRE_WORKERS = _envbool('READINESS_REQUIRE_WORKERS', IS_PRODUCTION)
 
 # 登录爆破防护（BUG-006）：窗口内连续失败达阈值后临时锁定
 LOGIN_MAX_ATTEMPTS = int(os.environ.get('LOGIN_MAX_ATTEMPTS', 5))

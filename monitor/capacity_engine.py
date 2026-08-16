@@ -252,7 +252,6 @@ class SimpleMovingAverageModel:
         if current_value <= 0 or current_value >= max_capacity:
             return None
         
-        import math
         days = math.log(max_capacity / current_value) / math.log(1 + self.growth_rate)
         
         if days > days_ahead:

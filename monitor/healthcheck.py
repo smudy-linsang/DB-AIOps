@@ -58,10 +58,22 @@ class PlatformHealthCheckView(View):
         # 6. APScheduler 状态
         checks['scheduler'] = self._check_scheduler()
 
-        # 判定整体健康状态
-        # 只有数据库（ORM）不可用时才算不健康，其他组件降级
-        if checks['database']['status'] != 'ok':
-            overall_healthy = False
+        # 7. 必需后台角色心跳
+        checks['workers'] = self._check_required_workers()
+
+        # readiness 的关键依赖不能“降级后仍 200”。按启用项判断，避免负载
+        # 均衡器继续把流量送到缺 TSDB/Redis/后台角色的半残节点。
+        from monitor import appconf
+        critical = ['database']
+        if appconf.get('TIMESCALEDB_ENABLED'):
+            critical.append('timescaledb')
+        if appconf.get('USE_REDIS_CACHE'):
+            critical.append('redis')
+        if appconf.get('ES_ENABLED'):
+            critical.append('elasticsearch')
+        if appconf.get('READINESS_REQUIRE_WORKERS'):
+            critical.append('workers')
+        overall_healthy = all(checks[name].get('status') == 'ok' for name in critical)
 
         # TimescaleDB 或 ES 不可用视为降级而非不健康
         degraded_components = [
@@ -78,12 +90,18 @@ class PlatformHealthCheckView(View):
 
         response_data = {
             'status': overall_status,
+            'version': self._version(),
             'timestamp': datetime.now().isoformat(),
             'checks': checks,
         }
 
-        status_code = 200 if overall_status in ('healthy', 'degraded') else 503
+        status_code = 200 if overall_healthy else 503
         return JsonResponse(response_data, status=status_code)
+
+    @staticmethod
+    def _version():
+        from dbmonitor.version import __version__
+        return __version__
 
     def _check_django_db(self) -> dict:
         """检查 Django ORM 数据库连通性"""
@@ -108,10 +126,19 @@ class PlatformHealthCheckView(View):
                 # 真正跑一条语句：只拿到连接对象不足以证明链路可用
                 with ts.cursor() as cur:
                     if cur is not None:
-                        cur.execute("SELECT 1")
-                        cur.fetchone()
+                        cur.execute(
+                            "SELECT column_name FROM information_schema.columns "
+                            "WHERE table_name='session_sample'")
+                        columns = {row[0] for row in cur.fetchall()}
+                        required = {'wait_class', 'wait_secs', 'trx_age_secs'}
+                        missing = sorted(required - columns)
+                        if missing:
+                            return {
+                                'status': 'error',
+                                'message': f'TimescaleDB schema 缺列: {missing}',
+                            }
                         return {'status': 'ok',
-                                'message': 'TimescaleDB connection is alive'}
+                                'message': 'TimescaleDB connection/schema is ready'}
             return {'status': 'error', 'message': 'TimescaleDB enabled but connection failed'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)}
@@ -119,6 +146,9 @@ class PlatformHealthCheckView(View):
     def _check_elasticsearch(self) -> dict:
         """检查 Elasticsearch 连通性"""
         try:
+            from monitor import appconf
+            if not appconf.get('ES_ENABLED'):
+                return {'status': 'disabled', 'message': 'Elasticsearch not enabled'}
             from monitor.elasticsearch_engine import get_es_client
             client = get_es_client()
             if client and client.ping():
@@ -134,6 +164,9 @@ class PlatformHealthCheckView(View):
     def _check_redis(self) -> dict:
         """检查 Redis 连通性"""
         try:
+            from monitor import appconf
+            if not appconf.get('USE_REDIS_CACHE'):
+                return {'status': 'disabled', 'message': 'Redis cache not enabled'}
             from django.core.cache import cache
             # 尝试读写一个测试键
             test_key = '_healthcheck_test'
@@ -167,10 +200,15 @@ class PlatformHealthCheckView(View):
     def _check_scheduler(self) -> dict:
         """检查调度器状态（简化：基于最近采集记录判断）"""
         try:
+            from django.utils import timezone
             from monitor.models import MonitorLog
             latest = MonitorLog.objects.order_by('-create_time').first()
             if latest:
-                age_sec = (datetime.now() - latest.create_time).total_seconds()
+                now = timezone.now()
+                ct = latest.create_time
+                if timezone.is_naive(ct):
+                    ct = timezone.make_aware(ct)
+                age_sec = (now - ct).total_seconds()
                 if age_sec < 300:  # 5分钟内有记录
                     return {'status': 'ok', 'message': f'Last collection {int(age_sec)}s ago'}
                 else:
@@ -178,3 +216,43 @@ class PlatformHealthCheckView(View):
             return {'status': 'idle', 'message': 'No collection records found'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)[:100]}
+
+    def _check_required_workers(self) -> dict:
+        """校验 collector/sentinel/pipeline 至少一个新鲜实例。"""
+        try:
+            from monitor import appconf
+            if not appconf.get('READINESS_REQUIRE_WORKERS'):
+                return {'status': 'disabled', 'message': 'worker readiness check disabled'}
+            from django.utils import timezone
+            from monitor.models import ComponentHeartbeat
+            from monitor.self_monitor import COMPONENTS
+
+            now = timezone.now()
+            missing, stale = [], []
+            for code in ('collector', 'sentinel', 'pipeline'):
+                spec = COMPONENTS[code]
+                beats = list(ComponentHeartbeat.objects.filter(component=code))
+                fresh = [b for b in beats if b.status == 'up' and
+                         (now - b.last_beat_at).total_seconds() <= spec[2]]
+                if not beats:
+                    missing.append(code)
+                elif not fresh:
+                    stale.append(code)
+            if missing or stale:
+                return {'status': 'error', 'missing': missing, 'stale': stale,
+                        'message': '必需后台角色未就绪'}
+            return {'status': 'ok', 'message': '必需后台角色均有新鲜心跳'}
+        except Exception as e:
+            return {'status': 'error', 'message': str(e)[:100]}
+
+
+class LivenessView(View):
+    """只证明 Web 进程能够响应，不访问任何外部依赖。"""
+
+    def get(self, request):
+        from dbmonitor.version import __version__
+        return JsonResponse({'status': 'alive', 'version': __version__})
+
+
+class ReadinessView(PlatformHealthCheckView):
+    """生产流量就绪探针；关键依赖或后台角色失败时返回 503。"""

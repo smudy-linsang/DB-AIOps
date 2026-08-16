@@ -23,9 +23,12 @@ from datetime import datetime, timedelta
 from django.utils import timezone as dj_tz
 
 logger = logging.getLogger(__name__)
-from typing import Dict, List, Tuple, Optional, Any
+from typing import TYPE_CHECKING, Dict, List, Tuple, Optional, Any
 
 from monitor.models import MonitorLog, DatabaseConfig, AlertLog
+
+if TYPE_CHECKING:
+    from monitor.models import HealthScore
 
 
 # ==========================================

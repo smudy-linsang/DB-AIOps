@@ -75,10 +75,13 @@ export default function IncidentWarRoom() {
         incident_id: warRoomData.incident_id,
         playbook_code: playbookCode,
         config_id: warRoomData.config_id,
-        params: { username: 'app_trade_user', session_id: '1845' }
+        params: {}
       });
       setDryRunResult(res?.data);
-      message.success('Dry-Run 预演评估完成');
+      if (res?.data?.status !== 'PASSED') {
+        throw new Error(res?.data?.reason || '安全预演未通过');
+      }
+      message.success('Dry-Run 安全评估通过');
     } catch (e) {
       message.error('预演失败: ' + e.message);
     } finally {
@@ -95,9 +98,13 @@ export default function IncidentWarRoom() {
         incident_id: warRoomData.incident_id,
         playbook_code: playbookCode,
         config_id: warRoomData.config_id,
-        params: { username: 'app_trade_user', session_id: '1845' }
+        params: {}
       });
-      message.success(res?.data?.message || '自愈预案执行成功！');
+      const status = res?.data?.status;
+      if (status === 'failed' || status === 'REJECTED') {
+        throw new Error(res?.data?.error || res?.data?.reason || '剧本未执行');
+      }
+      message.info(res?.data?.message || `剧本已受理，当前状态：${status || 'unknown'}`);
       loadWarRoomDetail(warRoomData.incident_id);
     } catch (e) {
       message.error('执行失败: ' + e.message);

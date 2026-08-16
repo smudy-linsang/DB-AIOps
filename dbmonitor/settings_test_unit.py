@@ -15,6 +15,12 @@ DATABASES = {
 # 外部服务一律关闭，避免用例误触真实依赖
 TIMESCALEDB_ENABLED = False
 ES_ENABLED = False
+LLM_ENABLED = False
+AGENT_ENABLED = False
+EMBED_ENABLED = False
+AUTH_ALLOW_COOKIE_TOKEN = False
+READINESS_REQUIRE_WORKERS = False
 CACHES = {'default': {'BACKEND': 'django.core.cache.backends.locmem.LocMemCache'}}
+EMAIL_BACKEND = 'django.core.mail.backends.locmem.EmailBackend'
 PASSWORD_HASHERS = ['django.contrib.auth.hashers.MD5PasswordHasher']  # 仅测试提速
 LOGGING_CONFIG = None   # 保留测试中的 assertLogs 行为

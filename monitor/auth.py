@@ -543,13 +543,14 @@ def require_auth(func: Callable) -> Callable:
         elif auth_header.startswith('Token '):
             token = auth_header[6:]
         else:
-            # 尝试从 Cookie 获取
-            token = request.COOKIES.get('auth_token', '')
+            # Cookie token 只有在显式启用且整套 CSRF 策略就绪时才允许。
+            token = (request.COOKIES.get('auth_token', '')
+                     if getattr(settings, 'AUTH_ALLOW_COOKIE_TOKEN', False) else '')
 
         if not token:
             return JsonResponse({
                 'error': 'Authentication required',
-                'message': 'Please provide a valid token in Authorization header or auth_token cookie'
+                'message': 'Please provide a valid token in the Authorization header'
             }, status=401)
 
         # 验证 Token

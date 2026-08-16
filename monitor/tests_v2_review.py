@@ -21,8 +21,6 @@
 转正为"回归防线"。全部摘完时，本文件即成为 v2.0 的常规回归集。
 """
 import json
-import unittest
-
 from django.test import Client, TestCase, tag
 from django.utils import timezone
 
@@ -95,7 +93,6 @@ class ConnUsageUnitConfusionTests(TestCase):
     却拿去和百分比阈值 85 比。90 个连接 / 上限 2000（4.5%）会被判成"连接池接近饱和"。
     """
 
-    @unittest.expectedFailure
     def test_absolute_connection_count_is_not_a_percentage(self):
         import json
         from monitor.copilot import generate_quick_health_assessment
@@ -134,13 +131,11 @@ class V2DataScopeTests(TestCase):
         self.client = Client()
         login(self.client, self.user)
 
-    @unittest.expectedFailure
     def test_blocking_graph_rejects_out_of_scope_database(self):
         r = self.client.get(f'/api/v2/databases/{self.others.id}/blocking-graph/')
         self.assertIn(r.status_code, (403, 404),
                       '越权读取了不在数据范围内的实例的阻塞拓扑')
 
-    @unittest.expectedFailure
     def test_dryrun_rejects_out_of_scope_database(self):
         r = self.client.post(
             '/api/v2/playbooks/execute-dryrun/',
@@ -150,7 +145,6 @@ class V2DataScopeTests(TestCase):
         self.assertIn(r.status_code, (403, 404),
                       '越权对不在数据范围内的实例做了自愈预演')
 
-    @unittest.expectedFailure
     def test_execute_rejects_out_of_scope_database(self):
         r = self.client.post(
             '/api/v2/playbooks/execute-safely/',
@@ -161,7 +155,6 @@ class V2DataScopeTests(TestCase):
         self.assertIn(r.status_code, (403, 404),
                       '越权对不在数据范围内的实例执行了自愈剧本——这是运维动作，不只是读数据')
 
-    @unittest.expectedFailure
     def test_warroom_rejects_out_of_scope_incident(self):
         inc = _incident(self.others, title='别人的库的故障')
         r = self.client.get(f'/api/v2/incidents/{inc.incident_id}/warroom-context/')
@@ -177,7 +170,6 @@ class PlaybookExecutionIsFakeTests(TestCase):
     这不是"功能没做完"，是**在故障处置现场谎报成功**，且留下失真的审计记录。
     """
 
-    @unittest.expectedFailure
     def test_execute_must_not_claim_success_without_doing_anything(self):
         from unittest import mock
         from monitor.playbook_engine_v2 import PlaybookExecutor
@@ -200,7 +192,6 @@ class RealtimeActiveIncidentStatusTests(TestCase):
     结果：故障一旦被人接手开始诊断，就从 WarRoom 活跃列表里消失。
     """
 
-    @unittest.expectedFailure
     def test_in_progress_incidents_must_stay_active(self):
         valid = {c[0] for c in Incident.STATUS_CHOICES}
         self.assertNotIn('investigating', valid,
@@ -208,7 +199,25 @@ class RealtimeActiveIncidentStatusTests(TestCase):
         cfg = _cfg('rev-db-status')
         for st in ('diagnosing', 'plan_ready', 'executing', 'verifying'):
             _incident(cfg, status=st)
-        active = Incident.objects.filter(status__in=['open', 'investigating']).count()
-        self.assertEqual(
-            active, 4,
-            '处理中的 4 条事故被 v2 的活跃过滤条件全部漏掉')
+        from monitor.api_views_v2 import ACTIVE_INCIDENT_STATUSES
+        active = Incident.objects.filter(status__in=ACTIVE_INCIDENT_STATUSES).count()
+        self.assertEqual(active, 4, '处理中的 4 条事故必须全部保持活跃')
+
+
+@tag('unit')
+class CaseDistillerFourNFTests(TestCase):
+    """案例 tags 是 4NF 子表，不能塞进 update_or_create defaults。"""
+
+    def test_distill_persists_parent_once_then_tags(self):
+        from monitor.case_distiller import distill_incident
+        from monitor.models import AlertCase
+
+        cfg = _cfg('distill-four-nf')
+        inc = _incident(cfg, status='resolved', title='蒸馏 4NF 回归')
+        inc.rca_result = {'root_causes': [{
+            'summary': '根因', 'suggestions': ['处置'], 'domain': 'lock'}]}
+        inc.save(update_fields=['rca_result'])
+        case_id = distill_incident(inc)
+        case = AlertCase.objects.get(case_id=case_id)
+        self.assertEqual(case.tags, ['mysql', 'lock'])
+        self.assertIsNone(distill_incident(inc))

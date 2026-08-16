@@ -77,7 +77,7 @@ from monitor.api_views_phase8 import (
     LlmRoutesView, CopilotChatView, QuickAssessmentView,
 )
 from monitor.observability import prometheus_metrics_view
-from monitor.healthcheck import PlatformHealthCheckView
+from monitor.healthcheck import LivenessView, PlatformHealthCheckView, ReadinessView
 from monitor.api_views_system import (
     SystemHealthView, SystemComponentsView, SystemDegradationsView,
 )
@@ -113,6 +113,8 @@ def serve_frontend_assets(request, path):
     return HttpResponseNotFound('Not found')
 
 urlpatterns = [
+    path('livez', LivenessView.as_view(), name='liveness'),
+    path('readyz', ReadinessView.as_view(), name='readiness'),
     # Admin
     path('admin/', admin.site.urls),
 
