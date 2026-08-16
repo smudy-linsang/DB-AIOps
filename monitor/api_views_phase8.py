@@ -8,6 +8,7 @@ Phase 8: AI 智能化 REST API (phase8/30 §2-3)。
 """
 import json
 import logging
+import os
 import threading
 import time
 
