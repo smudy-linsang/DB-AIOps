@@ -56,9 +56,34 @@ const DEFAULT_PORTS = {
   'pgsql': 5432,
   'dm': 5236,
   'gbase': 5258,
-  'tdsql': 3306,
+  'tdsql': 15002,
   'mongo': 27017,
   'redis': 6379
+}
+
+// 数据库类型专属推荐配置模板
+export const DB_CONFIG_TEMPLATES = {
+  'oracle': [
+    { label: 'Oracle 标准生产模板 (60s 周期 + 表空间/锁等待/ADG)', value: 'oracle_standard', port: 1521, interval: 60, service_name: 'orcl', desc: '采集 v$session, v$lock, dba_tablespaces, 缓冲池命中率及 ADG 延迟' },
+    { label: 'Oracle 核心高频模板 (15s 周期 + 深度 ASH 采样)', value: 'oracle_high_freq', port: 1521, interval: 15, service_name: 'orcl', desc: '15秒高频探查锁阻塞链与活跃会话，适合核心交易账务库' },
+    { label: 'Oracle 轻量归档模板 (300s 周期 + 基础容量)', value: 'oracle_light', port: 1521, interval: 300, service_name: 'orcl', desc: '5分钟低频巡检，适合只读报表库或测试环境' },
+  ],
+  'mysql': [
+    { label: 'MySQL 生产标准模板 (60s 周期 + InnoDB/主从复制)', value: 'mysql_standard', port: 3306, interval: 60, desc: '采集 QPS/TPS、活跃线程、InnoDB Buffer Pool 及 Replication Lag' },
+    { label: 'MySQL 高频高并发模板 (10s 周期 + 锁等待热点)', value: 'mysql_high_freq', port: 3306, interval: 10, desc: '10秒超高频探测死锁与连接数暴增，适合大促秒杀场景' },
+  ],
+  'pgsql': [
+    { label: 'PostgreSQL 生产标准模板 (60s 周期 + 膨胀率/流复制)', value: 'pgsql_standard', port: 5432, interval: 60, desc: '采集 pg_stat_activity, pg_stat_database, 表膨胀与 WAL 归档延迟' },
+  ],
+  'dm': [
+    { label: '达梦 DM8 国产库生产模板 (60s 周期 + DSC 集群/表空间)', value: 'dm_standard', port: 5236, interval: 60, desc: '采集 V$SESSIONS, V$DATAFILE, 表空间水位及 DSC 共享集群状态' },
+  ],
+  'tdsql': [
+    { label: 'TDSQL 分布式/集中式标准模板 (60s 周期 + Set/ZK 状态)', value: 'tdsql_standard', port: 15002, interval: 60, desc: '采集分布式多节点心跳、主备延迟及分片健康度' },
+  ],
+  'gbase': [
+    { label: 'GBase 8a 大数据集群模板 (120s 周期 + 数据节点存储)', value: 'gbase_standard', port: 5258, interval: 120, desc: '采集管理节点调度状态与各数据节点磁盘均衡度' },
+  ],
 }
 
 // 状态配置
@@ -213,9 +238,43 @@ const DatabaseList = () => {
     }
   }
 
-  // 数据库类型变更时自动设置默认端口
+  // 数据库类型变更时自动设置默认端口与模板
   const handleDbTypeChange = (dbType) => {
-    form.setFieldsValue({ port: DEFAULT_PORTS[dbType] || 3306 })
+    const templates = DB_CONFIG_TEMPLATES[dbType] || []
+    const defaultTpl = templates[0]
+    form.setFieldsValue({
+      port: DEFAULT_PORTS[dbType] || 3306,
+      template_name: defaultTpl ? defaultTpl.value : '',
+      collect_interval_sec: defaultTpl ? defaultTpl.interval : 60,
+      service_name: (dbType === 'oracle' && defaultTpl?.service_name) ? defaultTpl.service_name : form.getFieldValue('service_name')
+    })
+  }
+
+  // 选择配置模板时自动联动端口、采集周期与服务名
+  const handleTemplateChange = (templateVal) => {
+    const currentDbType = form.getFieldValue('db_type')
+    const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+    const selected = templates.find(t => t.value === templateVal)
+    if (selected) {
+      form.setFieldsValue({
+        port: selected.port || form.getFieldValue('port'),
+        collect_interval_sec: selected.interval || 60,
+        service_name: selected.service_name || form.getFieldValue('service_name')
+      })
+    }
+  }
+
+  const handleEditTemplateChange = (templateVal) => {
+    const currentDbType = editForm.getFieldValue('db_type')
+    const templates = DB_CONFIG_TEMPLATES[currentDbType] || []
+    const selected = templates.find(t => t.value === templateVal)
+    if (selected) {
+      editForm.setFieldsValue({
+        port: selected.port || editForm.getFieldValue('port'),
+        collect_interval_sec: selected.interval || 60,
+        service_name: selected.service_name || editForm.getFieldValue('service_name')
+      })
+    }
   }
 
   // 打开编辑数据库弹窗
@@ -232,7 +291,9 @@ const DatabaseList = () => {
         port: detail.port,
         username: detail.username,
         password: '',
-        service_name: detail.service_name || ''
+        service_name: detail.service_name || '',
+        collect_interval_sec: detail.collect_interval_sec || 60,
+        template_name: detail.template_name || ''
       })
       setEditModalVisible(true)
     } catch (error) {
@@ -873,11 +934,20 @@ const DatabaseList = () => {
       }
     },
     {
-      title: '环境',
-      dataIndex: 'environment',
-      key: 'environment',
-      width: 80,
-      render: (env) => env ? <Tag>{env}</Tag> : '-'
+      title: '采集周期',
+      key: 'collect_interval',
+      width: 95,
+      render: (_, record) => {
+        const sec = record.collect_interval_sec || 60
+        const isHighFreq = sec <= 15
+        return (
+          <Tooltip title={`每 ${sec} 秒采集一次指标快照`}>
+            <Tag color={isHighFreq ? 'purple' : 'blue'} style={{ borderRadius: 4 }}>
+              ⏱️ {sec}s
+            </Tag>
+          </Tooltip>
+        )
+      }
     },
     {
       title: '最后采集',
@@ -1320,12 +1390,40 @@ const DatabaseList = () => {
           </Form.Item>
 
           <Form.Item
-            name="service_name"
-            label="服务名/数据库名"
-            extra="Oracle: 服务名(SID), MySQL/PG: 数据库名, 其他类型可留空"
+            name="template_name"
+            label="配置模板 (推荐)"
+            extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
           >
-            <Input placeholder="Oracle必填，其他可留空" />
+            <Select placeholder="请选择或自定义配置模板" allowClear onChange={handleTemplateChange}>
+              {(DB_CONFIG_TEMPLATES[form.getFieldValue('db_type')] || []).map(t => (
+                <Select.Option key={t.value} value={t.value}>
+                  {t.label}
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={16}>
+              <Form.Item
+                name="service_name"
+                label="服务名/数据库名"
+                extra="Oracle: 服务名(SID), MySQL/PG: 数据库名"
+              >
+                <Input placeholder="Oracle必填，其他可留空" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="collect_interval_sec"
+                label="采集周期(秒)"
+                rules={[{ required: true, message: '请输入采集周期' }]}
+                extra="支持 10s-3600s"
+              >
+                <InputNumber style={{ width: '100%' }} min={5} max={3600} placeholder="60" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           {/* 测试连接结果显示 */}
           {testResult && (
@@ -1450,12 +1548,40 @@ const DatabaseList = () => {
           </Form.Item>
 
           <Form.Item
-            name="service_name"
-            label="服务名/数据库名"
-            extra="Oracle: 服务名(SID), MySQL/PG: 数据库名, 其他类型可留空"
+            name="template_name"
+            label="配置模板 (推荐)"
+            extra="根据数据库类型自动匹配专属生产指标采集与默认参数"
           >
-            <Input placeholder="Oracle必填，其他可留空" />
+            <Select placeholder="请选择或自定义配置模板" allowClear onChange={handleEditTemplateChange}>
+              {(DB_CONFIG_TEMPLATES[editForm.getFieldValue('db_type')] || []).map(t => (
+                <Select.Option key={t.value} value={t.value}>
+                  {t.label}
+                </Select.Option>
+              ))}
+            </Select>
           </Form.Item>
+
+          <Row gutter={16}>
+            <Col span={16}>
+              <Form.Item
+                name="service_name"
+                label="服务名/数据库名"
+                extra="Oracle: 服务名(SID), MySQL/PG: 数据库名"
+              >
+                <Input placeholder="Oracle必填，其他可留空" />
+              </Form.Item>
+            </Col>
+            <Col span={8}>
+              <Form.Item
+                name="collect_interval_sec"
+                label="采集周期(秒)"
+                rules={[{ required: true, message: '请输入采集周期' }]}
+                extra="支持 10s-3600s"
+              >
+                <InputNumber style={{ width: '100%' }} min={5} max={3600} placeholder="60" />
+              </Form.Item>
+            </Col>
+          </Row>
 
           {/* 测试连接结果显示 */}
           {editTestResult && (

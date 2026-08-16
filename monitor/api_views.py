@@ -232,6 +232,8 @@ class DatabaseListView(JSONResponseMixin, View):
                 'port': config.port,
                 'service_name': config.service_name or '',
                 'is_active': config.is_active,
+                'collect_interval_sec': config.collect_interval_sec or 60,
+                'template_name': config.template_name or '',
                 'status': config.latest_status or 'UNKNOWN',
                 'last_collect_time': config.latest_collect_time.isoformat() if config.latest_collect_time else None,
                 'create_time': config.create_time.isoformat() if config.create_time else None
@@ -267,6 +269,8 @@ class DatabaseListView(JSONResponseMixin, View):
         username = data['username'].strip()
         password = data['password']
         service_name = data.get('service_name', '').strip() or None
+        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        template_name = data.get('template_name', '').strip()
         
         # 验证端口
         try:
@@ -426,6 +430,9 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
             'port': config.port,
             'username': config.username,
             'service_name': config.service_name or '',
+            'collect_interval_sec': config.collect_interval_sec or 60,
+            'template_name': config.template_name or '',
+            'autonomy_level': config.autonomy_level,
             'is_active': config.is_active,
             'create_time': config.create_time.isoformat() if config.create_time else None
         })
@@ -460,6 +467,8 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         port = data['port']
         username = data['username'].strip()
         service_name = data.get('service_name', '').strip() or None
+        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        template_name = data.get('template_name', '').strip()
 
         # 验证端口
         try:
@@ -485,6 +494,8 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         config.port = port
         config.username = username
         config.service_name = service_name
+        config.collect_interval_sec = collect_interval_sec
+        config.template_name = template_name
 
         # 如果提供了新密码，则加密更新
         password = data.get('password')
@@ -502,6 +513,8 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
                 'port': config.port,
                 'username': config.username,
                 'service_name': config.service_name or '',
+                'collect_interval_sec': config.collect_interval_sec,
+                'template_name': config.template_name,
                 'is_active': config.is_active,
                 'message': '数据库配置更新成功'
             })

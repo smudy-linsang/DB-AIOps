@@ -86,6 +86,11 @@ class DatabaseConfig(models.Model):
     autonomy_level = models.IntegerField(null=True, blank=True, verbose_name="自治等级",
         help_text="留空表示跟随全局默认; 0-3 逐级放权")
 
+    # 实例级独立指标采集周期 (秒) - 默认 60 秒
+    collect_interval_sec = models.IntegerField(default=60, verbose_name="指标采集周期(秒)", help_text="默认60秒 (支持10s-3600s)")
+    # 数据库参数与指标配置模板标识
+    template_name = models.CharField(max_length=64, blank=True, default='', verbose_name="配置模板名称", help_text="如 standard_oracle / high_frequency_mysql")
+
     # 创建时间
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
 

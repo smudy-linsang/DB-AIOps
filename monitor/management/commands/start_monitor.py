@@ -208,23 +208,42 @@ class Command(BaseCommand):
                     self.process_result(cfg, 'DOWN', {'error': f'采集线程异常：{str(e)}'})
 
     def monitor_job(self):
-        """统一巡检入口：支持 Celery 异步模式和 ThreadPool 本地模式（v3.0）"""
-        print(f"\n[{datetime.datetime.now()}] --- 开始新一轮巡检 ---")
+        """统一巡检入口：支持 Celery 异步模式和 ThreadPool 本地模式，支持实例级独立采集周期"""
+        now = datetime.datetime.now()
         connection.close_if_unusable_or_obsolete()
 
-        configs = list(DatabaseConfig.objects.filter(is_active=True))
-        if not configs:
+        all_configs = list(DatabaseConfig.objects.filter(is_active=True))
+        if not all_configs:
             print("  没有活跃的数据库配置，跳过本轮巡检")
             return
 
+        # 针对每个库检查是否到达自身设定的采集周期
+        configs_to_check = []
+        for cfg in all_configs:
+            interval = cfg.collect_interval_sec or 60
+            last_log = MonitorLog.objects.filter(config=cfg).order_by('-create_time').first()
+            if not last_log:
+                configs_to_check.append(cfg)
+            else:
+                elapsed = (timezone.now() - last_log.create_time).total_seconds()
+                # 若已流逝时间达到采集周期的 90%，或超过周期，即触发采集
+                if elapsed >= (interval * 0.9):
+                    configs_to_check.append(cfg)
+
+        if not configs_to_check:
+            # 均未到期
+            return
+
+        print(f"\n[{now.strftime('%Y-%m-%d %H:%M:%S')}] --- 开始巡检 ({len(configs_to_check)}/{len(all_configs)} 库到期) ---")
+
         if USE_CELERY:
-            self._celery_dispatch_job(configs)
+            self._celery_dispatch_job(configs_to_check)
         else:
-            self._threadpool_job(configs)
+            self._threadpool_job(configs_to_check)
 
         # W4 自监控：本轮采集完成，上报采集器心跳
         from monitor.self_monitor import report
-        report('collector', {'db_count': len(configs)})
+        report('collector', {'db_count': len(all_configs), 'checked_count': len(configs_to_check)})
 
     def process_result(self, config, current_status, data):
         """统一结果处理和告警逻辑（v3.0：Phase 2 智能引擎集成）"""
