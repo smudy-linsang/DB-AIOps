@@ -2221,6 +2221,7 @@ class LLMProviderCredential(models.Model):
     base_url = models.CharField(max_length=255, verbose_name="API 接入端点 Base URL")
     api_key = models.CharField(max_length=255, blank=True, default='', verbose_name="加密存储的 API Key")
     model_name = models.CharField(max_length=64, verbose_name="模型 ID", help_text="如 MiniMax-Text-01 / gemini-1.5-pro")
+    proxy_url = models.CharField(max_length=255, blank=True, default='', verbose_name="本地代理 URL", help_text="如 http://127.0.0.1:7890 / socks5://127.0.0.1:1080")
     
     # 状态与调度
     is_active = models.BooleanField(default=True, db_index=True, verbose_name="是否启用")

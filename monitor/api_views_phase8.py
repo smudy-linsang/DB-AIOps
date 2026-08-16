@@ -664,6 +664,7 @@ class LlmCredentialsView(_BaseView):
                 'provider_type': c.provider_type,
                 'base_url': c.base_url,
                 'model_name': c.model_name,
+                'proxy_url': c.proxy_url,
                 'api_key_masked': masked,
                 'has_key': bool(api_key),
                 'is_active': c.is_active,
@@ -689,6 +690,7 @@ class LlmCredentialsView(_BaseView):
         base_url = (data.get('base_url') or '').strip()
         api_key = (data.get('api_key') or '').strip()
         model_name = (data.get('model_name') or '').strip()
+        proxy_url = (data.get('proxy_url') or '').strip()
 
         if not name or not base_url or not model_name:
             return self.err('BAD_REQUEST', '名称、接入端点(Base URL)与模型名称为必填项', 400)
@@ -699,6 +701,7 @@ class LlmCredentialsView(_BaseView):
             base_url=base_url,
             api_key=api_key,
             model_name=model_name,
+            proxy_url=proxy_url,
             is_active=bool(data.get('is_active', True)),
             priority=int(data.get('priority', 10)),
             weight=int(data.get('weight', 1)),
@@ -735,6 +738,8 @@ class LlmCredentialDetailView(_BaseView):
             cred.api_key = data['api_key'].strip()
         if 'model_name' in data and data['model_name'].strip():
             cred.model_name = data['model_name'].strip()
+        if 'proxy_url' in data:
+            cred.proxy_url = data['proxy_url'].strip()
         if 'is_active' in data:
             cred.is_active = bool(data['is_active'])
         if 'priority' in data:
@@ -777,7 +782,8 @@ class LlmCredentialPingView(_BaseView):
             base_url=cred.base_url,
             api_key=cred.api_key,
             model=cred.model_name,
-            timeout=15
+            timeout=15,
+            proxy_url=cred.proxy_url
         )
         t0 = time.time()
         result = {'ok': False, 'latency_ms': 0, 'model': cred.model_name}

@@ -51,6 +51,7 @@ SPECS = {
     'LLM_TEMPERATURE':         Spec('LLM_TEMPERATURE', 0.1, float, lambda v: 0.0 <= v <= 2.0),
     'LLM_MAX_TOKENS':          Spec('LLM_MAX_TOKENS', 2048, int, lambda v: v >= 64),
     'LLM_TIMEOUT_SEC':         Spec('LLM_TIMEOUT_SEC', 25, int, lambda v: v >= 1),
+    'LLM_PROXY_URL':           Spec('LLM_PROXY_URL', '', str),
     'AGENT_ENABLED':           Spec('AGENT_ENABLED', False, bool),
     'EMBED_ENABLED':           Spec('EMBED_ENABLED', False, bool),
 }

@@ -69,14 +69,15 @@ def _log_call(scene: str, status: str, *, incident_id: str = '', model: str = ''
 
 
 class OpenAICompatProvider:
-    """OpenAI 兼容 Provider。chat 走 LLM_* 配置, embed 走 EMBED_* 配置。"""
+    """OpenAI 兼容 Provider。支持 HTTP / SOCKS5 本地代理转发 (如 http://127.0.0.1:7890)。"""
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
-                 timeout: int = None):
+                 timeout: int = None, proxy_url: str = None):
         self.base_url = (base_url or getattr(settings, 'LLM_BASE_URL', '')).rstrip('/')
         self.api_key = api_key or getattr(settings, 'LLM_API_KEY', '')
         self.model = model or getattr(settings, 'LLM_MODEL', '')
         self.timeout = int(timeout or getattr(settings, 'LLM_TIMEOUT_SEC', 25))
+        self.proxy_url = proxy_url or getattr(settings, 'LLM_PROXY_URL', '')
 
     # ------------------------------------------------------------------
     def _post(self, path: str, payload: dict, timeout: int = None) -> dict:
@@ -85,15 +86,23 @@ class OpenAICompatProvider:
         headers = {'Content-Type': 'application/json'}
         if self.api_key:
             headers['Authorization'] = f"Bearer {self.api_key}"
+        proxies = None
+        if self.proxy_url:
+            proxies = {
+                'http': self.proxy_url,
+                'https': self.proxy_url,
+            }
         try:
             resp = requests.post(url, json=payload, headers=headers,
-                                 timeout=timeout or self.timeout)
+                                 timeout=timeout or self.timeout, proxies=proxies)
         except requests.Timeout as e:
             raise LLMTimeout(f"LLM 请求超时 (>{timeout or self.timeout}s): {url}") from e
         except requests.RequestException as e:
             raise LLMUnavailable(f"LLM 服务不可达: {e}") from e
         if resp.status_code in (401, 403):
             raise LLMUnavailable(f"LLM 鉴权失败: HTTP {resp.status_code}")
+        if resp.status_code == 404:
+            raise LLMUnavailable(f"LLM 端点不存在 (HTTP 404): {url} (请检查 Base URL 是否正确，如 Gemini 官方兼容端点为 https://generativelanguage.googleapis.com/v1beta/openai)")
         if resp.status_code >= 500:
             raise LLMUnavailable(f"LLM 服务端错误: HTTP {resp.status_code}")
         if resp.status_code != 200:

@@ -92,7 +92,8 @@ class LLMRouterEngine:
                 base_url=cred.base_url,
                 api_key=cred.api_key,
                 model=cred.model_name,
-                timeout=timeout_sec
+                timeout=timeout_sec,
+                proxy_url=getattr(cred, 'proxy_url', '')
             )
 
             t0 = time.time()
