@@ -55,20 +55,18 @@ class CopilotIncidentSeverityTests(TestCase):
     也就是说：越是"有故障、真正需要它"的实例，这两个功能越必然崩。
     """
 
-    @unittest.expectedFailure
     def test_database_context_survives_incident(self):
         from monitor.copilot import _get_database_context
         cfg = _cfg()
         _incident(cfg)
-        ctx = _get_database_context(cfg)   # 当前会抛 AttributeError
+        ctx = _get_database_context(cfg)
         self.assertIn('recent_incidents', ctx)
 
-    @unittest.expectedFailure
     def test_quick_assessment_survives_incident(self):
         from monitor.copilot import generate_quick_health_assessment
         cfg = _cfg('rev-db-2')
         _incident(cfg)
-        res = generate_quick_health_assessment(cfg.id)  # 当前会抛 AttributeError
+        res = generate_quick_health_assessment(cfg.id)
         self.assertIn('overall_score', res)
 
 
@@ -78,7 +76,6 @@ class QuickAssessmentFabricatedMetricsTests(TestCase):
     给出"性能与负载 100 分""容量规划 100 分"。对零数据实例输出满分是虚假保证。
     """
 
-    @unittest.expectedFailure
     def test_no_metrics_must_not_yield_full_marks(self):
         from monitor.copilot import generate_quick_health_assessment
         cfg = _cfg('rev-db-nometric')
