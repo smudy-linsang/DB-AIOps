@@ -31,16 +31,22 @@ const MODEL_PRESETS = [
     model: 'MiniMax-Text-01',
   },
   {
-    label: 'Google Gemini (官方原生端点 /interactions 或 /v1beta)',
+    label: 'Google Gemini (官方原生端点 /v1beta - 推荐 gemini-2.5-flash)',
     value: 'gemini',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
-    model: 'gemini-1.5-flash',
+    model: 'gemini-2.5-flash',
+  },
+  {
+    label: 'Google Gemini Pro (官方原生端点 /v1beta - gemini-2.5-pro)',
+    value: 'gemini_pro',
+    baseUrl: 'https://generativelanguage.googleapis.com/v1beta',
+    model: 'gemini-2.5-pro',
   },
   {
     label: 'Google Gemini (官方 OpenAI 兼容端点 /openai)',
     value: 'gemini_openai',
     baseUrl: 'https://generativelanguage.googleapis.com/v1beta/openai',
-    model: 'gemini-1.5-pro',
+    model: 'gemini-2.5-flash',
   },
   {
     label: 'DeepSeek 官方 API (推荐/高性价比)',
