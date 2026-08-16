@@ -2,6 +2,10 @@
 trigger: always_on
 ---
 
+<!-- 同步关系：本文件（db-aiops/.qoder/rules/validation.md，git 版本控制内）是权威源；
+     工作区根副本 /Users/mac/DB_Monitor/.qoder/rules/validation.md 供平台规则发现，
+     修改本文件后必须将全文同步覆盖到工作区根副本，禁止只改其中一份。 -->
+
 # 代码编辑后验证规则
 
 ## 强制：每次代码编辑后立即验证
@@ -33,17 +37,18 @@ trigger: always_on
 
 ## CI 性质（事后信号，非门禁）
 
-CI（`.github/workflows/ci.yml`）是事后信号，不是合并门禁。本地验证是唯一的闸。
+> 权威描述以 `AGENTS.md` 的「协作约定」章节为准（理由见
+> `PROJECT_IMPROVEMENT_DESIGN.md` 附录 B.6.2），本节只保留精简入口。
 
-本仓库直推 master，没有 ruleset、没有必需状态检查（「允许直推」与「必需检查」
-在 GitHub 上互斥）。这意味着：
+CI（`.github/workflows/ci.yml`）是事后信号，不是合并门禁。本地验证是唯一的闸：
 
-- **没有任何机制会在你推送前拦住你。** 推坏了就是 master 坏了。
+- 本仓库直推 master，没有 ruleset、没有必需状态检查，推前没有任何机制拦截；
 - CI 在 push 之后才跑（静态检查、单元、集成、方言 MySQL/PG、方言 Oracle、
-  安全扫描、前端，共 7 项）。它能告诉你推坏了，但拦不住你推。
-- 因此**推之前请自己跑 `scripts/validate.sh`**；改到采集/方言相关代码时，
-  尽量连方言测试一起跑。
-- **推完请回头看一眼 CI。** 看到红请立刻修或回滚，别留给下一个人。
+  安全扫描、前端，共 7 项）；推之前请自己跑 `scripts/validate.sh`，
+  改到采集/方言相关代码时尽量连方言测试一起跑；
+- master 挂红就是真红 —— Oracle job 已摘掉 `continue-on-error`，且有
+  「确认用例真的跑了」守住绿灯含义，不存在「红了也没关系」的 job。
+  推完回头看一眼 CI，看到红请立刻修或回滚，别留给下一个人。
 
 > 本规则的 `trigger: always_on` 仅约束本地编辑后验证的强制性，
 > 不改变 CI 的事后信号性质——CI 结果不会在推送前拦住你。
