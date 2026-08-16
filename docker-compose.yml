@@ -1,235 +1,174 @@
-# ==========================================
-# DB Monitor - Full Stack Environment
-# TimescaleDB (PostgreSQL) + Redis + Elasticsearch + Django App
-# MySQL is an optional monitoring target
-# ==========================================
+# DB-AIOps v2.5 production-like single-host topology.
+# Secrets are mandatory environment variables; do not place them in this file.
 
-version: '3.8'
+name: dbmonitor
+
+x-app-environment: &app-environment
+  DJANGO_ENV: production
+  DJANGO_SECRET_KEY: ${DJANGO_SECRET_KEY:?DJANGO_SECRET_KEY is required}
+  DB_MONITOR_SECRET_KEY: ${DB_MONITOR_SECRET_KEY:?DB_MONITOR_SECRET_KEY is required}
+  DJANGO_ALLOWED_HOSTS: ${DJANGO_ALLOWED_HOSTS:?DJANGO_ALLOWED_HOSTS is required}
+  DJANGO_CSRF_TRUSTED_ORIGINS: ${DJANGO_CSRF_TRUSTED_ORIGINS:?DJANGO_CSRF_TRUSTED_ORIGINS is required}
+  USE_POSTGRESQL: "True"
+  POSTGRES_HOST: timescaledb
+  POSTGRES_PORT: "5432"
+  POSTGRES_DB: db_monitor
+  POSTGRES_USER: postgres
+  POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  TIMESCALEDB_ENABLED: "True"
+  TIMESCALEDB_HOST: timescaledb
+  TIMESCALEDB_PORT: "5432"
+  TIMESCALEDB_NAME: db_monitor
+  TIMESCALEDB_USER: postgres
+  TIMESCALEDB_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+  USE_REDIS_CACHE: "True"
+  REDIS_URL: redis://:${REDIS_PASSWORD:?REDIS_PASSWORD is required}@redis:6379/0
+  ES_ENABLED: "True"
+  ES_URL: http://elastic:${ELASTIC_PASSWORD:?ELASTIC_PASSWORD is required}@elasticsearch:9200
+  DJANGO_TRUSTED_PROXY_IPS: ${DBMONITOR_BACKEND_SUBNET:-172.30.25.0/24}
+  ENABLE_RATE_LIMIT: "True"
+  READINESS_REQUIRE_WORKERS: "True"
+
+x-app-service: &app-service
+  build:
+    context: .
+    dockerfile: Dockerfile
+  image: dbmonitor/backend:2.5.0
+  environment: *app-environment
+  init: true
+  restart: unless-stopped
+  depends_on:
+    timescaledb:
+      condition: service_healthy
+    redis:
+      condition: service_healthy
+    elasticsearch:
+      condition: service_healthy
+  networks: [backend]
+  security_opt:
+    - no-new-privileges:true
 
 services:
-
-  # ----------------------------------------
-  # Redis Cache
-  # Host port: 6379
-  # ----------------------------------------
-  redis:
-    image: redis:7-alpine
-    container_name: dbmonitor-redis
-    ports:
-      - "6379:6379"
-    volumes:
-      - redis_data:/data
-    networks:
-      - dbmonitor-net
-    healthcheck:
-      test: ["CMD", "redis-cli", "ping"]
-      interval: 10s
-      timeout: 5s
-      retries: 5
-
-  # ----------------------------------------
-  # MySQL 8.0（可选监控目标）
-  # 如需监控 MySQL 实例可取消注释
-  # Host port: 3306
-  # root password: root123
-  # monitor user: monitor / monitor123
-  # ----------------------------------------
-  # mysql:
-  #   image: mysql:8.0
-  #   container_name: dbmonitor-mysql
-  #   environment:
-  #     MYSQL_ROOT_PASSWORD: root123
-  #     MYSQL_DATABASE: testdb
-  #     MYSQL_USER: monitor
-  #     MYSQL_PASSWORD: monitor123
-  #   ports:
-  #     - "3306:3306"
-  #   volumes:
-  #     - mysql_data:/var/lib/mysql
-  #   command: >
-  #     --default-authentication-plugin=mysql_native_password
-  #     --slow-query-log=ON
-  #     --long-query-time=1
-  #   networks:
-  #     - dbmonitor-net
-  #   healthcheck:
-  #     test: ["CMD", "mysqladmin", "ping", "-h", "localhost", "-uroot", "-proot123"]
-  #     interval: 10s
-  #     timeout: 5s
-  #     retries: 10
-
-
-  # ----------------------------------------
-  # TimescaleDB (PostgreSQL with time-series extensions)
-  # Host port: 5432
-  # User: postgres / postgres123
-  # Database: timeseriesdb
-  # ----------------------------------------
   timescaledb:
-    image: timescale/timescaledb:latest-pg16
-    container_name: dbmonitor-timescaledb
+    image: timescale/timescaledb:latest-pg16@sha256:87f39af0a38cb42e4add367d9dfad2087a53fe5c9b24b5bc0dc66bd204b0665f
     environment:
+      POSTGRES_DB: db_monitor
       POSTGRES_USER: postgres
-      POSTGRES_PASSWORD: postgres123
-      POSTGRES_DB: timeseriesdb
-    ports:
-      - "5432:5432"
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?POSTGRES_PASSWORD is required}
+    expose: ["5432"]
     volumes:
       - timeseries_data:/var/lib/postgresql/data
-    networks:
-      - dbmonitor-net
+    networks: [backend]
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "pg_isready -U postgres"]
+      test: ["CMD-SHELL", "pg_isready -U postgres -d db_monitor"]
+      interval: 10s
+      timeout: 5s
+      retries: 12
+    security_opt:
+      - no-new-privileges:true
+
+  redis:
+    image: redis:7-alpine@sha256:6ab0b6e7381779332f97b8ca76193e45b0756f38d4c0dcda72dbb3c32061ab99
+    environment:
+      REDIS_PASSWORD: ${REDIS_PASSWORD:?REDIS_PASSWORD is required}
+    command: ["sh", "-c", "exec redis-server --appendonly yes --requirepass \"$$REDIS_PASSWORD\""]
+    expose: ["6379"]
+    volumes:
+      - redis_data:/data
+    networks: [backend]
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD-SHELL", "redis-cli -a \"$$REDIS_PASSWORD\" ping | grep -q PONG"]
       interval: 10s
       timeout: 5s
       retries: 10
+    security_opt:
+      - no-new-privileges:true
 
-  # ----------------------------------------
-  # Django Application
-  # Host port: 8000
-  # ----------------------------------------
-  web:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: dbmonitor-web
-    environment:
-      - DJANGO_ENV=production
-      - USE_POSTGRESQL=True
-      - POSTGRES_HOST=timescaledb
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=db_monitor
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres123
-      - TIMESCALEDB_ENABLED=True
-      - TIMESCALEDB_HOST=timescaledb
-      - TIMESCALEDB_PORT=5432
-      - TIMESCALEDB_NAME=timeseriesdb
-      - TIMESCALEDB_USER=postgres
-      - TIMESCALEDB_PASSWORD=postgres123
-      - ES_ENABLED=True
-      - ES_HOST=elasticsearch
-      - ES_PORT=9200
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    ports:
-      - "8000:8000"
-    volumes:
-      - .:/app
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - dbmonitor-net
-    command: >
-      sh -c "python manage.py migrate &&
-             gunicorn --bind 0.0.0.0:8000 --workers 3 --timeout 120 dbmonitor.wsgi:application"
-
-  # ----------------------------------------
-  # React Frontend (Vite dev server)
-  # Host port: 3000
-  # ----------------------------------------
-  frontend:
-    image: node:18-alpine
-    container_name: dbmonitor-frontend
-    working_dir: /app
-    volumes:
-      - ./frontend:/app
-    ports:
-      - "3000:3000"
-    environment:
-      - VITE_API_BASE_URL=http://localhost:8000
-    networks:
-      - dbmonitor-net
-    depends_on:
-      web:
-        condition: service_started
-    command: >
-      sh -c "cd /app && npm install &&
-             npm run dev -- --host 0.0.0.0 --port 3000"
-
-  # ----------------------------------------
-  # 数据采集守护进程
-  # 每5分钟采集所有数据库的指标数据
-  # ----------------------------------------
-  collector:
-    build:
-      context: .
-      dockerfile: Dockerfile
-    container_name: dbmonitor-collector
-    environment:
-      - DJANGO_ENV=production
-      - USE_POSTGRESQL=True
-      - POSTGRES_HOST=timescaledb
-      - POSTGRES_PORT=5432
-      - POSTGRES_DB=db_monitor
-      - POSTGRES_USER=postgres
-      - POSTGRES_PASSWORD=postgres123
-      - TIMESCALEDB_ENABLED=True
-      - TIMESCALEDB_HOST=timescaledb
-      - TIMESCALEDB_PORT=5432
-      - TIMESCALEDB_NAME=timeseriesdb
-      - TIMESCALEDB_USER=postgres
-      - TIMESCALEDB_PASSWORD=postgres123
-      - ES_ENABLED=True
-      - ES_HOST=elasticsearch
-      - ES_PORT=9200
-      - REDIS_HOST=redis
-      - REDIS_PORT=6379
-    volumes:
-      - .:/app
-    depends_on:
-      timescaledb:
-        condition: service_healthy
-      redis:
-        condition: service_healthy
-      elasticsearch:
-        condition: service_healthy
-    extra_hosts:
-      - "host.docker.internal:host-gateway"
-    networks:
-      - dbmonitor-net
-    command: python manage.py start_monitor
-    restart: unless-stopped
-
-  # ----------------------------------------
-  # Elasticsearch 8.x - 时序指标存储
-  # Host port: 9200 (HTTP API)
-  # ----------------------------------------
   elasticsearch:
-    image: docker.elastic.co/elasticsearch/elasticsearch:8.12.0
-    container_name: dbmonitor-elasticsearch
+    image: docker.elastic.co/elasticsearch/elasticsearch:8.19.3@sha256:bbac63ecd50e9263565fbb616172a5287d5f99e486d76453e81e32cafcba3838
     environment:
-      - discovery.type=single-node
-      - xpack.security.enabled=false
-      - xpack.security.http.ssl.enabled=false
-      - ES_JAVA_OPTS=-Xms512m -Xmx512m
-      - cluster.name=dbmonitor-es
-      - bootstrap.memory_lock=true
-    ports:
-      - "9200:9200"
+      discovery.type: single-node
+      xpack.security.enabled: "true"
+      xpack.security.http.ssl.enabled: "false"
+      ELASTIC_PASSWORD: ${ELASTIC_PASSWORD:?ELASTIC_PASSWORD is required}
+      ES_JAVA_OPTS: ${ES_JAVA_OPTS:--Xms1g -Xmx1g}
+      cluster.name: dbmonitor-es
+    expose: ["9200"]
     volumes:
       - es_data:/usr/share/elasticsearch/data
-    networks:
-      - dbmonitor-net
+    networks: [backend]
+    restart: unless-stopped
     healthcheck:
-      test: ["CMD-SHELL", "curl -f http://localhost:9200/_cluster/health || exit 1"]
+      test: ["CMD-SHELL", "curl -fsS -u elastic:$$ELASTIC_PASSWORD http://localhost:9200/_cluster/health >/dev/null"]
       interval: 15s
       timeout: 10s
-      retries: 10
+      retries: 20
     ulimits:
-      memlock:
-        soft: -1
-        hard: -1
-      nofile:
-        soft: 65536
-        hard: 65536
+      memlock: {soft: -1, hard: -1}
+      nofile: {soft: 65536, hard: 65536}
+    security_opt:
+      - no-new-privileges:true
+
+  web:
+    <<: *app-service
+    command:
+      - sh
+      - -c
+      - >-
+        python manage.py migrate --noinput &&
+        python manage.py init_timeseries &&
+        python manage.py init_playbooks &&
+        exec gunicorn --bind 0.0.0.0:8000 --workers 3 --worker-class gthread
+        --threads 8 --worker-tmp-dir /dev/shm --timeout 120
+        --access-logfile - --error-logfile - dbmonitor.wsgi:application
+    expose: ["8000"]
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8000/livez"]
+      interval: 15s
+      timeout: 5s
+      retries: 10
+
+  collector:
+    <<: *app-service
+    command: ["python", "manage.py", "start_monitor"]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  sentinel:
+    <<: *app-service
+    command: ["python", "manage.py", "start_sentinel"]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  pipeline:
+    <<: *app-service
+    command: ["python", "manage.py", "start_pipeline"]
+    depends_on:
+      web:
+        condition: service_healthy
+
+  frontend:
+    build:
+      context: frontend
+      dockerfile: Dockerfile
+    image: dbmonitor/frontend:2.5.0
+    ports:
+      # 默认只供宿主机上的 TLS 入口代理访问；不要把明文 HTTP 直接暴露到生产网。
+      - "${DBMONITOR_BIND_ADDRESS:-127.0.0.1}:${DBMONITOR_HTTP_PORT:-3000}:8080"
+    depends_on:
+      web:
+        condition: service_healthy
+    networks:
+      frontend:
+      backend:
+        ipv4_address: ${DBMONITOR_FRONTEND_BACKEND_IP:-172.30.25.10}
+    restart: unless-stopped
+    security_opt:
+      - no-new-privileges:true
 
 volumes:
   timeseries_data:
@@ -237,5 +176,9 @@ volumes:
   es_data:
 
 networks:
-  dbmonitor-net:
-    driver: bridge
+  frontend:
+  backend:
+    internal: true
+    ipam:
+      config:
+        - subnet: ${DBMONITOR_BACKEND_SUBNET:-172.30.25.0/24}

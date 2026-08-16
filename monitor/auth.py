@@ -16,6 +16,7 @@ Author: DB-AIOps Team
 
 import hashlib
 import hmac
+import ipaddress
 import logging
 import secrets
 import time
@@ -826,7 +827,21 @@ def _client_ip(request: HttpRequest) -> str:
     """
     remote = request.META.get('REMOTE_ADDR', '') or 'unknown'
     trusted = getattr(settings, 'TRUSTED_PROXY_IPS', None) or []
-    if remote not in trusted:
+    try:
+        remote_ip = ipaddress.ip_address(remote)
+    except ValueError:
+        remote_ip = None
+    trusted_remote = False
+    if remote_ip is not None:
+        for entry in trusted:
+            try:
+                if remote_ip in ipaddress.ip_network(str(entry), strict=False):
+                    trusted_remote = True
+                    break
+            except ValueError:
+                # 配置错误保持 fail-safe：该项不受信任。启动检查/日志负责暴露配置问题。
+                continue
+    if not trusted_remote:
         # 直连：XFF 一律不信；但若对方确实带了 XFF，提示运维可能漏配了代理白名单
         if request.META.get('HTTP_X_FORWARDED_FOR'):
             _warn_untrusted_xff_once(remote)

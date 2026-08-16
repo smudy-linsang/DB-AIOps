@@ -390,6 +390,7 @@ class FeedbackCalibrationDbTests(TestCase):
 # ==========================================================================
 # 7. Copilot & Quick Assessment 单元测试
 # ==========================================================================
+@override_settings(LLM_ENABLED=False, AGENT_ENABLED=False, EMBED_ENABLED=False)
 class CopilotTests(TestCase):
 
     def setUp(self):
@@ -400,7 +401,7 @@ class CopilotTests(TestCase):
             host='10.0.0.10',
             port=1521,
             username='sys',
-            password='enc:test_encrypted_pwd',  # noqa: secret
+            password='enc:test_encrypted_pwd',  # secret-scan: allow 测试夹具
             is_active=True,
             cpu_cores=16,
         )
@@ -440,7 +441,7 @@ class V2OperationsTests(TestCase):
             host='127.0.0.1',
             port=3306,
             username='trade_user',
-            password='enc:test_encrypted_pwd',  # noqa: secret
+            password='enc:test_encrypted_pwd',  # secret-scan: allow 测试夹具
             is_active=True,
         )
         self.inc = Incident.objects.create(
@@ -459,27 +460,53 @@ class V2OperationsTests(TestCase):
         from monitor.rca_engine_v3 import CausalInferenceEngine
         from monitor.models import IncidentCauseChain
         chains = CausalInferenceEngine.infer_and_build_cause_chain(self.inc)
-        self.assertGreaterEqual(len(chains), 2)
+        self.assertEqual(len(chains), 1)
         self.assertTrue(IncidentCauseChain.objects.filter(incident=self.inc).exists())
         self.assertEqual(chains[0]['node_type'], 'LOCK')
+        self.assertEqual(chains[0]['evidence_refs'], ['rca:lock'])
+
+    def test_rca3_does_not_fabricate_chain_without_evidence(self):
+        from monitor.rca_engine_v3 import CausalInferenceEngine
+        from monitor.models import IncidentCauseChain
+
+        self.inc.title = '标题里即使写了阻塞也不能当证据'
+        self.inc.rca_result = {}
+        self.inc.health_snapshot = 0.0
+        self.inc.save(update_fields=['title', 'rca_result', 'health_snapshot'])
+        self.assertEqual(CausalInferenceEngine.infer_and_build_cause_chain(self.inc), [])
+        self.assertFalse(IncidentCauseChain.objects.filter(incident=self.inc).exists())
 
     def test_playbook_dryrun_and_execution(self):
+        from django.core.management import call_command
+        from io import StringIO
+        from monitor.models import Event
         from monitor.playbook_engine_v2 import PlaybookExecutor
-        # 1. 预演保护账号 -> 拒绝
+        # 1. 没有服务端事故证据时，即使浏览器提交会话参数也必须拒绝。
         rej = PlaybookExecutor.evaluate_dryrun(
-            'KILL_ROOT_BLOCKER', self.cfg, {'username': 'root', 'session_id': '10'}
+            'KILL_ROOT_BLOCKER', self.cfg, {'username': 'root', 'session_id': '10'},
+            incident=self.inc,
         )
         self.assertEqual(rej['status'], 'REJECTED')
 
-        # 2. 预演普通账号 -> 通过
+        # 2. 告警事件提供可复核的 blocker 后，必须忽略客户端伪造 SID，
+        #    只使用服务端证据解析出的目标。
+        Event.objects.create(
+            event_uid='EVT-TEST-BLOCKER-001', config=self.cfg, db_type='mysql',
+            source='sentinel', signal='blocked_session', severity='critical',
+            dedup_key='test:blocker:1845', occurred_at=timezone.now(),
+            incident=self.inc, detail={'chains': [{'blocker': 1845}]},
+        )
         pass_res = PlaybookExecutor.evaluate_dryrun(
-            'KILL_ROOT_BLOCKER', self.cfg, {'username': 'trade_user', 'session_id': '1845'}
+            'KILL_ROOT_BLOCKER', self.cfg, {'session_id': '9999'}, incident=self.inc,
         )
         self.assertEqual(pass_res['status'], 'PASSED')
+        self.assertEqual(pass_res['resolved_params'], {'blocker_id': '1845'})
 
-        # 3. 正式安全执行
+        # 3. 中风险动作默认只生成待审批运行单，不应在单元测试中下发目标库。
+        call_command('init_playbooks', stdout=StringIO())
         exec_res = PlaybookExecutor.execute_playbook(
-            'KILL_ROOT_BLOCKER', self.cfg, 'admin', {'username': 'trade_user', 'session_id': '1845'}, incident=self.inc
+            'KILL_ROOT_BLOCKER', self.cfg, 'admin', {'session_id': '9999'},
+            incident=self.inc,
         )
-        self.assertEqual(exec_res['status'], 'success')
-        self.assertIn('RUN-', exec_res['run_id'])
+        self.assertEqual(exec_res['status'], 'pending_approval')
+        self.assertIn('PBR-', exec_res['run_id'])

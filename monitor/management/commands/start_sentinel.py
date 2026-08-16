@@ -6,7 +6,7 @@
 import datetime
 
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 
 
 class Command(BaseCommand):
@@ -17,6 +17,15 @@ class Command(BaseCommand):
                             help='对每个实例执行一次探活+采样后退出(调试)')
 
     def handle(self, *args, **options):
+        from monitor.process_lease import LeaseUnavailable, ProcessLeaseGuard
+        try:
+            with ProcessLeaseGuard('sentinel') as leader:
+                self._leader = leader
+                return self._handle(*args, **options)
+        except LeaseUnavailable as exc:
+            raise CommandError(str(exc)) from exc
+
+    def _handle(self, *args, **options):
         if not getattr(settings, 'SENTINEL_ENABLED', True):
             self.stdout.write("SENTINEL_ENABLED=False, 退出")
             return
@@ -45,6 +54,7 @@ class Command(BaseCommand):
 
         print(f"[{datetime.datetime.now()}] 哨兵进程启动")
         mgr = SentinelManager()
+        self._leader.on_lost = mgr.stop
         try:
             mgr.run()
         except (KeyboardInterrupt, SystemExit):

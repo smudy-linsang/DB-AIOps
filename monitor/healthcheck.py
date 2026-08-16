@@ -181,8 +181,9 @@ class PlatformHealthCheckView(View):
     def _check_collector_activity(self) -> dict:
         """检查采集活跃度"""
         try:
+            from django.utils import timezone
             from monitor.models import MonitorLog
-            recent_time = datetime.now() - timedelta(minutes=10)
+            recent_time = timezone.now() - timedelta(minutes=10)
             active_count = MonitorLog.objects.filter(
                 create_time__gte=recent_time
             ).values('config_id').distinct().count()
@@ -224,11 +225,11 @@ class PlatformHealthCheckView(View):
             if not appconf.get('READINESS_REQUIRE_WORKERS'):
                 return {'status': 'disabled', 'message': 'worker readiness check disabled'}
             from django.utils import timezone
-            from monitor.models import ComponentHeartbeat
+            from monitor.models import ComponentHeartbeat, ProcessLease
             from monitor.self_monitor import COMPONENTS
 
             now = timezone.now()
-            missing, stale = [], []
+            missing, stale, leaderless = [], [], []
             for code in ('collector', 'sentinel', 'pipeline'):
                 spec = COMPONENTS[code]
                 beats = list(ComponentHeartbeat.objects.filter(component=code))
@@ -238,10 +239,16 @@ class PlatformHealthCheckView(View):
                     missing.append(code)
                 elif not fresh:
                     stale.append(code)
-            if missing or stale:
+                lease = ProcessLease.objects.filter(
+                    role=code, shard_key='global', owner_id__gt='',
+                    expires_at__gt=now).first()
+                if lease is None:
+                    leaderless.append(code)
+            if missing or stale or leaderless:
                 return {'status': 'error', 'missing': missing, 'stale': stale,
+                        'leaderless': leaderless,
                         'message': '必需后台角色未就绪'}
-            return {'status': 'ok', 'message': '必需后台角色均有新鲜心跳'}
+            return {'status': 'ok', 'message': '必需后台角色均有新鲜心跳和有效租约'}
         except Exception as e:
             return {'status': 'error', 'message': str(e)[:100]}
 

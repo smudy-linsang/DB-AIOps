@@ -16,6 +16,108 @@ from django.utils import timezone
 
 logger = logging.getLogger("monitor.playbook_engine")
 
+_IDENTIFIER_RE = re.compile(r'^[A-Za-z][A-Za-z0-9_$#]{0,127}$')
+_UNSIGNED_INT_RE = re.compile(r'^[0-9]+$')
+_ORACLE_SESSION_RE = re.compile(r'^[0-9]+,[0-9]+$')
+_LEGACY_PARAM_TYPES = {
+    'blocker_id': 'session', 'session_id': 'session',
+    'idle_sec': 'integer', 'add_mb': 'integer',
+    'tablespace': 'identifier', 'param': 'identifier',
+    'old_value': 'literal', 'new_value': 'literal',
+}
+_PROTECTED_SESSION_USERS = frozenset({
+    'root', 'sys', 'system', 'postgres', 'rdsadmin', 'administrator',
+})
+
+
+def _sql_literal(value) -> str:
+    if isinstance(value, bool):
+        return '1' if value else '0'
+    if isinstance(value, (int, float)) and not isinstance(value, bool):
+        return str(value)
+    if value is None:
+        return 'NULL'
+    return "'" + str(value).replace("'", "''") + "'"
+
+
+def _normalize_params(schema: dict, supplied: dict, db_type: str) -> dict:
+    """把外部参数转换为可安全替换的 SQL 片段；未声明参数不会进入渲染上下文。"""
+    if not isinstance(schema, dict) or not isinstance(supplied, dict):
+        raise ValueError('Playbook 参数格式必须为对象')
+    normalized = {}
+    for name, raw_spec in schema.items():
+        if not re.fullmatch(r'\w+', str(name)):
+            raise ValueError(f'非法参数名: {name}')
+        spec = raw_spec if isinstance(raw_spec, dict) else {}
+        if name in supplied:
+            value = supplied[name]
+        elif 'default' in spec:
+            value = spec['default']
+        elif spec.get('required'):
+            raise ValueError(f'缺少必填参数: {name}')
+        else:
+            continue
+
+        kind = spec.get('type') or _LEGACY_PARAM_TYPES.get(name)
+        if kind == 'integer':
+            text = str(value)
+            if isinstance(value, bool) or not _UNSIGNED_INT_RE.fullmatch(text):
+                raise ValueError(f'参数 {name} 必须为非负整数')
+            number = int(text)
+            minimum = int(spec.get('min', 0))
+            maximum = int(spec.get('max', 2_147_483_647))
+            if not minimum <= number <= maximum:
+                raise ValueError(f'参数 {name} 超出允许范围 {minimum}..{maximum}')
+            normalized[name] = str(number)
+        elif kind == 'identifier':
+            text = str(value)
+            if not _IDENTIFIER_RE.fullmatch(text):
+                raise ValueError(f'参数 {name} 不是合法数据库标识符')
+            normalized[name] = text
+        elif kind == 'session':
+            text = str(value)
+            if db_type == 'oracle' and name == 'blocker_id':
+                if not _ORACLE_SESSION_RE.fullmatch(text):
+                    raise ValueError('Oracle blocker_id 必须为 sid,serial#')
+                normalized[f'{name}_sid'] = text.split(',', 1)[0]
+            elif not _UNSIGNED_INT_RE.fullmatch(text):
+                raise ValueError(f'参数 {name} 必须为数字会话号')
+            normalized[name] = text
+        elif kind == 'literal':
+            normalized[name] = _sql_literal(value)
+        else:
+            raise ValueError(f'参数 {name} 未声明受支持的 type')
+    return normalized
+
+
+def _assert_safe_session_target(conn, db_type: str, session_id: str) -> str:
+    """从目标库实时解析会话账号；系统账号和无法验证的目标一律拒绝。"""
+    if db_type in ('mysql', 'tdsql', 'gbase'):
+        sql = f'SELECT user FROM information_schema.processlist WHERE id={session_id}'
+    elif db_type in ('pgsql', 'postgresql'):
+        sql = f'SELECT usename FROM pg_stat_activity WHERE pid={session_id}'
+    elif db_type == 'oracle':
+        sid = session_id.split(',', 1)[0]
+        sql = f'SELECT username FROM v$session WHERE sid={sid}'
+    else:
+        raise ValueError(f'{db_type} 尚未实现受保护会话账号校验，拒绝 kill')
+
+    cursor = conn.cursor()
+    try:
+        cursor.execute(sql)
+        row = cursor.fetchone()
+    finally:
+        cursor.close()
+    if not row:
+        raise ValueError('目标会话不存在或监控账号不可见')
+    owner = next(iter(row.values())) if isinstance(row, dict) else row[0]
+    owner = str(owner or '').strip()
+    if not owner:
+        raise ValueError('无法解析目标会话账号')
+    if owner.casefold() in _PROTECTED_SESSION_USERS:
+        raise ValueError(f'目标属于受保护账号 {owner}，拒绝执行')
+    return owner
+
 
 def _render(sql: str, params: dict) -> str:
     """渲染 {placeholder}。缺失占位符保留原样(precheck 会拦)。"""
@@ -31,7 +133,13 @@ def _pick_sql(step: dict, db_type: str, params: dict) -> str:
     by_db = step.get('sql_by_db') or {}
     key = {'postgresql': 'pgsql'}.get(db_type, db_type)
     sql = by_db.get(key) or step.get('sql') or ''
-    return _render(sql, params)
+    render_params = params
+    # 兼容 v2.5 之前已落库的 Oracle blocker 前置检查模板：查询只需要 sid，
+    # KILL 语句仍必须使用完整 sid,serial#。
+    if (db_type == 'oracle' and step.get('action') == 'query'
+            and 'v$session' in sql.lower() and 'blocker_id_sid' in params):
+        render_params = dict(params, blocker_id=params['blocker_id_sid'])
+    return _render(sql, render_params)
 
 
 def _run_step(conn, db_type: str, step: dict, params: dict) -> dict:
@@ -166,11 +274,15 @@ def execute_run(run_id: str) -> dict:
     inc = run.incident
     config = inc.config
     db_type = config.db_type
-    params = dict(run.params or {})
-    # params_schema 中的默认值兜底 (占位符缺失会让 SQL 渲染失败)
-    for k, spec in (pb.params_schema or {}).items():
-        if k not in params and isinstance(spec, dict) and 'default' in spec:
-            params[k] = spec['default']
+    try:
+        params = _normalize_params(pb.params_schema or {}, run.params or {}, db_type)
+    except ValueError as e:
+        run.status = 'failed'
+        run.error_message = str(e)
+        run.finished_at = timezone.now()
+        run.save(update_fields=['status', 'error_message', 'finished_at'])
+        _audit(inc, 'parameter_validation', str(e), 'fail')
+        return {'status': 'failed', 'reason': 'invalid_parameters'}
 
     run.status = 'prechecking'
     run.started_at = timezone.now()
@@ -187,6 +299,27 @@ def execute_run(run_id: str) -> dict:
     step_results = []
     try:
         conn = DbConnector.get_connection(config)
+
+        # kill 类动作必须以目标库实时账号为准，不能相信浏览器或旧事件中的用户名。
+        if pb.playbook_id == 'PB-LOCK-KILL-BLOCKER':
+            try:
+                owner = _assert_safe_session_target(
+                    conn, db_type, params.get('blocker_id', ''))
+                step_results.append({
+                    'seq': 0, 'phase': 'safety_guard', 'action': 'query',
+                    'desc': '受保护会话账号校验', 'status': 'ok',
+                    'output': f'目标账号: {owner}', 'rows_affected': 1,
+                    'started_at': timezone.now().isoformat(),
+                    'finished_at': timezone.now().isoformat(), 'sql': '', 'error': '',
+                })
+            except ValueError as e:
+                run.status = 'failed'
+                run.error_message = str(e)
+                run.step_results = step_results
+                run.finished_at = timezone.now()
+                run.save()
+                _audit(inc, 'safety_guard', str(e), 'fail')
+                return {'status': 'failed', 'reason': 'unsafe_session_target'}
 
         # 1. precheck (全过才继续; 任一失败 → failed, 零写操作)
         for st in (pb.precheck or []):

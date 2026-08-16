@@ -59,8 +59,8 @@ const Login = () => {
           onFinish={onFinish}
           size="large"
           initialValues={{
-            username: 'admin',
-            password: 'admin123' // noqa: secret 开发环境默认填充值，非凭据
+            username: '',
+            password: ''
           }}
         >
           <Form.Item
@@ -96,7 +96,7 @@ const Login = () => {
 
           <div style={{ textAlign: 'center' }}>
             <Text type="secondary" style={{ fontSize: 12 }}>
-              默认账号: admin / admin123
+              请使用已授权的实名账号登录
             </Text>
           </div>
         </Form>

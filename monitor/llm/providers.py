@@ -62,7 +62,10 @@ def _log_call(scene: str, status: str, *, incident_id: str = '', model: str = ''
             model=model, latency_ms=int(latency_ms),
             prompt_tokens=int(prompt_tokens), completion_tokens=int(completion_tokens),
             prompt_chars=int(prompt_chars), error_message=(error or '')[:2000],
-            response_digest=hashlib.md5(response_text.encode('utf-8')).hexdigest() if response_text else '',
+            # 模型字段为 32 字符；保留 SHA-256 的前 128 bit 作为去重指纹，
+            # 避免弱哈希同时不破坏既有表结构与审计日志写入。
+            response_digest=(hashlib.sha256(response_text.encode('utf-8')).hexdigest()[:32]
+                             if response_text else ''),
         )
     except Exception:  # noqa: BLE001 留痕失败不影响诊断
         logger.debug("[llm] LLMCallLog 写入失败", exc_info=True)

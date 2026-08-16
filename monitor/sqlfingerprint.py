@@ -41,4 +41,4 @@ def unified_digest(db_type: str, native_digest=None, sql_text=None):
     norm = normalize(sql_text or '')
     if not norm:
         return None
-    return hashlib.md5(norm.encode('utf-8', 'replace')).hexdigest()[:32]
+    return hashlib.sha256(norm.encode('utf-8', 'replace')).hexdigest()[:32]

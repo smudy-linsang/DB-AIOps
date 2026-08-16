@@ -1,32 +1,20 @@
 # -*- coding: utf-8 -*-
-"""独立复审用的复现测试（v2.0）—— 见 V2.0_INDEPENDENT_REVIEW.md。
+"""v2.0 独立复审缺陷转正后的常规回归集。
 
-这些用例不是要"通过"，而是**钉住复审中发现的缺陷**：
-每条都能在当前 master 上稳定复现一个真实问题。
-
-## 为什么全都标了 @expectedFailure
-
-断言是真跑的，缺陷也是真存在的。标记只是把"已知未修"这个事实**写进测试记录**，
-好让它们现在就能进仓库而不至于让 master 挂红（本仓库直推 master、CI 是事后信号，
-红了就是真红，长期挂红会让红灯失去意义）。
-
-这**不是**把测试跳过去换绿灯：
-- 用例照常执行，断言照常求值，只是失败被记为"预期失败"；
-- **一旦对应缺陷被修好，用例会转为 unexpected success，整个测试套件随即判失败。**
-  也就是说它会主动提醒你"这条可以摘标记了"，而不是悄悄变绿。
-
-## 修复流程
-
-修好某一项后，删掉那条用例上的 `@unittest.expectedFailure`，它就从"缺陷复现"
-转正为"回归防线"。全部摘完时，本文件即成为 v2.0 的常规回归集。
+本文件最初用于复现 ``V2.0_INDEPENDENT_REVIEW.md`` 中的问题；v2.5 已移除全部
+``expectedFailure``，现在这些用例是权限、真实数据、自愈安全、租约和供应链整改的
+长期回归防线。新增缺陷不得以 expected failure 方式换取绿灯。
 """
 import json
+from io import StringIO
 from django.test import Client, TestCase, tag
+from django.test import override_settings
+from django.core.management import call_command
 from django.utils import timezone
 
 from monitor.auth import Perm, RoleCode
 from monitor.crypto import encrypt_password
-from monitor.models import DatabaseConfig, Incident
+from monitor.models import DatabaseConfig, Incident, Playbook, PlaybookRun
 from monitor.tests_bugfix import login
 
 
@@ -163,6 +151,61 @@ class V2DataScopeTests(TestCase):
 
 
 @tag('unit')
+class IncidentApiDataScopeTests(TestCase):
+    """v1 事故处置的所有对象入口都必须复用同一数据范围。"""
+
+    def setUp(self):
+        from monitor.tests_bugfix import make_db, make_user
+        self.mine = make_db('v1-scope-mine', port=3320)
+        self.others = make_db('v1-scope-others', port=3321)
+        self.user = make_user(
+            'v1scoped', RoleCode.DBA,
+            [Perm.ALERTS_VIEW, Perm.ALERTS_ACKNOWLEDGE,
+             Perm.TICKETS_EXECUTE, Perm.TICKETS_APPROVE],
+            allowed_dbs=[self.mine.id])
+        self.client = Client()
+        login(self.client, self.user)
+        self.incident = _incident(self.others, title='越权处置目标')
+        self.playbook = Playbook.objects.create(
+            playbook_id='PB-SCOPE-TEST', name='范围测试', category='lock',
+            signal='blocked_session', risk_level='high')
+        self.run = PlaybookRun.objects.create(
+            run_id='PBR-SCOPE-TEST', playbook=self.playbook,
+            incident=self.incident, trigger_mode='approved')
+
+    def test_incident_read_and_mutations_reject_out_of_scope(self):
+        iid = self.incident.incident_id
+        calls = [
+            ('get', f'/api/v1/incidents/{iid}/', None),
+            ('get', f'/api/v1/incidents/{iid}/timeline/', None),
+            ('post', f'/api/v1/incidents/{iid}/ack/', {}),
+            ('post', f'/api/v1/incidents/{iid}/close/', {'reason': 'x'}),
+            ('post', f'/api/v1/incidents/{iid}/rediagnose/', {}),
+            ('post', f'/api/v1/incidents/{iid}/execute/', {'playbook_id': self.playbook.playbook_id}),
+        ]
+        for method, path, data in calls:
+            with self.subTest(path=path):
+                response = getattr(self.client, method)(
+                    path, data=json.dumps(data) if data is not None else None,
+                    content_type='application/json')
+                self.assertEqual(response.status_code, 404)
+
+    def test_run_read_and_mutations_reject_out_of_scope(self):
+        base = f'/api/v1/playbook-runs/{self.run.run_id}'
+        for method, path in (
+                ('get', f'{base}/'),
+                ('post', f'{base}/approve/'),
+                ('post', f'{base}/rollback/')):
+            with self.subTest(path=path):
+                if method == 'get':
+                    response = self.client.get(path)
+                else:
+                    response = self.client.post(
+                        path, data='{}', content_type='application/json')
+                self.assertEqual(response.status_code, 404)
+
+
+@tag('unit')
 class PlaybookExecutionIsFakeTests(TestCase):
     """REV-02：execute_playbook 不连接任何目标库、不下发任何动作，
     却写下 status='success' 并返回"执行成功！阻塞资源已释放"。
@@ -205,6 +248,7 @@ class RealtimeActiveIncidentStatusTests(TestCase):
 
 
 @tag('unit')
+@override_settings(LLM_ENABLED=False, EMBED_ENABLED=False)
 class CaseDistillerFourNFTests(TestCase):
     """案例 tags 是 4NF 子表，不能塞进 update_or_create defaults。"""
 
@@ -221,3 +265,298 @@ class CaseDistillerFourNFTests(TestCase):
         case = AlertCase.objects.get(case_id=case_id)
         self.assertEqual(case.tags, ['mysql', 'lock'])
         self.assertIsNone(distill_incident(inc))
+
+
+@tag('unit')
+class PlaybookBootstrapTests(TestCase):
+    def test_bootstrap_is_idempotent_and_preserves_dba_customization(self):
+        from monitor.models import Playbook
+
+        call_command('init_playbooks', stdout=StringIO())
+        pb = Playbook.objects.get(playbook_id='PB-LOCK-KILL-BLOCKER')
+        self.assertTrue(pb.applicable_db_types)
+        self.assertTrue(pb.steps)
+        pb.name = 'DBA 定制名称'
+        pb.save(update_fields=['name'])
+
+        call_command('init_playbooks', stdout=StringIO())
+        pb.refresh_from_db()
+        self.assertEqual(pb.name, 'DBA 定制名称')
+
+
+@tag('unit')
+class WebhookSecurityTests(TestCase):
+    def test_webhook_rejects_ssrf_and_plain_http(self):
+        from monitor.notifications import _validated_webhook_url
+
+        bad_urls = (
+            'http://oapi.dingtalk.com/robot/send?access_token=x',
+            'https://127.0.0.1/latest/meta-data/',
+            'https://oapi.dingtalk.com.evil.example/robot/send',
+            'https://user:pass@oapi.dingtalk.com/robot/send',
+            'https://oapi.dingtalk.com:8443/robot/send',
+        )
+        for url in bad_urls:
+            with self.subTest(url=url), self.assertRaises(ValueError):
+                _validated_webhook_url(url, 'dingtalk')
+
+    @override_settings(
+        WEBHOOK_ALLOWED_HOSTS=('oapi.dingtalk.com', 'qyapi.weixin.qq.com'))
+    def test_webhook_accepts_only_matching_official_channel(self):
+        from monitor.notifications import _validated_webhook_url
+
+        ding = 'https://oapi.dingtalk.com/robot/send?access_token=secret'
+        wecom = 'https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=secret'
+        self.assertEqual(_validated_webhook_url(ding, 'dingtalk'), ding)
+        self.assertEqual(_validated_webhook_url(wecom, 'wecom'), wecom)
+        with self.assertRaises(ValueError):
+            _validated_webhook_url(wecom, 'dingtalk')
+
+    @override_settings(
+        DINGTALK_WEBHOOK='https://oapi.dingtalk.com/robot/send?access_token=test-only',
+        DINGTALK_SECRET='test-only-signing-secret',
+        WEBHOOK_ALLOWED_HOSTS=('oapi.dingtalk.com', 'qyapi.weixin.qq.com'))
+    def test_dingtalk_success_path_uses_bounded_https_request(self):
+        from unittest import mock
+        from monitor.notifications import send_dingtalk_alert
+
+        with mock.patch('monitor.notifications._post_webhook',
+                        return_value={'errcode': 0}) as post:
+            self.assertTrue(send_dingtalk_alert('title', 'body'))
+        self.assertTrue(post.call_args.args[0].startswith('https://oapi.dingtalk.com/'))
+        self.assertEqual(post.call_args.args[1]['msgtype'], 'markdown')
+
+    def test_webhook_transport_rejects_redirect_and_oversized_response(self):
+        from unittest import mock
+        from monitor.notifications import _post_webhook
+
+        redirect = mock.MagicMock(status_code=302, headers={'Location': 'http://127.0.0.1/'})
+        redirect.__enter__.return_value = redirect
+        with mock.patch('monitor.notifications.requests.post', return_value=redirect) as post, \
+                self.assertRaisesRegex(ValueError, 'redirect'):
+            _post_webhook('https://oapi.dingtalk.com/robot/send', {'x': 1})
+        self.assertFalse(post.call_args.kwargs['allow_redirects'])
+        self.assertEqual(post.call_args.kwargs['timeout'], (3, 5))
+
+        oversized = mock.MagicMock(status_code=200, headers={'Content-Length': '65537'})
+        oversized.__enter__.return_value = oversized
+        with mock.patch('monitor.notifications.requests.post', return_value=oversized), \
+                self.assertRaisesRegex(ValueError, 'too large'):
+            _post_webhook('https://oapi.dingtalk.com/robot/send', {'x': 1})
+
+    def test_webhook_transport_parses_bounded_json(self):
+        from unittest import mock
+        from monitor.notifications import _post_webhook
+
+        response = mock.MagicMock(status_code=200, headers={})
+        response.__enter__.return_value = response
+        response.iter_content.return_value = [b'{"err', b'code": 0}']
+        with mock.patch('monitor.notifications.requests.post', return_value=response):
+            self.assertEqual(
+                _post_webhook('https://oapi.dingtalk.com/robot/send', {'x': 1}),
+                {'errcode': 0})
+        response.raise_for_status.assert_called_once_with()
+
+    @override_settings(
+        WECOM_WEBHOOK='https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=test-only',
+        WEBHOOK_ALLOWED_HOSTS=('oapi.dingtalk.com', 'qyapi.weixin.qq.com'))
+    def test_wecom_failure_is_recorded_without_leaking_url(self):
+        from unittest import mock
+        from monitor.notifications import send_wecom_alert
+
+        with mock.patch('monitor.notifications._post_webhook',
+                        side_effect=TimeoutError('token-bearing-url')), \
+                mock.patch('monitor.degrade.note') as note, \
+                self.assertLogs('monitor.notifications', level='WARNING') as logs:
+            self.assertFalse(send_wecom_alert('title', 'body', '13800000000'))
+        note.assert_called_once_with('notify.wecom', reason='TimeoutError')
+        self.assertNotIn('token-bearing-url', '\n'.join(logs.output))
+
+    @override_settings(ADMIN_EMAILS=['dba@example.bank'], DEFAULT_FROM_EMAIL='monitor@example.bank')
+    def test_email_failure_records_degradation(self):
+        from unittest import mock
+        from monitor.notifications import send_email_alert
+
+        failure = RuntimeError('smtp down')
+        with mock.patch('monitor.notifications.send_mail', side_effect=failure), \
+                mock.patch('monitor.degrade.note') as note:
+            self.assertFalse(send_email_alert('title', 'body'))
+        note.assert_called_once_with('notify.email', exc=failure)
+
+    def test_alert_aggregator_flushes_all_channels(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from monitor.notifications import AlertAggregator, send_alert_notification
+
+        alert = SimpleNamespace(
+            alert_type='lock', metric_key='blocked_sessions', severity='critical',
+            title='blocking', description='one blocker',
+            config=SimpleNamespace(name='trade-db'))
+        aggregator = AlertAggregator(window_seconds=0)
+        with mock.patch('monitor.notifications.send_email_alert') as email, \
+                mock.patch('monitor.notifications.send_dingtalk_alert') as ding, \
+                mock.patch('monitor.notifications.send_wecom_alert') as wecom:
+            self.assertTrue(aggregator.add_alert(alert))
+            email.assert_called_once()
+            ding.assert_called_once()
+            wecom.assert_called_once()
+
+        with mock.patch('monitor.notifications.send_email_alert', return_value=True), \
+                mock.patch('monitor.notifications.send_dingtalk_alert', return_value=False), \
+                mock.patch('monitor.notifications.send_wecom_alert', return_value=True):
+            self.assertEqual(send_alert_notification(alert), {
+                'email': True, 'dingtalk': False, 'wecom': True})
+
+
+@tag('unit')
+class PlaybookParameterSecurityTests(TestCase):
+    def test_sql_control_parameters_are_typed_and_bounded(self):
+        from monitor.playbook_engine import _normalize_params
+
+        schema = {
+            'session_id': {'required': True, 'type': 'session'},
+            'idle_sec': {'required': True, 'type': 'integer', 'min': 60, 'max': 3600},
+            'tablespace': {'required': True, 'type': 'identifier'},
+        }
+        valid = _normalize_params(
+            schema,
+            {'session_id': '42', 'idle_sec': '600', 'tablespace': 'USERS',
+             'untrusted_extra': 'DROP DATABASE prod'},
+            'mysql')
+        self.assertEqual(valid, {
+            'session_id': '42', 'idle_sec': '600', 'tablespace': 'USERS'})
+
+        for key, value in (
+                ('session_id', '42; DROP TABLE audit_log'),
+                ('idle_sec', '0 OR 1=1'),
+                ('tablespace', 'USERS; DROP TABLESPACE SYSTEM')):
+            supplied = {'session_id': '42', 'idle_sec': '600', 'tablespace': 'USERS'}
+            supplied[key] = value
+            with self.subTest(key=key), self.assertRaises(ValueError):
+                _normalize_params(schema, supplied, 'mysql')
+
+    def test_literals_are_quoted_and_oracle_session_is_split_for_precheck(self):
+        from monitor.playbook_engine import _normalize_params, _pick_sql
+
+        literal = _normalize_params(
+            {'old_value': {'required': True, 'type': 'literal'}},
+            {'old_value': "safe' OR '1'='1"}, 'mysql')
+        self.assertEqual(literal['old_value'], "'safe'' OR ''1''=''1'")
+
+        params = _normalize_params(
+            {'blocker_id': {'required': True, 'type': 'session'}},
+            {'blocker_id': '12,34'}, 'oracle')
+        sql = _pick_sql({
+            'action': 'query',
+            'sql_by_db': {'oracle': 'SELECT 1 FROM v$session WHERE sid={blocker_id}'},
+        }, 'oracle', params)
+        self.assertIn('sid=12', sql)
+        self.assertEqual(params['blocker_id'], '12,34')
+
+    @override_settings(INCIDENT_P1_EXECUTE_FIRST=False)
+    def test_mid_risk_requires_approval_by_default(self):
+        from types import SimpleNamespace
+        from unittest import mock
+        from monitor.playbook_authz import decide_trigger
+
+        incident = SimpleNamespace(config_id=1, priority='P1')
+        playbook = SimpleNamespace(risk_level='mid', auto_execute=False)
+        with mock.patch('monitor.playbook_authz._circuit_broken', return_value=False), \
+                mock.patch('monitor.autonomy_policy.gate', return_value=None):
+            decision = decide_trigger(incident, playbook)
+        self.assertFalse(decision['execute_now'])
+        self.assertTrue(decision['need_approval'])
+
+    def test_kill_guard_reads_live_owner_and_rejects_system_accounts(self):
+        from unittest import mock
+        from monitor.playbook_engine import _assert_safe_session_target
+
+        cursor = mock.MagicMock()
+        cursor.fetchone.return_value = {'user': 'root'}
+        conn = mock.MagicMock()
+        conn.cursor.return_value = cursor
+        with self.assertRaisesRegex(ValueError, '受保护账号'):
+            _assert_safe_session_target(conn, 'mysql', '42')
+
+        cursor.fetchone.return_value = {'user': 'trade_app'}
+        self.assertEqual(
+            _assert_safe_session_target(conn, 'mysql', '42'), 'trade_app')
+        cursor.execute.assert_called_with(
+            'SELECT user FROM information_schema.processlist WHERE id=42')
+
+
+@tag('unit')
+@override_settings(PROCESS_LEASE_TTL_SEC=30, PROCESS_LEASE_RENEW_SEC=10)
+class ProcessLeaseTests(TestCase):
+    def test_single_owner_and_monotonic_fencing_token(self):
+        from monitor.process_lease import ProcessLeaseGuard
+
+        first = ProcessLeaseGuard('collector', owner_id='node-a:1')
+        second = ProcessLeaseGuard('collector', owner_id='node-b:2')
+        self.assertTrue(first.acquire())
+        self.assertEqual(first.fencing_token, 1)
+        self.assertFalse(second.acquire())
+
+        first.release()
+        self.assertTrue(second.acquire())
+        self.assertEqual(second.fencing_token, 2)
+        self.assertFalse(first.renew(), '旧 fencing token 不得续租新 leader 的租约')
+        second.release()
+
+    def test_expired_lease_can_be_taken_over(self):
+        from datetime import timedelta
+        from monitor.models import ProcessLease
+        from monitor.process_lease import ProcessLeaseGuard
+
+        ProcessLease.objects.create(
+            role='sentinel', shard_key='global', owner_id='dead-node',
+            fencing_token=7, expires_at=timezone.now() - timedelta(seconds=1))
+        leader = ProcessLeaseGuard('sentinel', owner_id='replacement')
+        self.assertTrue(leader.acquire())
+        self.assertEqual(leader.fencing_token, 8)
+        leader.release()
+
+    def test_renew_loss_callback_is_idempotent_and_stale_owner_cannot_release(self):
+        from unittest import mock
+        from monitor.models import ProcessLease
+        from monitor.process_lease import LeaseLost, ProcessLeaseGuard
+
+        callback = mock.Mock()
+        leader = ProcessLeaseGuard('pipeline', owner_id='node-a', on_lost=callback)
+        self.assertTrue(leader.acquire())
+        self.assertTrue(leader.renew())
+
+        ProcessLease.objects.filter(pk=leader._lease_pk).update(
+            owner_id='node-b', fencing_token=leader.fencing_token + 1)
+        self.assertFalse(leader.renew())
+        leader._mark_lost('test token changed')
+        leader._mark_lost('duplicate signal')
+        callback.assert_called_once_with()
+        with self.assertRaises(LeaseLost):
+            leader.assert_leader()
+        leader.release()
+        self.assertEqual(
+            ProcessLease.objects.get(pk=leader._lease_pk).owner_id, 'node-b',
+            '失租的旧进程不得清空新 leader 的租约')
+
+    def test_start_rejects_second_owner_and_context_releases_first(self):
+        from unittest import mock
+        from monitor.process_lease import LeaseUnavailable, ProcessLeaseGuard
+
+        first = ProcessLeaseGuard('collector', owner_id='node-a')
+        with mock.patch('monitor.process_lease.threading.Thread') as thread_type:
+            thread = thread_type.return_value
+            self.assertIs(first.start(), first)
+            thread.start.assert_called_once_with()
+            second = ProcessLeaseGuard('collector', owner_id='node-b')
+            with self.assertRaises(LeaseUnavailable):
+                second.start()
+            first.release()
+            thread.join.assert_called_once()
+
+    @override_settings(PROCESS_LEASE_TTL_SEC=10, PROCESS_LEASE_RENEW_SEC=10)
+    def test_renew_interval_must_be_shorter_than_ttl(self):
+        from monitor.process_lease import ProcessLeaseGuard
+
+        with self.assertRaisesRegex(ValueError, '必须小于'):
+            ProcessLeaseGuard('sentinel')

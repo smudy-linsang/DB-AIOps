@@ -46,8 +46,8 @@ def _strip_volatile(node):
 
 def _structural_hash(plan_json) -> str:
     stripped = _strip_volatile(plan_json)
-    return hashlib.md5(json.dumps(stripped, sort_keys=True, default=str)
-                       .encode()).hexdigest()[:32]
+    return hashlib.sha256(json.dumps(stripped, sort_keys=True, default=str)
+                          .encode()).hexdigest()[:32]
 
 
 def _sql_allowed(sql_text: str) -> bool:

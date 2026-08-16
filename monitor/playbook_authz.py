@@ -43,11 +43,11 @@ def decide_trigger(incident, playbook) -> dict:
     if risk == 'mid':
         # P1 紧急通道: 先执行后补审
         if (incident.priority == 'P1'
-                and getattr(settings, 'INCIDENT_P1_EXECUTE_FIRST', True)):
+                and getattr(settings, 'INCIDENT_P1_EXECUTE_FIRST', False)):
             return {'mode': 'one_click', 'execute_now': True, 'need_approval': True,
                     'reason': 'P1 紧急通道: 先执行后补审'}
-        return {'mode': 'one_click', 'execute_now': True, 'need_approval': True,
-                'reason': '中风险一键执行(需快速审批, 已授权即执行)'}
+        return {'mode': 'approved', 'execute_now': False, 'need_approval': True,
+                'reason': '中风险需快速审批后执行'}
 
     # high
     return {'mode': 'approved', 'execute_now': False, 'need_approval': True,

@@ -2096,6 +2096,34 @@ class ComponentHeartbeat(models.Model):
         return f"{self.get_component_display()}@{self.instance} ({self.status})"
 
 
+class ProcessLease(models.Model):
+    """后台角色的数据库租约；fencing_token 在每次换主时单调递增。"""
+
+    role = models.CharField(max_length=32, verbose_name="后台角色")
+    shard_key = models.CharField(max_length=128, default='global', verbose_name="分片键")
+    owner_id = models.CharField(max_length=160, blank=True, default='', verbose_name="持有者")
+    fencing_token = models.BigIntegerField(default=0, verbose_name="隔离令牌")
+    expires_at = models.DateTimeField(null=True, blank=True, db_index=True,
+                                      verbose_name="租约到期时间")
+    heartbeat_at = models.DateTimeField(null=True, blank=True, verbose_name="续租时间")
+    metadata = models.JSONField(default=dict, blank=True, verbose_name="租约元数据")
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = 'process_lease'
+        verbose_name = "进程租约"
+        verbose_name_plural = "进程租约列表"
+        constraints = [
+            models.UniqueConstraint(fields=['role', 'shard_key'],
+                                    name='uniq_process_lease_role_shard'),
+        ]
+        indexes = [models.Index(fields=['role', 'expires_at'])]
+
+    def __str__(self):
+        return f"{self.role}/{self.shard_key}@{self.owner_id}#{self.fencing_token}"
+
+
 # =============================================================================
 # v2.0 4NF 扩展模型: 实例画像基线 / 因果推理链 / 自愈剧本模板与执行
 # =============================================================================
@@ -2413,4 +2441,3 @@ class CopilotSkill(models.Model):
 
     def __str__(self):
         return f"[{self.get_source_display()}] {self.name} ({self.code})"
-

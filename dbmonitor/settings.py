@@ -58,6 +58,12 @@ def _normalise_environment(raw):
 ENVIRONMENT = _normalise_environment(os.environ.get('DJANGO_ENV', 'development'))
 IS_PRODUCTION = ENVIRONMENT == 'production'
 
+
+def _require_strong_secret(name, value, min_length):
+    if IS_PRODUCTION and (len(value) < min_length or len(set(value)) < 8):
+        raise ValueError(
+            f'生产环境 {name} 必须至少 {min_length} 字符且包含足够随机性')
+
 # ============================================================================
 # 安全配置
 # ============================================================================
@@ -69,6 +75,7 @@ if not SECRET_KEY:
         raise ValueError("生产环境必须配置 DJANGO_SECRET_KEY 环境变量")
     else:
         SECRET_KEY = _SECRET_KEY_FALLBACK
+_require_strong_secret('DJANGO_SECRET_KEY', SECRET_KEY, 50)
 
 # DEBUG 模式控制
 if IS_PRODUCTION:
@@ -87,20 +94,26 @@ if IS_PRODUCTION and not ALLOWED_HOSTS:
     raise ValueError('生产环境必须配置 DJANGO_ALLOWED_HOSTS')
 
 # CSRF 信任来源
+_csrf_origins_default = '' if IS_PRODUCTION else 'http://localhost:8000,http://127.0.0.1:8000'
 CSRF_TRUSTED_ORIGINS = [
     o.strip()
-    for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', 'http://localhost:8000,http://127.0.0.1:8000').split(',')
+    for o in os.environ.get('DJANGO_CSRF_TRUSTED_ORIGINS', _csrf_origins_default).split(',')
     if o.strip()
 ]
+if IS_PRODUCTION and not CSRF_TRUSTED_ORIGINS:
+    raise ValueError('生产环境必须配置 DJANGO_CSRF_TRUSTED_ORIGINS')
 
 # Content-Security-Policy（BUG-019）：默认空=不下发，避免误伤前端内联脚本/样式；
 # 生产环境应按前端实际资源定制，例如:
 #   default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:;
-CONTENT_SECURITY_POLICY = os.environ.get('CONTENT_SECURITY_POLICY', '')
+_csp_default = ("default-src 'self'; object-src 'none'; base-uri 'self'; "
+                "frame-ancestors 'none'; form-action 'self'" if IS_PRODUCTION else '')
+CONTENT_SECURITY_POLICY = os.environ.get('CONTENT_SECURITY_POLICY', _csp_default)
 
 # 安全中间件配置
 if not DEBUG:
     SECURE_SSL_REDIRECT = IS_PRODUCTION
+    SECURE_PROXY_SSL_HEADER = ('HTTP_X_FORWARDED_PROTO', 'https')
     SESSION_COOKIE_SECURE = True
     CSRF_COOKIE_SECURE = True
     SECURE_HSTS_SECONDS = 31536000
@@ -143,6 +156,7 @@ if not DB_MONITOR_SECRET_KEY:
     else:
         # 开发环境使用默认密钥（仅用于开发）
         DB_MONITOR_SECRET_KEY = 'dev-only-secret-key-not-for-production'
+_require_strong_secret('DB_MONITOR_SECRET_KEY', DB_MONITOR_SECRET_KEY, 32)
 
 
 # Application definition
@@ -347,9 +361,8 @@ STATIC_URL = 'static/'
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
 # 额外静态文件目录
-STATICFILES_DIRS = [
-    os.path.join(BASE_DIR, 'frontend', 'dist'),
-]
+_frontend_dist = os.path.join(BASE_DIR, 'frontend', 'dist')
+STATICFILES_DIRS = [_frontend_dist] if os.path.isdir(_frontend_dist) else []
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
@@ -392,6 +405,13 @@ ADMIN_EMAILS = [
 # ==========================================
 DINGTALK_WEBHOOK = os.environ.get('DINGTALK_WEBHOOK', '')
 DINGTALK_SECRET = os.environ.get('DINGTALK_SECRET', '')
+WEBHOOK_ALLOWED_HOSTS = tuple(
+    x.strip().lower()
+    for x in os.environ.get(
+        'WEBHOOK_ALLOWED_HOSTS', 'oapi.dingtalk.com,qyapi.weixin.qq.com'
+    ).split(',')
+    if x.strip()
+)
 
 # ==========================================
 # 企业微信机器人告警配置（新增）
@@ -450,8 +470,10 @@ DIAG_RCA_TOPN = int(os.environ.get('DIAG_RCA_TOPN', 3))
 PLAYBOOK_AUTO_LOW_RISK = _envbool('PLAYBOOK_AUTO_LOW_RISK', True)
 PLAYBOOK_VERIFY_WINDOW_SEC = int(os.environ.get('PLAYBOOK_VERIFY_WINDOW_SEC', 300))
 PLAYBOOK_AUTO_CIRCUIT_BREAK = int(os.environ.get('PLAYBOOK_AUTO_CIRCUIT_BREAK', 3))
-INCIDENT_P1_EXECUTE_FIRST = _envbool('INCIDENT_P1_EXECUTE_FIRST', True)
+INCIDENT_P1_EXECUTE_FIRST = _envbool('INCIDENT_P1_EXECUTE_FIRST', False)
 ONCALL_ESCALATE_MIN = int(os.environ.get('ONCALL_ESCALATE_MIN', 15))
+PROCESS_LEASE_TTL_SEC = int(os.environ.get('PROCESS_LEASE_TTL_SEC', 30))
+PROCESS_LEASE_RENEW_SEC = int(os.environ.get('PROCESS_LEASE_RENEW_SEC', 10))
 
 # ==========================================
 # Phase 8 AI 智能诊断配置 (phase8/20 §1)

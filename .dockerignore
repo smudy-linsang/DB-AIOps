@@ -1,0 +1,17 @@
+.git
+.github
+.env
+.env.*
+!.env.example
+venv
+.venv
+frontend/node_modules
+frontend/dist
+logs
+staticfiles
+__pycache__
+*.pyc
+*.sqlite3
+coverage.xml
+.coverage
+htmlcov

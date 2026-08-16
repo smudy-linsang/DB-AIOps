@@ -21,14 +21,63 @@ import hashlib
 import base64
 import time
 import urllib.parse
-import urllib.request
 import json
 import logging
+
+import requests
 
 from django.conf import settings
 from django.core.mail import send_mail
 
 logger = logging.getLogger(__name__)
+
+_CHANNEL_HOSTS = {
+    'dingtalk': frozenset({'oapi.dingtalk.com'}),
+    'wecom': frozenset({'qyapi.weixin.qq.com'}),
+}
+_WEBHOOK_MAX_RESPONSE_BYTES = 64 * 1024
+
+
+def _validated_webhook_url(url: str, channel: str) -> str:
+    """校验机器人地址，阻断 SSRF、降级传输和 URL 凭据注入。"""
+    from monitor import appconf
+
+    parsed = urllib.parse.urlsplit(url)
+    allowed = set(appconf.get('WEBHOOK_ALLOWED_HOSTS')) & _CHANNEL_HOSTS[channel]
+    host = (parsed.hostname or '').lower()
+    if (parsed.scheme != 'https' or host not in allowed
+            or parsed.username or parsed.password
+            or parsed.port not in (None, 443) or parsed.fragment):
+        raise ValueError(f'{channel} webhook 地址不符合安全策略')
+    return url
+
+
+def _note_webhook_failure(channel: str, exc: Exception) -> None:
+    """URL 异常通常包含访问令牌，只记录类型而不记录异常文本。"""
+    logger.warning('[%s] 发送失败: %s', channel, type(exc).__name__)
+    from monitor import degrade
+    degrade.note(f'notify.{channel}', reason=type(exc).__name__)
+
+
+def _post_webhook(url: str, payload: dict) -> dict:
+    """发送受限 Webhook：不跟随重定向、分段超时、响应最多 64 KiB。"""
+    response = requests.post(
+        url, json=payload, headers={'Content-Type': 'application/json; charset=utf-8'},
+        timeout=(3, 5), allow_redirects=False, stream=True,
+    )
+    with response:
+        if 300 <= response.status_code < 400:
+            raise ValueError('webhook redirect is forbidden')
+        response.raise_for_status()
+        declared = response.headers.get('Content-Length')
+        if declared and int(declared) > _WEBHOOK_MAX_RESPONSE_BYTES:
+            raise ValueError('webhook response too large')
+        body = bytearray()
+        for chunk in response.iter_content(chunk_size=8192):
+            body.extend(chunk)
+            if len(body) > _WEBHOOK_MAX_RESPONSE_BYTES:
+                raise ValueError('webhook response too large')
+    return json.loads(body.decode('utf-8'))
 
 
 # ------------------------------------------------------------------
@@ -83,7 +132,11 @@ def send_dingtalk_alert(title: str, body: str) -> bool:
         return False
 
     secret = getattr(settings, 'DINGTALK_SECRET', '').strip()
-    url = webhook
+    try:
+        url = _validated_webhook_url(webhook, 'dingtalk')
+    except (TypeError, ValueError) as e:
+        _note_webhook_failure('dingtalk', e)
+        return False
     if secret:
         timestamp = int(time.time() * 1000)
         sign = _dingtalk_sign(secret, timestamp)
@@ -97,29 +150,17 @@ def send_dingtalk_alert(title: str, body: str) -> bool:
             'text': f"### {title}\n\n```\n{body}\n```",
         },
     }
-    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(
-        url,
-        data=data,
-        headers={'Content-Type': 'application/json; charset=utf-8'},
-        method='POST',
-    )
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result = json.loads(resp.read().decode())
-            if result.get('errcode', -1) == 0:
-                logger.info(f"[DingTalk] 发送成功：{title}")
-                return True
-            else:
-                logger.warning(f"[DingTalk] 返回错误：{result}")
-                from monitor import degrade
-                degrade.note('notify.dingtalk', reason=f"errcode={result.get('errcode')}")
-                return False
-    except Exception as e:
-        logger.warning(f"[DingTalk] 发送失败：{e}")
-        # W6-L2: "告警发不出去"必须可见 —— 计数供 /system/degradations 暴露
+        result = _post_webhook(url, payload)
+        if result.get('errcode', -1) == 0:
+            logger.info(f"[DingTalk] 发送成功：{title}")
+            return True
+        logger.warning("[DingTalk] 返回业务错误 errcode=%s", result.get('errcode'))
         from monitor import degrade
-        degrade.note('notify.dingtalk', exc=e)
+        degrade.note('notify.dingtalk', reason=f"errcode={result.get('errcode')}")
+        return False
+    except Exception as e:
+        _note_webhook_failure('dingtalk', e)
         return False
 
 
@@ -140,6 +181,11 @@ def send_wecom_alert(title: str, body: str, mentioned_mobile: str = None) -> boo
     webhook = getattr(settings, 'WECOM_WEBHOOK', '').strip()
     if not webhook:
         return False
+    try:
+        webhook = _validated_webhook_url(webhook, 'wecom')
+    except (TypeError, ValueError) as e:
+        _note_webhook_failure('wecom', e)
+        return False
     
     # 构建消息内容
     content = f"**{title}**\n\n{body}"
@@ -155,30 +201,17 @@ def send_wecom_alert(title: str, body: str, mentioned_mobile: str = None) -> boo
     if mentioned_mobile:
         payload['markdown']['mentioned_mobile_list'] = [mentioned_mobile]
     
-    data = json.dumps(payload, ensure_ascii=False).encode('utf-8')
-    req = urllib.request.Request(
-        webhook,
-        data=data,
-        headers={'Content-Type': 'application/json; charset=utf-8'},
-        method='POST'
-    )
-    
     try:
-        with urllib.request.urlopen(req, timeout=5) as resp:
-            result = json.loads(resp.read().decode())
-            if result.get('errcode', -1) == 0:
-                logger.info(f"[WeCom] 发送成功：{title}")
-                return True
-            else:
-                logger.warning(f"[WeCom] 返回错误：{result}")
-                from monitor import degrade
-                degrade.note('notify.wecom', reason=f"errcode={result.get('errcode')}")
-                return False
-    except Exception as e:
-        logger.warning(f"[WeCom] 发送失败：{e}")
-        # W6-L2: "告警发不出去"必须可见 —— 计数供 /system/degradations 暴露
+        result = _post_webhook(webhook, payload)
+        if result.get('errcode', -1) == 0:
+            logger.info(f"[WeCom] 发送成功：{title}")
+            return True
+        logger.warning("[WeCom] 返回业务错误 errcode=%s", result.get('errcode'))
         from monitor import degrade
-        degrade.note('notify.wecom', exc=e)
+        degrade.note('notify.wecom', reason=f"errcode={result.get('errcode')}")
+        return False
+    except Exception as e:
+        _note_webhook_failure('wecom', e)
         return False
 
 

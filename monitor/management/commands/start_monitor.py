@@ -17,7 +17,7 @@ import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
 from django.conf import settings
-from django.core.management.base import BaseCommand
+from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
 from django.utils import timezone
 
@@ -101,6 +101,15 @@ class Command(BaseCommand):
         )
 
     def handle(self, *args, **options):
+        from monitor.process_lease import LeaseUnavailable, ProcessLeaseGuard
+        try:
+            with ProcessLeaseGuard('collector') as leader:
+                self._leader = leader
+                return self._handle(*args, **options)
+        except LeaseUnavailable as exc:
+            raise CommandError(str(exc)) from exc
+
+    def _handle(self, *args, **options):
         if options.get('once'):
             print(f"[{datetime.datetime.now()}] 单轮采集模式 (--once)")
             self.monitor_job()
@@ -117,6 +126,8 @@ class Command(BaseCommand):
             print(f">> Phase 2 引擎: 已禁用 (设置 ENABLE_PHASE2_ENGINES=True 启用)")
 
         scheduler = BlockingScheduler()
+        self._leader.on_lost = lambda: (
+            scheduler.shutdown(wait=False) if scheduler.running else None)
         scheduler.add_job(self.monitor_job, 'interval', seconds=60)
         # 告警运维：自动升级扫描 + 聚合冲刷（接通 AlertManager 升级/聚合能力）
         scheduler.add_job(self.alert_housekeeping_job, 'interval', seconds=60)
@@ -213,6 +224,7 @@ class Command(BaseCommand):
 
     def monitor_job(self):
         """统一巡检入口：支持 Celery 异步模式和 ThreadPool 本地模式，支持实例级独立采集周期"""
+        self._leader.assert_leader()
         now = datetime.datetime.now()
         connection.close_if_unusable_or_obsolete()
 

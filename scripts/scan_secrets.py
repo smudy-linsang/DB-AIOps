@@ -2,7 +2,7 @@
 """密钥扫描：拦截疑似硬编码凭据进入仓库。
 
 扫描范围：git 跟踪的文本文件（不扫 node_modules/migrations/lock 文件）。
-策略：宁可误报也不漏报，误报用 # noqa: secret 显式豁免。
+策略：宁可误报也不漏报，误报用 # secret-scan: allow 显式豁免。
 """
 import re
 import subprocess
@@ -44,7 +44,7 @@ def main() -> int:
         except Exception:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            if 'noqa: secret' in line or PLACEHOLDER.search(line):
+            if 'secret-scan: allow' in line or PLACEHOLDER.search(line):
                 continue
             for label, pat in PATTERNS:
                 if pat.search(line):
@@ -53,7 +53,7 @@ def main() -> int:
         print('检测到疑似硬编码凭据：')
         for path, lineno, label, snippet in hits:
             print(f'  {path}:{lineno}  [{label}]  {snippet}')
-        print('\n确认为误报时，在该行加注释 `# noqa: secret`。')
+        print('\n确认为误报时，在该行加注释 `# secret-scan: allow`。')
         return 1
     print('密钥扫描通过')
     return 0

@@ -32,7 +32,12 @@ jobs:
       - name: 安装依赖
         run: |
           python -m pip install -U pip
-          pip install -r requirements.txt
+          pip install --require-hashes -r requirements.lock
+          pip install ruff
+      - name: 红线与确定性静态错误
+        run: |
+          python scripts/lint_redlines.py
+          ruff check monitor dbmonitor --select F821,F601,F811
       - name: 语法编译
         run: python -m compileall -q monitor dbmonitor
       - name: Django 系统检查
@@ -53,7 +58,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
       - name: 运行 unit 层
         env:
           DJANGO_SETTINGS_MODULE: dbmonitor.settings_test_unit
@@ -81,7 +86,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
       - name: 全量测试
         env:
           POSTGRES_HOST: 127.0.0.1
@@ -124,7 +129,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
       - name: 方言集成测试
         env:
           POSTGRES_HOST: 127.0.0.1
@@ -185,7 +190,7 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-python@v5
         with: { python-version: '3.11', cache: pip }
-      - run: pip install -r requirements.txt
+      - run: pip install --require-hashes -r requirements.lock
       # ── 两个探针：把"为什么 skip"编码进 step 的红绿 ────────────────
       # 上一轮已经确认 OracleDialectTests 是**全部 skip** 的（断言步骤挂了）。
       # 但 skip 有两种原因（连不上 / 连上了但读不到数据字典），二者在
@@ -293,13 +298,16 @@ jobs:
       - uses: actions/checkout@v4
       - uses: actions/setup-node@v4
         with:
-          node-version: '20'
+          node-version: '22'
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
+      - name: 前端依赖漏洞门禁
+        working-directory: frontend
+        run: npm audit --audit-level=high
       - name: 前端单元测试
         working-directory: frontend
         run: npm run test:run
@@ -315,8 +323,17 @@ jobs:
         with: { python-version: '3.11' }
       - name: 依赖已知漏洞
         run: |
-          pip install pip-audit
-          pip-audit -r requirements.txt || true
-        # 注：首次接入设为不阻断（|| true），积累基线后改为强制
+          pip install pip-audit bandit
+          pip-audit -r requirements.lock --format cyclonedx-json --output sbom-python.json
+      - name: Python 高危代码模式
+        run: bandit -q -r monitor dbmonitor -lll
       - name: 密钥扫描
         run: python scripts/scan_secrets.py
+      - name: 上传 Python SBOM
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: sbom-python
+          path: sbom-python.json
+          if-no-files-found: error
+          retention-days: 30

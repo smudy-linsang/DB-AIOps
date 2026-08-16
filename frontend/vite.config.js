@@ -29,11 +29,16 @@ export default defineConfig({
     // 构建优化
     rollupOptions: {
       output: {
-        manualChunks: {
-          'vendor-react': ['react', 'react-dom', 'react-router-dom'],
-          'vendor-antd': ['antd'],
-          'vendor-charts': ['recharts'],
-          'vendor-echarts': ['echarts', 'echarts-for-react']
+        // Vite 8 / Rolldown 只接受函数形式。按模块路径分包，避免对象形式
+        // 在升级后构建期抛 "manualChunks is not a function"。
+        manualChunks(id) {
+          if (!id.includes('node_modules')) return undefined
+          if (id.includes('/echarts/') || id.includes('/zrender/')) return 'vendor-echarts'
+          if (id.includes('/antd/') || id.includes('/@ant-design/')) return 'vendor-antd'
+          if (id.includes('/recharts/')) return 'vendor-charts'
+          if (id.includes('/react/') || id.includes('/react-dom/') ||
+              id.includes('/react-router')) return 'vendor-react'
+          return undefined
         }
       }
     }

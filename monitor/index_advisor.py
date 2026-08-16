@@ -163,7 +163,8 @@ class SQLParser:
                 col = match.group(1)
                 # 排除常见关键词
                 if col.upper() not in ('AND', 'OR', 'NOT', 'NULL', 'TRUE', 'FALSE'):
-                    columns.append((col, pattern.split(r'\s*')[1] if '\s*' in pattern else '='))
+                    operator = pattern.split(r'\s*')[1] if r'\s*' in pattern else '='
+                    columns.append((col, operator))
         
         return columns
     

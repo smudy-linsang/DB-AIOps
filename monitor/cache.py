@@ -57,7 +57,7 @@ def generate_cache_key(prefix: str, *args, **kwargs) -> str:
     
     if kwargs:
         kwargs_str = json.dumps(kwargs, sort_keys=True, default=str)
-        kwargs_hash = hashlib.md5(kwargs_str.encode()).hexdigest()[:8]
+        kwargs_hash = hashlib.sha256(kwargs_str.encode()).hexdigest()[:16]
         key_parts.append(kwargs_hash)
     
     return ":".join(key_parts)

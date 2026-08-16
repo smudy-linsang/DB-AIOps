@@ -35,7 +35,7 @@ def main():
     # 需要真实落库才能建 Event/Incident (config 外键)。这里插入一条临时 config。
     real = DatabaseConfig.objects.create(
         name='演练-不可达实例', db_type='mysql', host='10.255.255.1', port=3306,
-        username='x', password='enc:invalid', is_active=False)  # noqa: secret 演练哨兵值
+        username='x', password='enc:invalid', is_active=False)  # secret-scan: allow 演练哨兵值
     real.get_password = lambda: 'x'
     try:
         s = InstanceSentinel(real)

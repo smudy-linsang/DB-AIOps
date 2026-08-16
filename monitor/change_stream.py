@@ -21,7 +21,7 @@ def _make_dedup_key(config_id, source, title, occurred_at) -> str:
     # 同源同标题按小时桶去重
     bucket = occurred_at.strftime('%Y%m%d%H')
     raw = f"{config_id}:{source}:{title}:{bucket}"
-    return hashlib.sha1(raw.encode('utf-8')).hexdigest()[:40]
+    return hashlib.sha256(raw.encode('utf-8')).hexdigest()[:40]
 
 
 def record_change(config, source: str, title: str, detail: dict = None,

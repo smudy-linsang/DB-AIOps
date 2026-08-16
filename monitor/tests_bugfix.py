@@ -35,7 +35,7 @@ def make_role(code, perms):
 
 
 def make_user(username, role_code, perms=(), allowed_dbs=None):
-    user = User.objects.create_user(username=username, password='Pw!23456')  # noqa: secret 测试夹具
+    user = User.objects.create_user(username=username, password='Pw!23456')  # secret-scan: allow 测试夹具
     profile = UserProfile.objects.create(user=user, role=make_role(role_code, perms))
     if allowed_dbs is not None:
         profile.allowed_databases = allowed_dbs
@@ -170,6 +170,17 @@ class V25SafetyBaselineTests(TestCase):
         with self.assertRaises(ValueError):
             _normalise_environment('prodution')
 
+    def test_production_rejects_weak_secrets(self):
+        from unittest import mock
+        from dbmonitor import settings as project_settings
+        with mock.patch.object(project_settings, 'IS_PRODUCTION', True):
+            with self.assertRaises(ValueError):
+                project_settings._require_strong_secret('DJANGO_SECRET_KEY', 'short', 50)
+            project_settings._require_strong_secret(
+                'DJANGO_SECRET_KEY',
+                'A9!long-production-secret-with-many-unique-characters-0123456789',
+                50)
+
     def test_liveness_exposes_single_version_without_dependencies(self):
         from dbmonitor.version import __version__
         response = Client().get('/livez')
@@ -186,6 +197,24 @@ class V25SafetyBaselineTests(TestCase):
         response = Client().get('/readyz')
         self.assertEqual(response.status_code, 503)
         self.assertEqual(response.json()['checks']['workers']['status'], 'error')
+
+    @override_settings(
+        READINESS_REQUIRE_WORKERS=True,
+        TIMESCALEDB_ENABLED=False,
+        ES_ENABLED=False,
+        USE_REDIS_CACHE=False,
+    )
+    def test_readiness_rejects_heartbeats_without_active_leaders(self):
+        from monitor.models import ComponentHeartbeat
+        for component in ('collector', 'sentinel', 'pipeline'):
+            ComponentHeartbeat.objects.create(
+                component=component, instance=f'{component}:1',
+                last_beat_at=timezone.now(), status='up')
+        response = Client().get('/readyz')
+        self.assertEqual(response.status_code, 503)
+        self.assertEqual(
+            set(response.json()['checks']['workers']['leaderless']),
+            {'collector', 'sentinel', 'pipeline'})
 
     def test_cookie_token_is_rejected_by_default(self):
         user = make_user('cookie-only', RoleCode.READONLY)
@@ -304,7 +333,7 @@ class Bug106LoginThrottleTests(TestCase):
         from django.core.cache import cache
         cache.clear()
         self.client = Client()
-        User.objects.create_user(username='victim', password='CorrectPw!1')  # noqa: secret 测试夹具
+        User.objects.create_user(username='victim', password='CorrectPw!1')  # secret-scan: allow 测试夹具
 
     def _try(self, xff=None):
         headers = {'HTTP_X_FORWARDED_FOR': xff} if xff else {}
@@ -329,6 +358,29 @@ class Bug106LoginThrottleTests(TestCase):
         self.assertEqual(self._try(xff='203.0.113.7').status_code, 429)
         # 另一个真实客户端不受影响
         self.assertEqual(self._try(xff='203.0.113.8').status_code, 401)
+
+    @override_settings(TRUSTED_PROXY_IPS=['172.30.25.0/24'], TRUSTED_PROXY_DEPTH=1)
+    def test_xff_honored_for_controlled_proxy_cidr(self):
+        """容器代理地址可在受控专用网段内变化，CIDR 不能退化为全网信任。"""
+        req = mock.Mock(META={
+            'REMOTE_ADDR': '172.30.25.10',
+            'HTTP_X_FORWARDED_FOR': '203.0.113.17',
+        })
+        self.assertEqual(auth_mod._client_ip(req), '203.0.113.17')
+
+        untrusted = mock.Mock(META={
+            'REMOTE_ADDR': '172.30.26.10',
+            'HTTP_X_FORWARDED_FOR': '203.0.113.99',
+        })
+        self.assertEqual(auth_mod._client_ip(untrusted), '172.30.26.10')
+
+    @override_settings(TRUSTED_PROXY_IPS=['not-a-network'])
+    def test_invalid_trusted_proxy_entry_fails_closed(self):
+        req = mock.Mock(META={
+            'REMOTE_ADDR': '172.30.25.10',
+            'HTTP_X_FORWARDED_FOR': '203.0.113.17',
+        })
+        self.assertEqual(auth_mod._client_ip(req), '172.30.25.10')
 
     @override_settings(LOGIN_MAX_ATTEMPTS=1000, LOGIN_MAX_ATTEMPTS_PER_USER=4)
     def test_account_level_lockout_across_ips(self):

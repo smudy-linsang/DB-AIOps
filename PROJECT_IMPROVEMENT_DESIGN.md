@@ -458,7 +458,7 @@ Agent H 的 AGENTS.md 把"禁止提交密钥"写成红线，但**没有任何东
 """密钥扫描：拦截疑似硬编码凭据进入仓库。
 
 扫描范围：git 跟踪的文本文件（不扫 node_modules/migrations/lock 文件）。
-策略：宁可误报也不漏报，误报用 # noqa: secret 显式豁免。
+策略：宁可误报也不漏报，误报用 # secret-scan: allow 显式豁免。
 """
 import re
 import subprocess
@@ -500,7 +500,7 @@ def main() -> int:
         except Exception:
             continue
         for lineno, line in enumerate(text.splitlines(), 1):
-            if 'noqa: secret' in line or PLACEHOLDER.search(line):
+            if 'secret-scan: allow' in line or PLACEHOLDER.search(line):
                 continue
             for label, pat in PATTERNS:
                 if pat.search(line):
@@ -509,7 +509,7 @@ def main() -> int:
         print('检测到疑似硬编码凭据：')
         for path, lineno, label, snippet in hits:
             print(f'  {path}:{lineno}  [{label}]  {snippet}')
-        print('\n确认为误报时，在该行加注释 `# noqa: secret`。')
+        print('\n确认为误报时，在该行加注释 `# secret-scan: allow`。')
         return 1
     print('密钥扫描通过')
     return 0
@@ -1650,7 +1650,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | V5 | unit 层零依赖 | 停掉所有 Docker，`scripts/validate.sh unit` | 退出码 0，< 15s |
 | V6 | JSON 契约 | `scripts/validate.sh unit --json \| python -m json.tool` | 合法 JSON，含 exit_code/stages |
 | V7 | 依赖缺失被发现 | `pip uninstall jsonschema` 后跑 `check_deps.py` | 退出码 1，明确指出 jsonschema |
-| V8 | 密钥扫描 | 临时加 `password = "Real1Passw0rd!"` | `scan_secrets.py` 退出码 1 并定位行号 | <!-- noqa: secret -->
+| V8 | 密钥扫描 | 临时加 `password = "Real1Passw0rd!"` | `scan_secrets.py` 退出码 1 并定位行号 | <!-- secret-scan: allow -->
 | V9 | 方言测试真跑 | 起 MySQL 容器，跑 `tests_dialect` | MySQL 用例通过，未配 DSN 的 skip |
 | V10 | 心跳失联告警 | 停掉哨兵进程，等超过 180s | `/api/v1/system/health` 显示 sentinel down，产生 `component_down` 告警 |
 | V11 | 心跳恢复 | 重启哨兵 | status 回 up，告警自动 resolve |
@@ -1688,7 +1688,7 @@ backend 检查序列（顺序固定，前序失败即终止）：
 | `pip-audit` 报出大量存量 CVE | 高 | 低 | 首期 `\|\| true` 不阻断，先建基线 |
 | 心跳表写入频繁 | 低 | 低 | upsert 单行，最快 30s 一次 × 组件数，量级可忽略 |
 | `__system__` 伪实例污染实例列表 | 中 | 低 | `is_active=False` + 列表接口过滤；**建议改用 AlertLog.config 可空**（§3.3） |
-| 密钥扫描误报打断提交 | 中 | 低 | 提供 `# noqa: secret` 豁免；占位符正则已排除常见示例值 |
+| 密钥扫描误报打断提交 | 中 | 低 | 提供 `# secret-scan: allow` 豁免；占位符正则已排除常见示例值 |
 
 **回滚方案**
 

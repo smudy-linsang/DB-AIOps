@@ -13,7 +13,9 @@ from django.views.decorators.csrf import csrf_exempt
 from django.http import JsonResponse
 
 from monitor.auth import Perm, require_auth, require_permission, get_user_database_ids
-from monitor.models import Incident, DatabaseConfig, IncidentCauseChain
+from monitor.models import (
+    DatabaseConfig, Incident, IncidentCauseChain, Playbook, PlaybookTemplate,
+)
 from monitor.playbook_engine_v2 import PlaybookExecutor
 
 logger = logging.getLogger("monitor.api_v2")
@@ -148,21 +150,25 @@ class WarRoomContextView(_BaseV2View):
             'evidence': c.evidence_refs
         } for c in chains]
 
-        # 推荐应急剧本
-        recommended = [
-            {
-                'playbook_code': 'KILL_ROOT_BLOCKER',
-                'title': '安全终止根源阻塞会话',
-                'risk_level': 'low',
-                'description': '一键释放长事务排他锁，恢复下游排队事务'
-            },
-            {
-                'playbook_code': 'FLUSH_QUERY_CACHE',
-                'title': '重置临时表空间与缓存池',
-                'risk_level': 'low',
-                'description': '清理临时会话占用的临时段空间'
-            }
-        ]
+        # 只推荐已有证据支撑、且已发布到统一执行引擎的剧本。
+        recommended = []
+        if any(c.node_type == 'LOCK' and c.evidence_refs for c in chains):
+            template = PlaybookTemplate.objects.filter(
+                code='KILL_ROOT_BLOCKER', is_active=True).first()
+            playbook = Playbook.objects.filter(
+                playbook_id=PlaybookExecutor.PLAYBOOK_MAP.get('KILL_ROOT_BLOCKER'),
+                enabled=True).first()
+            if (template and playbook and inc.config.db_type in template.db_types
+                    and inc.config.db_type in playbook.applicable_db_types):
+                recommended.append({
+                    'playbook_code': template.code,
+                    'title': template.name,
+                    'risk_level': playbook.risk_level,
+                    'description': template.description,
+                    'requires_approval': playbook.risk_level != 'low',
+                    'evidence': [ref for c in chains if c.node_type == 'LOCK'
+                                 for ref in c.evidence_refs],
+                })
 
         return self.ok(
             incident_id=inc.incident_id,

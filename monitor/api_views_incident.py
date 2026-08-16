@@ -5,13 +5,14 @@ Phase 6A: 事故/事件 API (phase6/10 §7)。
 """
 import json
 import logging
+import uuid
 
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
-from monitor.auth import require_auth, get_user_database_ids
+from monitor.auth import Perm, get_user_database_ids, require_auth, require_permission
 from monitor.models import Incident, Event, IncidentStateError
 
 logger = logging.getLogger(__name__)
@@ -82,6 +83,25 @@ def _rbac_qs(qs, request):
     return qs
 
 
+def _get_incident(request, incident_id, *, select_config=False):
+    """按当前用户数据范围取事故；越权与不存在统一返回 None，避免枚举。"""
+    qs = Incident.objects
+    if select_config:
+        qs = qs.select_related('config')
+    return _rbac_qs(qs, request).filter(incident_id=incident_id).first()
+
+
+def _get_run(request, run_id, *, select_all=False):
+    """按执行所属事故的数据范围取 PlaybookRun。"""
+    qs = PlaybookRun.objects
+    if select_all:
+        qs = qs.select_related('playbook', 'incident', 'incident__config')
+    allowed = get_user_database_ids(request.user)
+    if allowed is not None:
+        qs = qs.filter(incident__config_id__in=allowed)
+    return qs.filter(run_id=run_id).first()
+
+
 class IncidentListView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
@@ -110,7 +130,7 @@ class IncidentDetailView(_BaseView):
         return super().dispatch(*a, **k)
 
     def get(self, request, incident_id):
-        inc = Incident.objects.select_related('config').filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id, select_config=True)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         d = _incident_full(inc)
@@ -140,7 +160,7 @@ class IncidentTimelineView(_BaseView):
         return super().dispatch(*a, **k)
 
     def get(self, request, incident_id):
-        inc = Incident.objects.filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         items = []
@@ -163,11 +183,12 @@ class IncidentTimelineView(_BaseView):
 class IncidentAckView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_ACKNOWLEDGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, incident_id):
-        inc = Incident.objects.filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         if inc.status in ('closed',):
@@ -182,11 +203,12 @@ class IncidentAckView(_BaseView):
 class IncidentCloseView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_ACKNOWLEDGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, incident_id):
-        inc = Incident.objects.filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         try:
@@ -206,11 +228,12 @@ class IncidentRediagnoseView(_BaseView):
     """Phase 6B: 手动重新诊断 (phase6/20 §8.2)。"""
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_ACKNOWLEDGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, incident_id):
-        inc = Incident.objects.filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         if inc.status in ('resolved', 'closed'):
@@ -279,13 +302,13 @@ class IncidentExecuteView(_BaseView):
     """执行某方案: 建 PlaybookRun + 按授权策略执行 (phase6/30 §9)。"""
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.TICKETS_EXECUTE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, incident_id):
         import json as _json
-        import time as _time
-        inc = Incident.objects.select_related('config').filter(incident_id=incident_id).first()
+        inc = _get_incident(request, incident_id, select_config=True)
         if not inc:
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         try:
@@ -314,12 +337,27 @@ class IncidentExecuteView(_BaseView):
         pb = Playbook.objects.filter(playbook_id=playbook_id, enabled=True).first()
         if not pb:
             return self.err('NOT_FOUND', f'Playbook {playbook_id} 不存在', 404)
+        if inc.db_type not in pb.applicable_db_types:
+            return self.err('VALIDATION', f'Playbook 不支持 {inc.db_type}', 400)
+
+        # 会话终止目标必须来自服务端事故证据，请求体不得覆盖。
+        if pb.playbook_id == 'PB-LOCK-KILL-BLOCKER':
+            blocker_id = None
+            for event in inc.events.order_by('-occurred_at'):
+                chains = (event.detail or {}).get('chains') or []
+                if chains:
+                    blocker_id = chains[0].get('blocker') or chains[0].get('blocker_id')
+                    if blocker_id:
+                        break
+            if not blocker_id:
+                return self.err('VALIDATION', '事故证据中无可复核的根阻塞会话', 400)
+            params = {'blocker_id': str(blocker_id)}
 
         from monitor.playbook_authz import decide_trigger, record_auto_action
         decision = decide_trigger(inc, pb)
 
         run = PlaybookRun.objects.create(
-            run_id=f"PBR-{_time.strftime('%Y%m%d%H%M%S')}-{inc.id}",
+            run_id=f"PBR-{uuid.uuid4().hex}",
             playbook=pb, incident=inc, params=params,
             trigger_mode=decision['mode'],
             status='pending_approval' if not decision['execute_now'] else 'prechecking')
@@ -340,7 +378,7 @@ class PlaybookRunDetailView(_BaseView):
         return super().dispatch(*a, **k)
 
     def get(self, request, run_id):
-        run = PlaybookRun.objects.select_related('playbook', 'incident').filter(run_id=run_id).first()
+        run = _get_run(request, run_id, select_all=True)
         if not run:
             return self.err('NOT_FOUND', f'执行 {run_id} 不存在', 404)
         return self.ok(run={
@@ -356,11 +394,12 @@ class PlaybookRunDetailView(_BaseView):
 class PlaybookRunApproveView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.TICKETS_APPROVE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, run_id):
-        run = PlaybookRun.objects.filter(run_id=run_id).first()
+        run = _get_run(request, run_id)
         if not run:
             return self.err('NOT_FOUND', f'执行 {run_id} 不存在', 404)
         if run.status != 'pending_approval':
@@ -376,24 +415,29 @@ class PlaybookRunApproveView(_BaseView):
 class PlaybookRunRollbackView(_BaseView):
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.TICKETS_EXECUTE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request, run_id):
-        run = PlaybookRun.objects.select_related('playbook', 'incident', 'incident__config').filter(run_id=run_id).first()
+        run = _get_run(request, run_id, select_all=True)
         if not run:
             return self.err('NOT_FOUND', f'执行 {run_id} 不存在', 404)
         from monitor.db_connector import DbConnector
-        from monitor.playbook_engine import _do_rollback
+        from monitor.playbook_engine import _do_rollback, _normalize_params
         conn = None
         try:
+            params = _normalize_params(
+                run.playbook.params_schema or {}, run.params or {}, run.incident.db_type)
             conn = DbConnector.get_connection(run.incident.config)
             sr = list(run.step_results or [])
-            _do_rollback(conn, run.incident.db_type, run.playbook, run.params or {}, sr)
+            _do_rollback(conn, run.incident.db_type, run.playbook, params, sr)
             run.step_results = sr  # 4NF: setter 已写入 PlaybookRunStepResult 子表
             run.status = 'rolled_back'
             run.save(update_fields=['status'])
             return self.ok(run_id=run.run_id, status='rolled_back')
+        except ValueError as e:
+            return self.err('VALIDATION', str(e), 400)
         except Exception as e:
             logger.exception("[incident] 回滚失败 run_id=%s", run_id)
             return self.err('INTERNAL', f'回滚失败: {e}', 500)

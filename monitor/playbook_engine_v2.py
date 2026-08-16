@@ -119,10 +119,11 @@ class PlaybookExecutor:
             'template_code': template.code,
             'template_name': template.name,
             'risk_level': template.risk_level,
-            'impact_summary': f"预演通过。将针对目标实例 [{config.name}] 执行 [{template.name}]，预计 5 秒内生效",
+            'impact_summary': f"预演通过。将针对目标实例 [{config.name}] 执行 [{template.name}]；生效时间需以执行后验证为准",
             'affected_sessions_estimate': 1,
-            'released_locks_estimate': 12,
-            'rollback_available': bool(template.rollback_payload),
+            'released_locks_estimate': None,
+            'rollback_available': False if template_code == 'KILL_ROOT_BLOCKER'
+                                  else bool(template.rollback_payload),
             'resolved_params': resolved_params,
             'evaluated_at': timezone.now().isoformat()
         }
