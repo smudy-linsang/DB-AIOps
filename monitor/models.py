@@ -2286,3 +2286,94 @@ class LLMSceneRoutingRule(models.Model):
     def __str__(self):
         return f"{self.scene_name} ({self.scene_code})"
 
+
+# =============================================================================
+# Copilot 智能体长期记忆宫殿 (Palace of Long-Term Memory)
+# =============================================================================
+class CopilotMemory(models.Model):
+    """
+    智能体长期记忆归档模型 (基于记忆宫殿 Loci 架构)
+    归档历史排障事故、自愈证据链、语义常识与 DBA 偏好
+    """
+    MEMORY_TYPE_CHOICES = (
+        ('episodic', '情景记忆 (故障处置/自愈工单/事故总结)'),
+        ('semantic', '语义记忆 (架构特征/业务重要性/拓扑知识)'),
+        ('preference', '偏好记忆 (DBA 运维习惯/禁忌/首选方案)'),
+    )
+
+    memory_type = models.CharField(max_length=32, choices=MEMORY_TYPE_CHOICES, default='episodic', verbose_name="记忆类型")
+    config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, null=True, blank=True, related_name='agent_memories', verbose_name="关联数据库")
+    
+    # 记忆宫殿坐标 (Loci 索引)
+    locus_key = models.CharField(max_length=128, db_index=True, verbose_name="记忆宫殿坐标 Key", help_text="如 oracle:tablespace:full / mysql:deadlock")
+    title = models.CharField(max_length=255, verbose_name="记忆摘要/标题")
+    content = models.TextField(verbose_name="记忆详细内容/排障推导/处置证据")
+    tags = models.JSONField(default=list, blank=True, verbose_name="记忆标签列表")
+    
+    incident = models.ForeignKey('Incident', on_delete=models.SET_NULL, null=True, blank=True, related_name='memories', verbose_name="关联事故")
+    audit_log = models.ForeignKey('AuditLog', on_delete=models.SET_NULL, null=True, blank=True, related_name='memories', verbose_name="关联工单")
+    
+    importance = models.IntegerField(default=5, verbose_name="重要度 (1-10)", help_text="越高在检索时越优先唤醒")
+    access_count = models.IntegerField(default=0, verbose_name="被回忆/引用次数")
+    last_recalled_at = models.DateTimeField(null=True, blank=True, verbose_name="最后一次回忆时间")
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="沉淀时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = 'copilot_memory'
+        ordering = ['-importance', '-updated_at']
+        verbose_name = "Copilot 长期记忆"
+        verbose_name_plural = "Copilot 长期记忆库"
+
+    def __str__(self):
+        return f"[{self.get_memory_type_display()}] {self.locus_key} - {self.title}"
+
+
+# =============================================================================
+# Copilot 专家 Skill 体系与 MCP 纳管中心
+# =============================================================================
+class CopilotSkill(models.Model):
+    """
+    智能体技能模型：包含内置专家 Skill、自我总结提炼 Skill 与 MCP 纳管 Skill
+    """
+    SOURCE_CHOICES = (
+        ('builtin', '系统内置专家 Skill'),
+        ('self_learned', '智能体自总结沉淀 Skill'),
+        ('mcp_imported', 'MCP 协议纳管 Skill'),
+        ('community', '社区/外部导入 Skill'),
+    )
+    
+    code = models.CharField(max_length=64, unique=True, verbose_name="Skill 唯一编码")
+    name = models.CharField(max_length=128, verbose_name="Skill 名称")
+    source = models.CharField(max_length=32, choices=SOURCE_CHOICES, default='builtin', verbose_name="Skill 来源")
+    db_types = models.JSONField(default=list, verbose_name="适用数据库类型列表", help_text="如 ['oracle', 'mysql']")
+    
+    description = models.TextField(verbose_name="Skill 职能说明")
+    trigger_patterns = models.JSONField(default=list, verbose_name="触发关键词/意图规则")
+    
+    # 执行定义（Prompt 模板、执行诊断 SQL、推荐自愈 Playbook）
+    system_instruction = models.TextField(blank=True, default='', verbose_name="Skill 专属推理指导 Prompt")
+    diagnostic_sqls = models.JSONField(default=list, blank=True, verbose_name="标准诊断 SQL 库")
+    recommended_playbooks = models.JSONField(default=list, blank=True, verbose_name="推荐自愈剧本编码列表")
+    
+    # MCP 标准元数据
+    mcp_server_name = models.CharField(max_length=128, blank=True, default='', verbose_name="MCP Server 标识")
+    mcp_tool_name = models.CharField(max_length=128, blank=True, default='', verbose_name="MCP Tool 名称")
+    mcp_schema = models.JSONField(null=True, blank=True, verbose_name="MCP Tool Schema 定义")
+    
+    is_active = models.BooleanField(default=True, db_index=True, verbose_name="是否启用")
+    usage_count = models.IntegerField(default=0, verbose_name="调用次数")
+    
+    created_at = models.DateTimeField(auto_now_add=True, verbose_name="创建时间")
+    updated_at = models.DateTimeField(auto_now=True, verbose_name="更新时间")
+
+    class Meta:
+        db_table = 'copilot_skill'
+        ordering = ['source', 'code']
+        verbose_name = "Copilot 专家 Skill"
+        verbose_name_plural = "Copilot 专家 Skill 库"
+
+    def __str__(self):
+        return f"[{self.get_source_display()}] {self.name} ({self.code})"
+

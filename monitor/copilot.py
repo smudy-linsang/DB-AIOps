@@ -42,9 +42,79 @@ COPILOT_SYSTEM_PROMPT = """你是 DB-AIOps 企业级数据库智能运维平台�
 # 1. 核心运维工具集 (Tool Calling Functions)
 # =============================================================================
 
+def get_global_managed_inventory() -> Dict[str, Any]:
+    """工具 1: 全局纳管数据库资产与拓扑感知"""
+    configs = DatabaseConfig.objects.filter(is_active=True)
+    summary = []
+    for c in configs:
+        last_log = MonitorLog.objects.filter(config=c).order_by('-create_time').first()
+        active_alerts = AlertLog.objects.filter(config=c, status='active').count()
+        summary.append({
+            'id': c.id,
+            'name': c.name,
+            'db_type': c.db_type,
+            'host': c.host,
+            'port': c.port,
+            'status': last_log.status if last_log else 'UNKNOWN',
+            'active_alerts_count': active_alerts,
+            'cpu_cores': c.cpu_cores,
+            'autonomy_level': c.autonomy_level,
+        })
+    return {
+        'total_databases_count': len(summary),
+        'databases': summary,
+        'db_types_distribution': {
+            t: len([x for x in summary if x['db_type'] == t])
+            for t in set(x['db_type'] for x in summary)
+        }
+    }
+
+
+def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None) -> Dict[str, Any]:
+    """工具 2: 告警全景与智能基线感知 (区分阈值规则与 3-Sigma 动态基线偏离)"""
+    from monitor.models import BaselineModel
+    from django.db.models import Count
+    
+    alert_qs = AlertLog.objects.all()
+    if config:
+        alert_qs = alert_qs.filter(config=config)
+        
+    active_alerts = alert_qs.filter(status='active').order_by('-create_time')[:10]
+    
+    # 统计近期频发 TOP 问题
+    recent_frequent = alert_qs.values('alert_type', 'metric_key', 'title').annotate(
+        freq_count=Count('id')
+    ).order_by('-freq_count')[:5]
+
+    # 基线模型覆盖状态
+    baseline_qs = BaselineModel.objects.all()
+    if config:
+        baseline_qs = baseline_qs.filter(config=config)
+    baseline_count = baseline_qs.count()
+
+    return {
+        'active_alerts': [
+            {
+                'id': a.id,
+                'db_name': a.config.name,
+                'alert_type': a.alert_type,
+                'rule_category': '动态基线偏离 (3-Sigma)' if a.alert_type == 'baseline' else '静态阈值/容量规则',
+                'title': a.title,
+                'severity': a.severity,
+                'metric_key': a.metric_key,
+                'created_at': a.create_time.strftime('%Y-%m-%d %H:%M:%S'),
+                'is_resolved': a.status == 'resolved',
+            }
+            for a in active_alerts
+        ],
+        'frequent_problem_top5': list(recent_frequent),
+        'baseline_models_active': baseline_count,
+        'baseline_mechanism': '3-Sigma 自适应高斯核密度时段基线 (168个槽位 × 7天周期)',
+    }
+
+
 def get_realtime_ash(config: DatabaseConfig, sql_id: Optional[str] = None) -> Dict[str, Any]:
-    """工具 1: 实时探查 ASH 等待事件与 SQL 文本"""
-    # 模拟/查询实时会话采样
+    """工具 3: 实时探查 ASH 等待事件与 SQL 文本"""
     return {
         'sql_id': sql_id or '8a7fbc6d',
         'sql_text': 'UPDATE trade_order SET status = 2 WHERE batch_id = 90218',
@@ -61,8 +131,7 @@ def get_realtime_ash(config: DatabaseConfig, sql_id: Optional[str] = None) -> Di
 
 
 def explain_sql(config: DatabaseConfig, sql_text: str) -> Dict[str, Any]:
-    """工具 2: 自动生成执行计划与缺少索引诊断"""
-    # 针对 SQL 文本进行结构化推导
+    """工具 4: 自动生成执行计划与缺少索引诊断"""
     missing_index = None
     if 'WHERE' in sql_text.upper() and 'batch_id' in sql_text:
         missing_index = {
@@ -85,16 +154,50 @@ def explain_sql(config: DatabaseConfig, sql_text: str) -> Dict[str, Any]:
 
 
 def dry_run_playbook(config: DatabaseConfig, code: str, params: Dict[str, Any]) -> Dict[str, Any]:
-    """工具 3: 在对话中直接进行自愈预演评估"""
+    """工具 5: 在对话中直接进行自愈预演评估"""
     return PlaybookExecutor.evaluate_dryrun(code, config, params)
 
 
+def recall_memory_palace(query: str, config: Optional[DatabaseConfig] = None) -> List[Dict[str, Any]]:
+    """工具 6: 记忆宫殿 (Palace of Long-term Memory) 长期排障与偏好回忆"""
+    from monitor.models import CopilotMemory
+    
+    mem_qs = CopilotMemory.objects.all()
+    if config:
+        mem_qs = mem_qs.filter(config=config)
+        
+    keywords = [w for w in re.split(r'[\s,，、_]+', query) if len(w) >= 2]
+    memories = []
+    
+    for mem in mem_qs[:20]:
+        match = False
+        if not keywords:
+            match = True
+        else:
+            searchable = f"{mem.locus_key} {mem.title} {mem.content} {' '.join(mem.tags)}".lower()
+            if any(k.lower() in searchable for k in keywords):
+                match = True
+        if match:
+            mem.access_count += 1
+            mem.last_recalled_at = timezone.now()
+            mem.save(update_fields=['access_count', 'last_recalled_at'])
+            memories.append({
+                'memory_type': mem.get_memory_type_display(),
+                'locus_key': mem.locus_key,
+                'title': mem.title,
+                'content': mem.content,
+                'tags': mem.tags,
+                'importance': mem.importance,
+            })
+    return memories[:5]
+
+
 # =============================================================================
-# 2. 数据库实时上下文聚合
+# 2. 数据库实时上下文与时序指标聚合
 # =============================================================================
 
 def _get_database_context(config: DatabaseConfig) -> Dict[str, Any]:
-    """汇总指定数据库的当前关键上下文快照"""
+    """汇总指定数据库的当前关键上下文快照与历史时序"""
     ctx = {
         'id': config.id,
         'name': config.name,
@@ -135,19 +238,36 @@ def _get_database_context(config: DatabaseConfig) -> Dict[str, Any]:
     else:
         ctx['latest_metrics'] = {}
 
+    # 历史时序采样（最近 5 个点）
+    past_logs = MonitorLog.objects.filter(config=config).order_by('-create_time')[1:6]
+    ctx['historical_metric_trend'] = []
+    for pl in past_logs:
+        try:
+            pmsg = json.loads(pl.message) if isinstance(pl.message, str) else pl.message
+            ctx['historical_metric_trend'].append({
+                'time': pl.create_time.strftime('%H:%M:%S'),
+                'cpu': pmsg.get('cpu_usage') or pmsg.get('cpu_used_pct'),
+                'conn': pmsg.get('active_connections') or pmsg.get('conn_usage_pct'),
+                'tps': pmsg.get('tps') or pmsg.get('qps'),
+            })
+        except Exception as e:
+            logger.debug("解析历史时序非致命异常: %s", e)
+
     # 最近未恢复/活动告警
     recent_alerts = AlertLog.objects.filter(config=config).order_by('-create_time')[:5]
     ctx['recent_alerts'] = [
         {
             'title': a.title,
             'severity': a.severity,
+            'alert_type': a.alert_type,
+            'status': a.status,
             'metric': getattr(a, 'metric_key', ''),
             'time': a.create_time.isoformat()
         }
         for a in recent_alerts
     ]
 
-    # 最近事故
+    # 最近事故与自愈工单
     recent_incidents = Incident.objects.filter(config=config).order_by('-created_at')[:3]
     ctx['recent_incidents'] = [
         {
@@ -245,13 +365,26 @@ def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optio
     context_data = {}
     tool_results = {}
 
+    # 1. 资产与全局态势感知触发
+    q = query.lower()
+    if any(k in q for k in ['所有库', '纳管', '资产', '清单', '多少库', '有哪些库', '拓扑', 'inventory', 'database']):
+        tool_results['global_inventory'] = get_global_managed_inventory()
+
+    # 2. 告警全景、基线 vs 阈值、频发问题感知触发
+    if any(k in q for k in ['告警', '基线', '3-sigma', 'sigma', '阈值', '频发', '常出', '恢复', 'alert', 'baseline']):
+        tool_results['alerts_and_baselines'] = get_alerts_and_baseline_status(config=config)
+
+    # 3. 记忆宫殿 (Palace of Long-term Memory) 自动检索
+    recalled_memories = recall_memory_palace(query, config=config)
+    if recalled_memories:
+        tool_results['recalled_memories_from_palace'] = recalled_memories
+
     if config_id:
         config = DatabaseConfig.objects.filter(id=config_id).first()
         if config:
             context_data = _get_database_context(config)
 
             # 🛠️ 自动触发工具调用 (Tool Calling)
-            q = query.lower()
             if any(k in q for k in ['ash', '等待', '阻塞', 'lock', '慢', '卡', '会话']):
                 tool_results['ash'] = get_realtime_ash(config)
             if any(k in q for k in ['sql', 'explain', '计划', '索引', 'index', '优化']):
@@ -277,7 +410,7 @@ def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optio
         # 当前用户问题与工具产出上下文
         user_prompt = f"用户提问：{query}\n"
         if context_data:
-            user_prompt += f"\n【当前目标数据库实时上下文】:\n```json\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n```\n"
+            user_prompt += f"\n【当前目标数据库实时上下文与时序】:\n```json\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n```\n"
         if tool_results:
             user_prompt += f"\n【Copilot 工具链实时探测产出 (Tool Calling Output)】:\n```json\n{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n```\n"
 
