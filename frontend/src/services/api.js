@@ -559,14 +559,24 @@ export const aiOpsAPI = {
 // ==========================================
 export const apiV2 = {
   // 1-Min 活跃故障清单
-  getActiveIncidents: () => api.get('/../v2/incidents/realtime-active/'),
+  getActiveIncidents: () => axios.get('/api/v2/incidents/realtime-active/', {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  }).then(r => r.data),
   // 5-Min WarRoom 全景排障上下文
-  getWarRoomContext: (incidentId) => api.get(`/../v2/incidents/${incidentId}/warroom-context/`),
+  getWarRoomContext: (incidentId) => axios.get(`/api/v2/incidents/${incidentId}/warroom-context/`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  }).then(r => r.data),
   // 阻塞拓扑图
-  getBlockingGraph: (configId) => api.get(`/../v2/databases/${configId}/blocking-graph/`),
+  getBlockingGraph: (configId) => axios.get(`/api/v2/databases/${configId}/blocking-graph/`, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  }).then(r => r.data),
   // 15-Min Playbook 预演与自愈执行
-  dryRunPlaybook: (data) => api.post('/../v2/playbooks/execute-dryrun/', data),
-  executePlaybook: (data) => api.post('/../v2/playbooks/execute-safely/', data),
+  dryRunPlaybook: (data) => axios.post('/api/v2/playbooks/execute-dryrun/', data, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  }).then(r => r.data),
+  executePlaybook: (data) => axios.post('/api/v2/playbooks/execute-safely/', data, {
+    headers: { Authorization: `Bearer ${localStorage.getItem('auth_token') || ''}` }
+  }).then(r => r.data),
 }
 
 // Phase 7B: 性能中心 (契约 phase7/20)
