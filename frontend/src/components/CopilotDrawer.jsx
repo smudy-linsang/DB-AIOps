@@ -50,15 +50,24 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
   }, [initialDbId]);
 
   // 加载数据库列表供切换
-  useEffect(() => {
-    databaseAPI.list().then(res => {
-      const list = res?.data || res?.items || (Array.isArray(res) ? res : []);
+  const loadDatabaseList = async () => {
+    try {
+      const res = await databaseAPI.list();
+      const list = res?.databases || res?.data || res?.items || (Array.isArray(res) ? res : []);
       setDatabases(list);
       if (!selectedDbId && list.length > 0) {
         setSelectedDbId(list[0].id);
       }
-    }).catch(() => {});
-  }, []);
+    } catch (e) {
+      // 容错兜底：从 localStorage 或已有缓存读取
+    }
+  };
+
+  useEffect(() => {
+    if (visible) {
+      loadDatabaseList();
+    }
+  }, [visible]);
 
   // 滚动到底部
   useEffect(() => {

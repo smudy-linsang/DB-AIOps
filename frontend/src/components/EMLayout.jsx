@@ -37,7 +37,7 @@ const EMLayout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const {
-    collapsed, toggleCollapsed, selectedDbName, selectedDbType,
+    collapsed, toggleCollapsed, selectedDbId, selectedDbName, selectedDbType,
     alertCounts, setAlertCounts, globalSearchKeyword, setGlobalSearchKeyword,
     connectSSE, disconnectSSE,
   } = useAppStore();
@@ -382,6 +382,7 @@ const EMLayout = ({ children }) => {
       <CopilotDrawer
         visible={copilotVisible}
         onClose={() => setCopilotVisible(false)}
+        initialDbId={selectedDbId}
       />
     </Layout>
   );
