@@ -219,12 +219,18 @@ export const ticketAPI = {
 export const userAPI = {
   // 获取用户列表
   list: () => api.get('/users/'),
+
+  // 创建用户
+  create: (data) => api.post('/users/', data),
   
   // 获取用户详情
   getDetail: (id) => api.get(`/users/${id}/`),
   
   // 更新用户
   update: (id, data) => api.put(`/users/${id}/`, data),
+
+  // 删除用户
+  delete: (id) => api.delete(`/users/${id}/`),
   
   // 修改密码
   changePassword: (id, password) => 
