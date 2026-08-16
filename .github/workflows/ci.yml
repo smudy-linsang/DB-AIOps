@@ -24,8 +24,8 @@ jobs:
     name: 静态检查
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
           cache: pip
@@ -55,8 +55,8 @@ jobs:
     runs-on: ubuntu-latest
     needs: static
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11', cache: pip }
       - run: pip install --require-hashes -r requirements.lock
       - name: 运行 unit 层
@@ -83,8 +83,8 @@ jobs:
           --health-timeout 5s
           --health-retries 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11', cache: pip }
       - run: pip install --require-hashes -r requirements.lock
       - name: 全量测试
@@ -126,8 +126,8 @@ jobs:
         ports: ['5433:5432']
         options: --health-cmd pg_isready --health-interval 10s --health-retries 5
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11', cache: pip }
       - run: pip install --require-hashes -r requirements.lock
       - name: 方言集成测试
@@ -187,8 +187,8 @@ jobs:
       # 生产环境对应做法是给监控账号授 SELECT_CATALOG_ROLE。
       DIALECT_ORACLE_DSN: oracle://system:oracle123@127.0.0.1:1521/FREEPDB1
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-python@v5
+      - uses: actions/checkout@v6
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11', cache: pip }
       - run: pip install --require-hashes -r requirements.lock
       # ── 两个探针：把"为什么 skip"编码进 step 的红绿 ────────────────
@@ -283,7 +283,7 @@ jobs:
       # 从 API 按 tail 取日志根本翻不到 Python 那几行。artifact 可以直接下载。
       - name: 上传原始输出
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: oracle-dialect-log
           path: /tmp/oracle.log
@@ -295,8 +295,8 @@ jobs:
     name: 前端构建与测试
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v6
+      - uses: actions/setup-node@v6
         with:
           node-version: '22'
           cache: npm
@@ -317,9 +317,9 @@ jobs:
     name: 安全扫描
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v6
         with: { fetch-depth: 0 }
-      - uses: actions/setup-python@v5
+      - uses: actions/setup-python@v6
         with: { python-version: '3.11' }
       - name: 依赖已知漏洞
         run: |
@@ -331,7 +331,7 @@ jobs:
         run: python scripts/scan_secrets.py
       - name: 上传 Python SBOM
         if: always()
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v6
         with:
           name: sbom-python
           path: sbom-python.json
