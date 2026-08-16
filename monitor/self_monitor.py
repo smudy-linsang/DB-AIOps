@@ -43,8 +43,16 @@ def report(component: str, meta: dict = None) -> None:
         return
     try:
         from monitor.models import ComponentHeartbeat
+        curr_instance = instance_id()
+        # 同一台主机上若进程重启产生新 PID，清理该主机上旧 PID 的历史残留心跳
+        hostname = socket.gethostname()
+        ComponentHeartbeat.objects.filter(
+            component=component,
+            instance__startswith=f"{hostname}:"
+        ).exclude(instance=curr_instance).delete()
+
         ComponentHeartbeat.objects.update_or_create(
-            component=component, instance=instance_id(),
+            component=component, instance=curr_instance,
             defaults={'last_beat_at': timezone.now(),
                       'meta': meta or {}, 'status': 'up'},
         )
