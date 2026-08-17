@@ -1,15 +1,17 @@
 #!/usr/bin/env python
 """红线约束静态扫描。
 
-三条检查（均基于 git diff HEAD，只检查新增/修改代码，不追溯存量）：
+四条检查（只检查本次工作区或 CI 提交新增/修改的代码，不追溯存量）：
 1. except 块中的 pass 而无 degrade.note() 调用 —— 静默降级必须留痕
 2. 新增 getattr(settings, 'KEY', ...) 引用未在 appconf.SPECS 中登记 —— 配置项不可散落
 3. git diff 中删除的 migration 文件 —— 迁移链不可断
+4. Copilot 工具层新增固定业务样例字面量 —— 样例不得冒充观测事实
 
 无外部依赖，纯标准库。用法: python scripts/lint_redlines.py
 退出码: 0=通过; 1=发现违规
 """
 import ast
+import os
 import re
 import subprocess
 import sys
@@ -42,9 +44,18 @@ def _git(*args):
         return ''
 
 
-def _changed_files():
-    """返回 [(status, relpath)] —— git diff HEAD 中所有变更文件。"""
-    out = _git('diff', 'HEAD', '--name-status')
+def _diff_args():
+    """本地扫描工作区；CI 干净检出扫描本次提交。"""
+    if _git('diff', 'HEAD', '--name-status').strip():
+        return ('HEAD',)
+    if os.environ.get('CI') and _git('rev-parse', '--verify', 'HEAD^').strip():
+        return ('HEAD^', 'HEAD')
+    return ('HEAD',)
+
+
+def _changed_files(diff_args=None):
+    """返回指定 diff 范围内的 [(status, relpath)]。"""
+    out = _git('diff', *(diff_args or _diff_args()), '--name-status')
     result = []
     for line in out.splitlines():
         parts = line.split('\t')
@@ -56,13 +67,13 @@ def _changed_files():
     return result
 
 
-def _added_lines_by_file():
-    """解析 git diff HEAD --unified=0，返回 {relpath: set(行号)}。
+def _added_lines_by_file(diff_args=None):
+    """解析选定 git diff --unified=0，返回 {relpath: set(行号)}。
 
     只提取新增行（+ 开头）的行号，用于精确定位"本次改动引入的违规"，
     避免对存量代码产生噪音。
     """
-    out = _git('diff', 'HEAD', '--unified=0')
+    out = _git('diff', *(diff_args or _diff_args()), '--unified=0')
     result = {}
     cur_file = None
     new_line = 0
@@ -188,10 +199,10 @@ def check_unregistered_settings(changed_py, added_lines, specs_keys):
 
 # ─── 检查 3：删除的 migration 文件 ───
 
-def check_deleted_migrations():
+def check_deleted_migrations(changed=None):
     """git diff 中删除的 migration 文件。"""
     violations = []
-    for status, relpath in _changed_files():
+    for status, relpath in (changed if changed is not None else _changed_files()):
         if status != 'D':
             continue
         parts = Path(relpath).parts
@@ -201,11 +212,35 @@ def check_deleted_migrations():
     return violations
 
 
+# ─── 检查 4：Copilot 固定业务样例 ───
+
+COPILOT_FORBIDDEN_LITERALS = (
+    'trade_order', 'app_trade_user', '8a7fbc6d', 'USERS_TBS',
+)
+
+
+def check_copilot_fabricated_literals(added_lines):
+    """阻止已知样例业务对象重新进入 Copilot 生产工具。"""
+    relpath = 'monitor/copilot.py'
+    path = PROJECT_DIR / relpath
+    if not path.exists():
+        return []
+    lines = path.read_text(encoding='utf-8').splitlines()
+    violations = []
+    for lineno in added_lines.get(relpath, set()):
+        if 1 <= lineno <= len(lines):
+            for literal in COPILOT_FORBIDDEN_LITERALS:
+                if literal in lines[lineno - 1]:
+                    violations.append((relpath, lineno, literal))
+    return violations
+
+
 def main() -> int:
     specs_keys = _parse_specs_keys()
-    changed = _changed_files()
+    diff_args = _diff_args()
+    changed = _changed_files(diff_args)
     changed_py = [p for s, p in changed if s in ('A', 'M') and p.endswith('.py')]
-    added_lines = _added_lines_by_file()
+    added_lines = _added_lines_by_file(diff_args)
 
     all_violations = []
 
@@ -221,9 +256,15 @@ def main() -> int:
             f'getattr(settings, "{key}", ...) 未在 appconf.SPECS 中登记'
         )
 
-    for relpath in check_deleted_migrations():
+    for relpath in check_deleted_migrations(changed):
         all_violations.append(
             f'  [删除迁移] {relpath}  不应删除 migration 文件'
+        )
+
+    for relpath, lineno, literal in check_copilot_fabricated_literals(added_lines):
+        all_violations.append(
+            f'  [Copilot样例事实] {relpath}:{lineno}  '
+            f'禁止在生产工具新增固定业务字面量 {literal!r}'
         )
 
     if all_violations:

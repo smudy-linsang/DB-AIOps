@@ -8,7 +8,6 @@ Phase 8: AI 智能化 REST API (phase8/30 §2-3)。
 """
 import json
 import logging
-import os
 import threading
 import time
 
@@ -544,102 +543,100 @@ class LlmConfigView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def get(self, request):
-        """获取当前大模型与 API Key 配置状态（脱敏输出）"""
-        api_key = getattr(settings, 'LLM_API_KEY', '')
-        masked_key = ''
-        if api_key:
-            masked_key = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else "****"
+        """读取数据库中的系统默认凭据；部署 settings 只作为只读 fallback。"""
+        from monitor.models import LLMProviderCredential, LLMSceneRoutingRule
+        credential = LLMProviderCredential.objects.filter(name='系统默认').first()
+        route = LLMSceneRoutingRule.objects.filter(scene_code='global_default').first()
+        if credential:
+            try:
+                api_key = credential.get_api_key()
+            except ValueError:
+                api_key = ''
+            provider = credential.provider_type
+            base_url = credential.base_url
+            model = credential.model_name
+            enabled = credential.is_active
+        else:
+            api_key = getattr(settings, 'LLM_API_KEY', '')
+            provider = getattr(settings, 'LLM_PROVIDER', 'openai_compat')
+            base_url = getattr(settings, 'LLM_BASE_URL', '')
+            model = getattr(settings, 'LLM_MODEL', '')
+            enabled = bool(getattr(settings, 'LLM_ENABLED', False))
+        masked_key = (f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8
+                      else ("****" if api_key else ""))
 
         return self.ok(
-            llm_enabled=bool(getattr(settings, 'LLM_ENABLED', False)),
-            llm_provider=getattr(settings, 'LLM_PROVIDER', 'openai_compat'),
-            llm_base_url=getattr(settings, 'LLM_BASE_URL', 'http://localhost:11434/v1'),
-            llm_model=getattr(settings, 'LLM_MODEL', 'qwen2.5:14b-instruct'),
+            llm_enabled=enabled,
+            llm_provider=provider,
+            llm_base_url=base_url,
+            llm_model=model,
             llm_api_key_masked=masked_key,
             has_api_key=bool(api_key),
-            llm_temperature=float(getattr(settings, 'LLM_TEMPERATURE', 0.1)),
-            llm_max_tokens=int(getattr(settings, 'LLM_MAX_TOKENS', 2048)),
-            llm_timeout_sec=int(getattr(settings, 'LLM_TIMEOUT_SEC', 25)),
+            llm_temperature=(route.temperature if route else
+                             float(getattr(settings, 'LLM_TEMPERATURE', 0.1))),
+            llm_max_tokens=(route.max_tokens if route else
+                            int(getattr(settings, 'LLM_MAX_TOKENS', 2048))),
+            llm_timeout_sec=(route.timeout_sec if route else
+                             int(getattr(settings, 'LLM_TIMEOUT_SEC', 25))),
             agent_enabled=bool(getattr(settings, 'AGENT_ENABLED', False)),
             embed_enabled=bool(getattr(settings, 'EMBED_ENABLED', False)),
+            deployment_managed_fields=['agent_enabled', 'embed_enabled', 'proxy_url'],
         )
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def put(self, request):
-        """在线更新大模型与 API Key 配置，并持久化到 .env 文件"""
-        if not request.user.is_superuser:
-            return self.err('FORBIDDEN', '仅超级管理员可修改全局大模型与 API Key 配置', 403)
-
+        """更新数据库系统默认凭据；不修改 worker 内存或部署文件。"""
+        from monitor.llm.security import LLMEndpointValidationError, validate_llm_base_url
+        from monitor.models import LLMProviderCredential, LLMSceneRoutingRule
         data = self.body(request)
         llm_enabled_val = data.get('llm_enabled', True)
         base_url = (data.get('llm_base_url') or '').strip()
         api_key = (data.get('llm_api_key') or '').strip()
         model = (data.get('llm_model') or '').strip()
-        temperature = data.get('llm_temperature')
-        max_tokens = data.get('llm_max_tokens')
-        agent_enabled_val = data.get('agent_enabled', True)
-
-        # 动态更新 settings 运行时内存
-        settings.LLM_ENABLED = bool(llm_enabled_val)
-        if base_url:
-            settings.LLM_BASE_URL = base_url
-        if api_key:
-            settings.LLM_API_KEY = api_key
-        if model:
-            settings.LLM_MODEL = model
-        if temperature is not None:
-            settings.LLM_TEMPERATURE = float(temperature)
-        if max_tokens is not None:
-            settings.LLM_MAX_TOKENS = int(max_tokens)
-        settings.AGENT_ENABLED = bool(agent_enabled_val)
-
-        # 重置全局 Provider 单例缓存
-        from monitor.llm import providers
-        providers.reset_providers()
-
-        # 同步写入/更新 .env 文件
-        env_path = os.path.join(settings.BASE_DIR, '.env')
+        provider_type = (data.get('llm_provider') or 'custom').strip()
+        if not base_url or not model:
+            return self.err('BAD_REQUEST', 'Base URL 与模型名称为必填项', 400)
         try:
-            env_lines = []
-            if os.path.exists(env_path):
-                with open(env_path, 'r', encoding='utf-8') as f:
-                    env_lines = f.readlines()
+            base_url = validate_llm_base_url(base_url)
+        except LLMEndpointValidationError as exc:
+            return self.err('BAD_REQUEST', str(exc), 400)
+        allowed_types = {value for value, _label in LLMProviderCredential.PROVIDER_CHOICES}
+        if provider_type not in allowed_types:
+            return self.err('BAD_REQUEST', '不支持的服务商类型', 400)
+        credential, _created = LLMProviderCredential.objects.get_or_create(
+            name='系统默认',
+            defaults={
+                'provider_type': provider_type, 'base_url': base_url,
+                'model_name': model, 'priority': 1, 'weight': 1,
+            },
+        )
+        credential.provider_type = provider_type
+        credential.base_url = base_url
+        credential.model_name = model
+        credential.is_active = bool(llm_enabled_val)
+        credential.proxy_url = ''
+        if api_key:
+            credential.set_api_key(api_key)
+        credential.save()
 
-            updated_keys = {
-                'LLM_ENABLED': str(settings.LLM_ENABLED),
-                'LLM_BASE_URL': settings.LLM_BASE_URL,
-                'LLM_MODEL': settings.LLM_MODEL,
-                'AGENT_ENABLED': str(settings.AGENT_ENABLED),
-            }
-            if api_key:
-                updated_keys['LLM_API_KEY'] = api_key
-
-            new_lines = []
-            seen_keys = set()
-            for line in env_lines:
-                k = line.split('=')[0].strip() if '=' in line else ''
-                if k in updated_keys:
-                    new_lines.append(f"{k}={updated_keys[k]}\n")
-                    seen_keys.add(k)
-                else:
-                    new_lines.append(line)
-
-            # 追加新配置项
-            for k, v in updated_keys.items():
-                if k not in seen_keys:
-                    new_lines.append(f"{k}={v}\n")
-
-            with open(env_path, 'w', encoding='utf-8') as f:
-                f.writelines(new_lines)
-
-        except Exception as e:
-            logger.warning("写入 .env 失败: %s", e)
-
-        return self.ok(message="大模型与 API Key 配置已成功更新并生效！")
+        route, _created = LLMSceneRoutingRule.objects.get_or_create(
+            scene_code='global_default',
+            defaults={'scene_name': '全局默认兜底', 'description': '未单独配置场景时使用'},
+        )
+        route.primary_credential = credential
+        if data.get('llm_temperature') is not None:
+            route.temperature = float(data['llm_temperature'])
+        if data.get('llm_max_tokens') is not None:
+            route.max_tokens = int(data['llm_max_tokens'])
+        if data.get('llm_timeout_sec') is not None:
+            route.timeout_sec = int(data['llm_timeout_sec'])
+        route.save()
+        return self.ok(message='数据库凭据与路由配置已更新；所有 worker 下次请求统一生效')
 
 
 class LlmCredentialsView(_BaseView):
@@ -647,16 +644,19 @@ class LlmCredentialsView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def get(self, request):
         from monitor.models import LLMProviderCredential
         creds = LLMProviderCredential.objects.all().order_by('priority', '-weight', 'id')
         items = []
         for c in creds:
-            api_key = c.api_key or ''
+            try:
+                api_key = c.get_api_key()
+            except ValueError:
+                api_key = ''
             masked = f"{api_key[:4]}****{api_key[-4:]}" if len(api_key) > 8 else ("****" if api_key else "")
             items.append({
                 'id': c.id,
@@ -664,7 +664,7 @@ class LlmCredentialsView(_BaseView):
                 'provider_type': c.provider_type,
                 'base_url': c.base_url,
                 'model_name': c.model_name,
-                'proxy_url': c.proxy_url,
+                'proxy_managed_by_deployment': True,
                 'api_key_masked': masked,
                 'has_key': bool(api_key),
                 'is_active': c.is_active,
@@ -679,21 +679,25 @@ class LlmCredentialsView(_BaseView):
             })
         return self.ok(credentials=items, total=len(items))
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def post(self, request):
-        if not request.user.is_superuser:
-            return self.err('FORBIDDEN', '仅超级管理员可添加大模型凭据', 403)
-
         from monitor.models import LLMProviderCredential
+        from monitor.llm.security import LLMEndpointValidationError, validate_llm_base_url
         data = self.body(request)
         name = (data.get('name') or '').strip()
         provider_type = data.get('provider_type') or 'custom'
         base_url = (data.get('base_url') or '').strip()
         api_key = (data.get('api_key') or '').strip()
         model_name = (data.get('model_name') or '').strip()
-        proxy_url = (data.get('proxy_url') or '').strip()
+        if (data.get('proxy_url') or '').strip():
+            return self.err('BAD_REQUEST', '代理只能通过部署期 LLM_PROXY_URL 配置', 400)
 
         if not name or not base_url or not model_name:
             return self.err('BAD_REQUEST', '名称、接入端点(Base URL)与模型名称为必填项', 400)
+        try:
+            base_url = validate_llm_base_url(base_url)
+        except LLMEndpointValidationError as exc:
+            return self.err('BAD_REQUEST', str(exc), 400)
 
         cred = LLMProviderCredential.objects.create(
             name=name,
@@ -701,7 +705,7 @@ class LlmCredentialsView(_BaseView):
             base_url=base_url,
             api_key=api_key,
             model_name=model_name,
-            proxy_url=proxy_url,
+            proxy_url='',
             is_active=bool(data.get('is_active', True)),
             priority=int(data.get('priority', 10)),
             weight=int(data.get('weight', 1)),
@@ -714,15 +718,13 @@ class LlmCredentialDetailView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def put(self, request, cred_id):
-        if not request.user.is_superuser:
-            return self.err('FORBIDDEN', '仅超级管理员可修改大模型凭据', 403)
-
         from monitor.models import LLMProviderCredential
+        from monitor.llm.security import LLMEndpointValidationError, validate_llm_base_url
         cred = LLMProviderCredential.objects.filter(id=cred_id).first()
         if not cred:
             return self.err('NOT_FOUND', '该凭据不存在', 404)
@@ -731,15 +733,23 @@ class LlmCredentialDetailView(_BaseView):
         if 'name' in data and data['name'].strip():
             cred.name = data['name'].strip()
         if 'provider_type' in data:
+            allowed_types = {value for value, _label in LLMProviderCredential.PROVIDER_CHOICES}
+            if data['provider_type'] not in allowed_types:
+                return self.err('BAD_REQUEST', '不支持的服务商类型', 400)
             cred.provider_type = data['provider_type']
         if 'base_url' in data and data['base_url'].strip():
-            cred.base_url = data['base_url'].strip()
+            try:
+                cred.base_url = validate_llm_base_url(data['base_url'].strip())
+            except LLMEndpointValidationError as exc:
+                return self.err('BAD_REQUEST', str(exc), 400)
         if 'api_key' in data and data['api_key'].strip():
             cred.api_key = data['api_key'].strip()
         if 'model_name' in data and data['model_name'].strip():
             cred.model_name = data['model_name'].strip()
         if 'proxy_url' in data:
-            cred.proxy_url = data['proxy_url'].strip()
+            if (data['proxy_url'] or '').strip():
+                return self.err('BAD_REQUEST', '代理只能通过部署期 LLM_PROXY_URL 配置', 400)
+            cred.proxy_url = ''
         if 'is_active' in data:
             cred.is_active = bool(data['is_active'])
         if 'priority' in data:
@@ -751,9 +761,6 @@ class LlmCredentialDetailView(_BaseView):
         return self.ok(message="凭据配置已成功更新！")
 
     def delete(self, request, cred_id):
-        if not request.user.is_superuser:
-            return self.err('FORBIDDEN', '仅超级管理员可删除大模型凭据', 403)
-
         from monitor.models import LLMProviderCredential
         deleted, _ = LLMProviderCredential.objects.filter(id=cred_id).delete()
         if not deleted:
@@ -766,7 +773,7 @@ class LlmCredentialPingView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
@@ -778,16 +785,15 @@ class LlmCredentialPingView(_BaseView):
         if not cred:
             return self.err('NOT_FOUND', '凭据不存在', 404)
 
-        provider = OpenAICompatProvider(
-            base_url=cred.base_url,
-            api_key=cred.api_key,
-            model=cred.model_name,
-            timeout=15,
-            proxy_url=cred.proxy_url
-        )
         t0 = time.time()
         result = {'ok': False, 'latency_ms': 0, 'model': cred.model_name}
         try:
+            provider = OpenAICompatProvider(
+                base_url=cred.base_url,
+                api_key=cred.get_api_key(),
+                model=cred.model_name,
+                timeout=15,
+            )
             res = provider.chat(
                 [{'role': 'user', 'content': "ping, 请确认连通并回复 pong"}],
                 scene='ping', max_tokens=150, json_mode=False
@@ -818,22 +824,12 @@ class LlmRoutesView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
     def get(self, request):
         from monitor.models import LLMSceneRoutingRule, LLMProviderCredential
-        # 初始化默认场景规则（若不存在）
-        default_scenes = [
-            ('copilot_chat', 'Copilot 专家日常对话', '处理 DBA 日常交互问答、等待事件探查与执行建议'),
-            ('rca_deep_reasoning', 'RCA 3.0 根因深度推理', '针对 P1/P2 重大事故进行多跳因果链分析与证据挖掘'),
-            ('sql_explain_opt', 'SQL 执行计划与索引优化', '解析慢查询执行计划树并推导复合索引优化方案'),
-            ('incident_warroom', '排障作战室自愈决策', '作战室自愈剧本 Dry-Run 预演与影响面安全评估'),
-        ]
-        for code, name, desc in default_scenes:
-            LLMSceneRoutingRule.objects.get_or_create(scene_code=code, defaults={'scene_name': name, 'description': desc})
-
         rules = LLMSceneRoutingRule.objects.all()
         items = []
         for r in rules:
@@ -851,10 +847,8 @@ class LlmRoutesView(_BaseView):
             })
         return self.ok(routes=items)
 
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def put(self, request):
-        if not request.user.is_superuser:
-            return self.err('FORBIDDEN', '仅超级管理员可调整场景路由规则', 403)
-
         from monitor.models import LLMSceneRoutingRule
         data = self.body(request)
         scene_code = data.get('scene_code')
@@ -884,27 +878,40 @@ class LlmTestConnectionView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
-    @method_decorator(require_permission(Perm.ALERT_CONFIG_VIEW))
+    @method_decorator(require_permission(Perm.ALERT_CONFIG_MANAGE))
     def dispatch(self, *a, **k):
         return super().dispatch(*a, **k)
 
     def post(self, request):
+        from monitor.models import LLMProviderCredential
         data = self.body(request)
         override_base = (data.get('llm_base_url') or '').strip()
         override_key = (data.get('llm_api_key') or '').strip()
         override_model = (data.get('llm_model') or '').strip()
 
+        default_credential = LLMProviderCredential.objects.filter(
+            name='系统默认').first() or LLMProviderCredential.objects.filter(
+                is_active=True).order_by('priority', '-weight').first()
         from monitor.llm.providers import OpenAICompatProvider
+        stored_key = ''
+        if default_credential:
+            try:
+                stored_key = default_credential.get_api_key()
+            except ValueError:
+                stored_key = ''
         result = {
             'ok': False,
-            'model': override_model or getattr(settings, 'LLM_MODEL', ''),
+            'model': override_model or (default_credential.model_name if default_credential
+                                        else getattr(settings, 'LLM_MODEL', '')),
             'latency_ms': 0,
         }
         try:
             provider = OpenAICompatProvider(
-                base_url=override_base or getattr(settings, 'LLM_BASE_URL', ''),
-                api_key=override_key or getattr(settings, 'LLM_API_KEY', ''),
-                model=override_model or getattr(settings, 'LLM_MODEL', ''),
+                base_url=override_base or (default_credential.base_url if default_credential
+                                           else getattr(settings, 'LLM_BASE_URL', '')),
+                api_key=override_key or stored_key or getattr(settings, 'LLM_API_KEY', ''),
+                model=override_model or (default_credential.model_name if default_credential
+                                         else getattr(settings, 'LLM_MODEL', '')),
                 timeout=15
             )
             t0 = time.time()
@@ -947,7 +954,8 @@ class CopilotChatView(_BaseView):
                 return self.err('NOT_FOUND', f'数据库 {config_id} 不存在或无权访问', 404)
 
         history = data.get('history') or []
-        res = run_copilot_chat(query, config_id=config_id, history=history)
+        res = run_copilot_chat(
+            query, config_id=config_id, history=history, user=request.user)
         return self.ok(**res)
 
 

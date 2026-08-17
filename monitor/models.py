@@ -49,7 +49,23 @@ def _read_ordered_children(parent, manager_name, phase=None):
         qs = qs.filter(phase=phase)
     return [o.payload for o in qs.order_by('seq')]
 
+
+class DatabaseConfigQuerySet(models.QuerySet):
+    """统一的数据范围入口，避免新视图/工具遗漏实例隔离。"""
+
+    def visible_to(self, user):
+        if user is None:
+            return self.none()
+        from monitor.auth import get_user_database_ids
+        allowed_ids = get_user_database_ids(user)
+        if allowed_ids is None:
+            return self
+        return self.filter(id__in=allowed_ids)
+
+
 class DatabaseConfig(models.Model):
+    objects = DatabaseConfigQuerySet.as_manager()
+
     # 相当于: name VARCHAR(100) NOT NULL COMMENT '连接别名'
     name = models.CharField(max_length=100, verbose_name="连接别名", help_text="例如: 核心交易库_主节点")
     
@@ -2284,9 +2300,13 @@ class LLMProviderCredential(models.Model):
     name = models.CharField(max_length=64, verbose_name="配置名称", help_text="如 MiniMax-主力账号01")
     provider_type = models.CharField(max_length=32, choices=PROVIDER_CHOICES, default='custom', verbose_name="供应商类型")
     base_url = models.CharField(max_length=255, verbose_name="API 接入端点 Base URL")
-    api_key = models.CharField(max_length=255, blank=True, default='', verbose_name="加密存储的 API Key")
+    api_key = models.CharField(max_length=512, blank=True, default='', verbose_name="AES-GCM 加密存储的 API Key")
     model_name = models.CharField(max_length=64, verbose_name="模型 ID", help_text="如 MiniMax-Text-01 / gemini-1.5-pro")
-    proxy_url = models.CharField(max_length=255, blank=True, default='', verbose_name="本地代理 URL", help_text="如 http://127.0.0.1:7890 / socks5://127.0.0.1:1080")
+    proxy_url = models.CharField(
+        max_length=255, blank=True, default='',
+        verbose_name="已停用的历史代理 URL",
+        help_text="仅为迁移兼容保留；运行时忽略，代理由部署期 LLM_PROXY_URL 管理",
+    )
     
     # 状态与调度
     is_active = models.BooleanField(default=True, db_index=True, verbose_name="是否启用")
@@ -2311,6 +2331,20 @@ class LLMProviderCredential(models.Model):
 
     def __str__(self):
         return f"{self.name} ({self.provider_type} / {self.model_name})"
+
+    def set_api_key(self, plaintext: str):
+        from monitor.crypto import encrypt_password
+        self.api_key = encrypt_password(plaintext or '')
+
+    def get_api_key(self) -> str:
+        from monitor.crypto import decrypt_password
+        return decrypt_password(self.api_key)
+
+    def save(self, *args, **kwargs):
+        # objects.create/admin/脚本都必须经过同一条落库加密防线。
+        from monitor.crypto import encrypt_password
+        self.api_key = encrypt_password(self.api_key or '')
+        return super().save(*args, **kwargs)
 
 
 class LLMSceneRoutingRule(models.Model):

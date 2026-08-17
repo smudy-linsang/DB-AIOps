@@ -99,7 +99,6 @@ class PlaybookExecutor:
         """
         Dry-Run 预演安全评估
         """
-        init_default_playbooks()
         template = PlaybookTemplate.objects.filter(code=template_code, is_active=True).first()
         if not template:
             return {'status': 'REJECTED', 'reason': f'剧本 {template_code} 不存在或已停用'}

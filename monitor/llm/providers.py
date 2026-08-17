@@ -3,7 +3,7 @@
 Phase 8A: LLM Provider (phase8/20 §2)。
 
 OpenAI 兼容 Chat Completions / Embeddings 单协议, requests 直连不引入 SDK。
-本地 Ollama (http://localhost:11434/v1) 与云 API 仅是 BASE_URL/KEY/MODEL 差异。
+Web/数据库配置的端点必须使用 HTTPS；内网模型需由部署白名单显式授权。
 
 异常体系:
     LLMTimeout      -- 超时 (不重试, 交由调用方降级)
@@ -72,15 +72,19 @@ def _log_call(scene: str, status: str, *, incident_id: str = '', model: str = ''
 
 
 class OpenAICompatProvider:
-    """OpenAI 兼容 Provider。支持 HTTP / SOCKS5 本地代理转发 (如 http://127.0.0.1:7890)。"""
+    """OpenAI 兼容 Provider；代理只能来自部署期受控配置。"""
 
     def __init__(self, base_url: str = None, api_key: str = None, model: str = None,
                  timeout: int = None, proxy_url: str = None):
-        self.base_url = (base_url or getattr(settings, 'LLM_BASE_URL', '')).rstrip('/')
+        from monitor.llm.security import validate_deployment_proxy_url, validate_llm_base_url
+        self.base_url = validate_llm_base_url(
+            base_url or getattr(settings, 'LLM_BASE_URL', ''))
         self.api_key = api_key or getattr(settings, 'LLM_API_KEY', '')
         self.model = model or getattr(settings, 'LLM_MODEL', '')
         self.timeout = int(timeout or getattr(settings, 'LLM_TIMEOUT_SEC', 25))
-        self.proxy_url = proxy_url or getattr(settings, 'LLM_PROXY_URL', '')
+        # 调用方参数只为兼容旧签名；运行时只信任部署期 settings。
+        self.proxy_url = validate_deployment_proxy_url(
+            getattr(settings, 'LLM_PROXY_URL', ''))
 
     # ------------------------------------------------------------------
     def _post(self, path: str, payload: dict, timeout: int = None) -> dict:
@@ -101,8 +105,9 @@ class OpenAICompatProvider:
                 'https': self.proxy_url,
             }
         try:
-            resp = requests.post(url, json=payload, headers=headers,
-                                 timeout=timeout or self.timeout, proxies=proxies)
+            resp = requests.post(
+                url, json=payload, headers=headers, timeout=timeout or self.timeout,
+                proxies=proxies, allow_redirects=False)
         except requests.Timeout as e:
             raise LLMTimeout(f"LLM 请求超时 (>{timeout or self.timeout}s): {url}") from e
         except requests.RequestException as e:
@@ -178,20 +183,20 @@ class OpenAICompatProvider:
             url = f"{clean_base}{path}"
             headers = {'Content-Type': 'application/json'}
             if self.api_key:
-                # 兼容 Google AI Studio API Key (x-goog-api-key 或 URL ?key=)
+                # API Key 只进请求头，禁止进入 URL、代理日志或访问日志。
                 headers['x-goog-api-key'] = self.api_key
                 if self.api_key.startswith('ya29.'): # OAuth2 Token 才发 Bearer
                     headers['Authorization'] = f"Bearer {self.api_key}"
-                if '?' not in url:
-                    url = f"{url}?key={self.api_key}"
 
             proxies = None
             if self.proxy_url:
                 proxies = {'http': self.proxy_url, 'https': self.proxy_url}
 
             try:
-                resp = requests.post(url, json=gemini_payload, headers=headers,
-                                     timeout=timeout or self.timeout, proxies=proxies)
+                resp = requests.post(
+                    url, json=gemini_payload, headers=headers,
+                    timeout=timeout or self.timeout, proxies=proxies,
+                    allow_redirects=False)
             except requests.Timeout as e:
                 raise LLMTimeout(f"Gemini API 请求超时 (>{timeout or self.timeout}s): {url}") from e
             except requests.RequestException as e:

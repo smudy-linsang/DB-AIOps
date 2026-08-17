@@ -68,6 +68,7 @@ SPECS = {
     'LLM_MAX_TOKENS':          Spec('LLM_MAX_TOKENS', 2048, int, lambda v: v >= 64),
     'LLM_TIMEOUT_SEC':         Spec('LLM_TIMEOUT_SEC', 25, int, lambda v: v >= 1),
     'LLM_PROXY_URL':           Spec('LLM_PROXY_URL', '', str),
+    'LLM_ALLOWED_ENDPOINT_HOSTS': Spec('LLM_ALLOWED_ENDPOINT_HOSTS', (), tuple),
     'AGENT_ENABLED':           Spec('AGENT_ENABLED', False, bool),
     'EMBED_ENABLED':           Spec('EMBED_ENABLED', False, bool),
 }

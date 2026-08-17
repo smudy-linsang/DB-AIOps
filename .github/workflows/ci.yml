@@ -25,6 +25,9 @@ jobs:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v6
+        with:
+          # 红线扫描在干净检出时比较 HEAD^..HEAD，必须保留父提交。
+          fetch-depth: 2
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'

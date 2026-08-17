@@ -1,5 +1,5 @@
 /**
- * CopilotDrawer - DB-AIOps 全局智能交互助手 (Tool Calling + Action Cards 驱动)
+ * CopilotDrawer - DB-AIOps 全局智能交互助手（关键词证据路由 + Action Cards）
  * 支持：实时 ASH 探测、执行计划诊断、Action Cards 交互动作卡片（一键 Kill/扩容/跳转）
  */
 import React, { useState, useEffect, useRef } from 'react';
@@ -35,7 +35,7 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
   const [messages, setMessages] = useState([
     {
       role: 'assistant',
-      content: '👋 您好！我是 **DB-AIOps 智能运维 Copilot 助手**。\n\n我已全面接入 **【运维工具集 (Tool Calling)】** 与 **【交互动作卡片 (Action Cards)】**：\n- ⏱️ `get_realtime_ash` 实时探查会话与阻塞链\n- 🔬 `explain_sql` 自动诊断执行计划与缺少索引\n- ⚡ `dry_run_playbook` 预案预演与影响评估\n- 🎴 在气泡中直接输出【立即 Kill 会话】、【一键扩容】等操作卡片\n\n请随时输入您遇到的数据库问题或 SQL！',
+      content: '👋 您好！我是 **DB-AIOps 智能运维 Copilot 助手**。\n\n我已接入 **【关键词证据路由】** 与 **【交互动作卡片 (Action Cards)】**：\n- ⏱️ `get_realtime_ash` 读取真实会话采样与阻塞链\n- 🔬 `explain_sql` 展示平台已采集的执行计划\n- ⚡ Playbook 预演从事故页进入并绑定证据与审批链\n- 🧭 对话中提供性能中心等安全导航卡片\n\n工具无数据时会明确说明，不会用样例数据补齐事实。',
       time: new Date().toLocaleTimeString(),
       source: 'system'
     }
@@ -236,7 +236,7 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
             <div>
               <Text strong style={{ fontSize: 16 }}>DB-AIOps Copilot 专家助手</Text>
               <div>
-                <Tag color="purple">Tool Calling 增强</Tag>
+                <Tag color="purple">证据路由增强</Tag>
                 <Tag color="cyan">Action Cards</Tag>
               </div>
             </div>
@@ -507,7 +507,7 @@ export default function CopilotDrawer({ visible, onClose, initialDbId }) {
         {loading && (
           <div style={{ display: 'flex', alignItems: 'center', gap: 8, padding: '8px 12px', background: '#fff', borderRadius: 8, width: 220 }}>
             <Spin size="small" />
-            <Text type="secondary" style={{ fontSize: 12 }}>Copilot 工具调用与推理中...</Text>
+            <Text type="secondary" style={{ fontSize: 12 }}>Copilot 证据检索与推理中...</Text>
           </div>
         )}
         <div ref={messagesEndRef} />

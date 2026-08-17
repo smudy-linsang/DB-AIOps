@@ -64,7 +64,8 @@ class LLMRouterEngine:
         统一入口：带场景路由、健康检测、429 智能避让与 Failover 容灾降级的 Chat Completions
         """
         # 1. 查找场景超参定义
-        rule = LLMSceneRoutingRule.objects.filter(scene_code=scene).first()
+        rule = (LLMSceneRoutingRule.objects.filter(scene_code=scene).first()
+                or LLMSceneRoutingRule.objects.filter(scene_code='global_default').first())
         temperature = kwargs.get('temperature') or (rule.temperature if rule else 0.1)
         max_tokens = kwargs.get('max_tokens') or (rule.max_tokens if rule else 2048)
         timeout_sec = kwargs.get('timeout') or (rule.timeout_sec if rule else 25)
@@ -88,16 +89,14 @@ class LLMRouterEngine:
                 })
                 continue
 
-            provider = OpenAICompatProvider(
-                base_url=cred.base_url,
-                api_key=cred.api_key,
-                model=cred.model_name,
-                timeout=timeout_sec,
-                proxy_url=getattr(cred, 'proxy_url', '')
-            )
-
             t0 = time.time()
             try:
+                provider = OpenAICompatProvider(
+                    base_url=cred.base_url,
+                    api_key=cred.get_api_key(),
+                    model=cred.model_name,
+                    timeout=timeout_sec,
+                )
                 result: ChatResult = provider.chat(
                     messages,
                     temperature=temperature,

@@ -1,6 +1,6 @@
 # -*- coding: utf-8 -*-
 """
-DB-AIOps Copilot 核心引擎与工具集 (Tool Calling + Action Cards)
+DB-AIOps Copilot 核心引擎与证据路由工具集 (Evidence Router + Action Cards)
 ============================================================
 提供：
 1. 核心运维工具集：get_realtime_ash, explain_sql, dry_run_playbook
@@ -9,14 +9,14 @@ DB-AIOps Copilot 核心引擎与工具集 (Tool Calling + Action Cards)
 """
 import json
 import logging
-import time
 import re
+import time
+from datetime import timedelta
 from typing import Dict, Any, List, Optional
 from django.conf import settings
+from django.db.models import F, Q
 from django.utils import timezone
-from monitor.models import DatabaseConfig, MonitorLog, AlertLog, Incident, AuditLog
-from monitor.llm import llm_enabled
-from monitor.llm.providers import get_chat_provider, LLMError
+from monitor.models import DatabaseConfig, MonitorLog, AlertLog, Incident
 from monitor.playbook_engine_v2 import PlaybookExecutor
 
 logger = logging.getLogger("monitor.copilot")
@@ -35,16 +35,19 @@ COPILOT_SYSTEM_PROMPT = """你是 DB-AIOps 企业级数据库智能运维平台�
 2. 结合给定的数据库当前快照信息与工具产出，进行深度根因推导并给出切实可行的处置建议；
 3. 输出清晰、专业、排版优良的 Markdown 格式（含表格、代码高亮、重点加粗）；
 4. 当发现长事务锁阻塞、表空间告急或卡死慢 SQL 时，平台会自动挂载【交互式动作卡片 (Action Cards)】供 DBA 一键点击执行。
+
+证据约束：工具返回 `available=false` 表示当前没有可核验观测。此时必须明确回答“暂无数据”，
+不得猜测、补齐、生成样例对象或把推测表述为真实数据库状态。
 """
 
 
 # =============================================================================
-# 1. 核心运维工具集 (Tool Calling Functions)
+# 1. 核心运维证据工具集
 # =============================================================================
 
-def get_global_managed_inventory() -> Dict[str, Any]:
-    """工具 1: 全局纳管数据库资产与拓扑感知"""
-    configs = DatabaseConfig.objects.filter(is_active=True)
+def get_global_managed_inventory(configs=None) -> Dict[str, Any]:
+    """工具 1: 调用者数据范围内的纳管数据库资产与拓扑。"""
+    configs = configs.filter(is_active=True) if configs is not None else DatabaseConfig.objects.none()
     summary = []
     for c in configs:
         last_log = MonitorLog.objects.filter(config=c).order_by('-create_time').first()
@@ -70,12 +73,19 @@ def get_global_managed_inventory() -> Dict[str, Any]:
     }
 
 
-def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None) -> Dict[str, Any]:
+def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None, configs=None) -> Dict[str, Any]:
     """工具 2: 告警全景与智能基线感知 (区分阈值规则与 3-Sigma 动态基线偏离)"""
     from monitor.models import BaselineModel
     from django.db.models import Count
     
-    alert_qs = AlertLog.objects.all()
+    if config:
+        config_ids = [config.id]
+    elif configs is not None:
+        config_ids = configs.values_list('id', flat=True)
+    else:
+        config_ids = []
+
+    alert_qs = AlertLog.objects.filter(config_id__in=config_ids)
     if config:
         alert_qs = alert_qs.filter(config=config)
         
@@ -87,7 +97,7 @@ def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None) -> D
     ).order_by('-freq_count')[:5]
 
     # 基线模型覆盖状态
-    baseline_qs = BaselineModel.objects.all()
+    baseline_qs = BaselineModel.objects.filter(config_id__in=config_ids)
     if config:
         baseline_qs = baseline_qs.filter(config=config)
     baseline_count = baseline_qs.count()
@@ -114,48 +124,107 @@ def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None) -> D
 
 
 def get_realtime_ash(config: DatabaseConfig, sql_id: Optional[str] = None) -> Dict[str, Any]:
-    """工具 3: 实时探查 ASH 等待事件与 SQL 文本"""
+    """工具 3: 读取最近两分钟的真实 ASH-lite 样本；没有样本即明确降级。"""
+    from monitor.timeseries import get_timeseries_storage
+
+    rows = get_timeseries_storage().query_session_samples(
+        config.id, timezone.now() - timedelta(seconds=120))
+    if sql_id:
+        rows = [r for r in rows if str(r.get('sql_id') or r.get('sql_digest') or '') == str(sql_id)]
+    if not rows:
+        return {
+            'available': False,
+            'reason': '最近 120 秒暂无 ASH 会话采样',
+            'observed_at': None,
+            'sql_id': sql_id,
+            'sql_text': None,
+            'blocked_session_count': 0,
+            'top_sessions': [],
+        }
+
+    observed_at = max((r.get('time') for r in rows if r.get('time')), default=None)
+    latest_rows = [r for r in rows if not observed_at or r.get('time') == observed_at]
+    ranked = sorted(
+        latest_rows,
+        key=lambda r: float(r.get('wait_secs') or r.get('active_secs') or 0),
+        reverse=True,
+    )
+    representative = next((r for r in ranked if r.get('sql_text')), ranked[0])
+    wait_values = [float(r.get('wait_secs') or 0) * 1000 for r in latest_rows]
     return {
-        'sql_id': sql_id or '8a7fbc6d',
-        'sql_text': 'UPDATE trade_order SET status = 2 WHERE batch_id = 90218',
-        'wait_class': 'Concurrency',
-        'wait_event': 'enq: TX - row lock contention' if config.db_type == 'oracle' else 'lock_wait',
-        'avg_wait_time_ms': 142.5,
-        'blocked_session_count': 18,
-        'sample_time': timezone.now().strftime('%H:%M:%S'),
+        'available': True,
+        'reason': '',
+        'observed_at': observed_at.isoformat() if hasattr(observed_at, 'isoformat') else str(observed_at or ''),
+        'sql_id': representative.get('sql_id') or representative.get('sql_digest'),
+        'sql_text': representative.get('sql_text'),
+        'wait_class': representative.get('wait_class'),
+        'wait_event': representative.get('wait_event'),
+        'avg_wait_time_ms': round(sum(wait_values) / len(wait_values), 2) if wait_values else None,
+        'blocked_session_count': sum(1 for r in latest_rows if r.get('is_blocked')),
         'top_sessions': [
-            {'session_id': '1845', 'user': 'app_trade_user', 'state': 'WAITING', 'holding_locks': True},
-            {'session_id': '2019', 'user': 'order_service', 'state': 'BLOCKED', 'holding_locks': False}
-        ]
+            {
+                'session_id': r.get('session_id'),
+                'user': r.get('user_name'),
+                'state': r.get('state'),
+                'is_blocked': bool(r.get('is_blocked')),
+                'blocker_id': r.get('blocker_id'),
+                'wait_event': r.get('wait_event'),
+            }
+            for r in ranked[:5]
+        ],
     }
 
 
 def explain_sql(config: DatabaseConfig, sql_text: str) -> Dict[str, Any]:
-    """工具 4: 自动生成执行计划与缺少索引诊断"""
-    missing_index = None
-    if 'WHERE' in sql_text.upper() and 'batch_id' in sql_text:
-        missing_index = {
-            'table': 'trade_order',
-            'suggested_index_ddl': 'CREATE INDEX idx_trade_order_batch_status ON trade_order(batch_id, status);',
-            'estimated_improvement': '92.4% (从 Full Table Scan 优化为 Index Range Scan)'
+    """工具 4: 只展示平台已经真实采集的执行计划。"""
+    from monitor.models import SqlPlan
+    from monitor.sqlfingerprint import unified_digest
+
+    digest = unified_digest(config.db_type, None, sql_text)
+    plan = SqlPlan.objects.filter(
+        config=config, sql_digest=digest, is_current=True).order_by('-captured_at').first()
+    if not plan:
+        return {
+            'available': False,
+            'reason': '该 SQL 暂无已采集执行计划；请先在性能中心执行受控 EXPLAIN',
+            'sql_text': sql_text,
+            'sql_digest': digest,
+            'execution_plan_tree': [],
+            'missing_index_suggestion': None,
         }
 
+    suggestions = []
+    try:
+        import dataclasses
+        from monitor.index_advisor import IndexAdvisor
+        from monitor.sqlfingerprint import normalize
+        normalized = normalize(sql_text).replace('`', '').replace('[', '').replace(']', '')
+        for candidate in (IndexAdvisor().analyze_queries(
+                [{'query': normalized, 'exec_count': 1}]) or [])[:3]:
+            suggestions.append(
+                dataclasses.asdict(candidate) if dataclasses.is_dataclass(candidate) else str(candidate))
+    except Exception as exc:
+        logger.debug("Copilot 索引建议生成失败: %s", exc)
     return {
+        'available': True,
+        'reason': '',
         'sql_text': sql_text,
+        'sql_digest': digest,
         'db_type': config.db_type,
-        'execution_plan_tree': [
-            {'node': 'UPDATE trade_order', 'cost': 18450.2, 'rows': 150000},
-            {'node': ' -> Filter: (batch_id = 90218)', 'cost': 18450.2, 'rows': 150000},
-            {'node': '     -> Table scan on trade_order (全表扫描未命中索引)', 'cost': 18400.0, 'rows': 150000}
-        ],
-        'missing_index_suggestion': missing_index,
-        'risk_factors': ['大表全表扫描', '行锁升级为大范围间隙锁风险']
+        'plan_hash': plan.plan_hash,
+        'execution_plan_tree': plan.plan_json,
+        'plan_text': plan.plan_text,
+        'cost_total': plan.cost_total,
+        'captured_at': plan.captured_at.isoformat(),
+        'source': plan.source,
+        'index_suggestions': suggestions,
+        'missing_index_suggestion': suggestions[0] if suggestions else None,
     }
 
 
-def get_tablespace_and_capacity_status(config: Optional[DatabaseConfig] = None) -> Dict[str, Any]:
+def get_tablespace_and_capacity_status(config: Optional[DatabaseConfig] = None, configs=None) -> Dict[str, Any]:
     """工具: 获取全库或指定库的各表空间使用率、磁盘占用与容量预测"""
-    configs = [config] if config else DatabaseConfig.objects.filter(is_active=True)
+    configs = [config] if config else (configs.filter(is_active=True) if configs is not None else [])
     results = []
     for c in configs:
         last_log = MonitorLog.objects.filter(config=c).order_by('-create_time').first()
@@ -172,30 +241,18 @@ def get_tablespace_and_capacity_status(config: Optional[DatabaseConfig] = None) 
             except Exception as e:
                 logger.debug("解析表空间非致命异常: %s", e)
 
-        # 兜底默认表空间结构
-        if not tablespaces:
-            if c.db_type == 'oracle':
-                tablespaces = [
-                    {'name': 'SYSTEM', 'used_mb': 1850, 'total_mb': 2048, 'used_pct': 90.3, 'status': 'ONLINE', 'autoextend': 'YES'},
-                    {'name': 'SYSAUX', 'used_mb': 1420, 'total_mb': 2048, 'used_pct': 69.3, 'status': 'ONLINE', 'autoextend': 'YES'},
-                    {'name': 'USERS', 'used_mb': 8840, 'total_mb': 10240, 'used_pct': 86.3, 'status': 'ONLINE', 'autoextend': 'YES'},
-                    {'name': 'UNDOTBS1', 'used_mb': 620, 'total_mb': 4096, 'used_pct': 15.1, 'status': 'ONLINE', 'autoextend': 'YES'},
-                    {'name': 'TEMP', 'used_mb': 310, 'total_mb': 2048, 'used_pct': 15.1, 'status': 'ONLINE', 'autoextend': 'YES'},
-                ]
-            else:
-                tablespaces = [
-                    {'name': f'{c.name}_data', 'used_mb': 5400, 'total_mb': 10240, 'used_pct': 52.7, 'status': 'ONLINE'},
-                    {'name': f'{c.name}_index', 'used_mb': 2100, 'total_mb': 5120, 'used_pct': 41.0, 'status': 'ONLINE'},
-                ]
-
         results.append({
             'config_id': c.id,
             'db_name': c.name,
             'db_type': c.db_type,
+            'available': bool(tablespaces),
+            'reason': '' if tablespaces else '最新监控快照中没有表空间采集数据',
+            'observed_at': last_log.create_time.isoformat() if last_log and tablespaces else None,
             'tablespaces': tablespaces,
             'high_watermark_count': len([t for t in tablespaces if float(t.get('used_pct') or 0) >= 85])
         })
     return {
+        'available': any(r['available'] for r in results),
         'total_analyzed': len(results),
         'databases_tablespace_report': results
     }
@@ -206,38 +263,49 @@ def dry_run_playbook(config: DatabaseConfig, code: str, params: Dict[str, Any]) 
     return PlaybookExecutor.evaluate_dryrun(code, config, params)
 
 
-def recall_memory_palace(query: str, config: Optional[DatabaseConfig] = None) -> List[Dict[str, Any]]:
+def recall_memory_palace(query: str, config: Optional[DatabaseConfig] = None,
+                         configs=None, include_global: bool = False) -> List[Dict[str, Any]]:
     """工具 6: 记忆宫殿 (Palace of Long-term Memory) 长期排障与偏好回忆"""
     from monitor.models import CopilotMemory
     
     mem_qs = CopilotMemory.objects.all()
     if config:
         mem_qs = mem_qs.filter(config=config)
+    elif configs is None:
+        mem_qs = mem_qs.none()
+    elif not include_global:
+        mem_qs = mem_qs.filter(config_id__in=configs.values_list('id', flat=True))
         
     keywords = [w for w in re.split(r'[\s,，、_]+', query) if len(w) >= 2]
-    memories = []
-    
-    for mem in mem_qs[:20]:
-        match = False
-        if not keywords:
-            match = True
-        else:
-            searchable = f"{mem.locus_key} {mem.title} {mem.content} {' '.join(mem.tags)}".lower()
-            if any(k.lower() in searchable for k in keywords):
-                match = True
-        if match:
-            mem.access_count += 1
-            mem.last_recalled_at = timezone.now()
-            mem.save(update_fields=['access_count', 'last_recalled_at'])
-            memories.append({
-                'memory_type': mem.get_memory_type_display(),
-                'locus_key': mem.locus_key,
-                'title': mem.title,
-                'content': mem.content,
-                'tags': mem.tags,
-                'importance': mem.importance,
-            })
-    return memories[:5]
+    # 中文通常没有空格；补充 2-4 字滑窗，使“回忆容量经验”能在 DB 层匹配“容量”。
+    chinese_runs = re.findall(r'[\u4e00-\u9fff]{2,}', query)
+    for run in chinese_runs:
+        for width in range(2, min(4, len(run)) + 1):
+            keywords.extend(run[index:index + width]
+                            for index in range(0, len(run) - width + 1))
+    keywords = list(dict.fromkeys(keywords))[:32]
+    if keywords:
+        predicate = Q()
+        for keyword in keywords:
+            predicate |= Q(locus_key__icontains=keyword)
+            predicate |= Q(title__icontains=keyword)
+            predicate |= Q(content__icontains=keyword)
+        mem_qs = mem_qs.filter(predicate)
+
+    matched = list(mem_qs.order_by('-importance', '-updated_at')[:5])
+    if matched:
+        CopilotMemory.objects.filter(id__in=[m.id for m in matched]).update(
+            access_count=F('access_count') + 1,
+            last_recalled_at=timezone.now(),
+        )
+    return [{
+        'memory_type': mem.get_memory_type_display(),
+        'locus_key': mem.locus_key,
+        'title': mem.title,
+        'content': mem.content,
+        'tags': mem.tags,
+        'importance': mem.importance,
+    } for mem in matched]
 
 
 # =============================================================================
@@ -349,41 +417,15 @@ def _build_action_cards(query: str, config: Optional[DatabaseConfig], tool_resul
     if any(k in q for k in ['锁', '阻塞', 'lock', 'block', '卡死', 'kill', '会话', 'session']):
         ash_info = tool_results.get('ash') or {}
         cards.append({
-            'card_type': 'PLAYBOOK_EXECUTE',
-            'title': '⚡ 立即安全终止根源阻塞会话',
-            'playbook_code': 'KILL_ROOT_BLOCKER',
-            'config_id': config.id,
-            'db_name': config.name,
-            'risk_level': 'low',
-            'params': {
-                'session_id': '1845',
-                'username': 'app_trade_user',
-                'sql_id': ash_info.get('sql_id', '8a7fbc6d')
-            },
-            'desc': '检测到会话 1845 持有行锁超时并阻塞 18 个下游事务，点击将执行 Dry-Run 安全检查并一键释放锁。'
-        })
-        cards.append({
             'card_type': 'NAVIGATE',
             'title': '📊 打开实时阻塞依赖图谱 (Blocking Tree)',
             'target_url': f'/databases/{config.id}/performance',
-            'desc': '跳转到性能中心，全屏查看会话因果树与锁等待拓扑。'
+            'desc': ('跳转到性能中心，全屏查看会话因果树与锁等待拓扑。'
+                     if ash_info.get('available') else '当前暂无 ASH 样本，可在性能中心核对采集状态。')
         })
 
     # 2. 表空间/磁盘容量类 -> 挂载【一键扩容表空间】卡片
-    if any(k in q for k in ['空间', '表空间', '磁盘', '容量', 'tablespace', 'disk', '水位', '扩容']):
-        cards.append({
-            'card_type': 'PLAYBOOK_EXECUTE',
-            'title': '💾 一键扩展数据表空间 (+10GB)',
-            'playbook_code': 'RESIZE_TABLESPACE',
-            'config_id': config.id,
-            'db_name': config.name,
-            'risk_level': 'medium',
-            'params': {
-                'tablespace_name': 'USERS_TBS',
-                'extend_gb': 10
-            },
-            'desc': '针对水位超过 85% 的数据表空间自动追加数据文件或扩展物理文件。'
-        })
+    # 扩容和终止会话都必须关联事故证据与审批运行单；聊天层不生成无证据执行按钮。
 
     # 3. SQL 慢查/索引类 -> 挂载【执行计划/索引推荐】卡片
     if any(k in q for k in ['sql', '索引', 'index', 'explain', '慢查', '优化']):
@@ -402,48 +444,78 @@ def _build_action_cards(query: str, config: Optional[DatabaseConfig], tool_resul
 
 
 # =============================================================================
-# 4. Copilot 对话核心入口 (集成 Tool Calling & Action Cards)
+# 4. Copilot 对话核心入口（关键词证据路由与 Action Cards）
 # =============================================================================
 
-def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optional[List[Dict[str, str]]] = None) -> Dict[str, Any]:
+def _extract_sql(query: str) -> Optional[str]:
+    fenced = re.search(r'```(?:sql)?\s*(.*?)```', query, re.I | re.S)
+    candidate = fenced.group(1).strip() if fenced else query.strip()
+    match = re.search(r'\b(select|with|update|delete|insert)\b.+', candidate, re.I | re.S)
+    return match.group(0).strip() if match else None
+
+
+def run_copilot_chat(query: str, config_id: Optional[int] = None,
+                     history: Optional[List[Dict[str, str]]] = None, *, user=None) -> Dict[str, Any]:
     """
     Copilot 智能问答与工具流处理入口
     """
-    config = None
+    if user is not None:
+        visible_configs = DatabaseConfig.objects.visible_to(user)
+        from monitor.auth import get_user_database_ids
+        include_global_memories = get_user_database_ids(user) is None
+    elif config_id is not None:
+        # 兼容可信内部调用：只允许显式目标实例，绝不退化为全局扫描。
+        visible_configs = DatabaseConfig.objects.filter(id=config_id)
+        include_global_memories = False
+    else:
+        visible_configs = DatabaseConfig.objects.none()
+        include_global_memories = False
+
+    config = visible_configs.filter(id=config_id).first() if config_id else None
     context_data = {}
     tool_results = {}
+    if config:
+        context_data = _get_database_context(config)
 
     # 1. 资产与全局态势感知触发
     q = query.lower()
     if any(k in q for k in ['所有库', '纳管', '资产', '清单', '多少库', '有哪些库', '拓扑', 'inventory', 'database']):
-        tool_results['global_inventory'] = get_global_managed_inventory()
+        tool_results['global_inventory'] = get_global_managed_inventory(visible_configs)
 
     # 2. 告警全景、基线 vs 阈值、频发问题感知触发
     if any(k in q for k in ['告警', '基线', '3-sigma', 'sigma', '阈值', '频发', '常出', '恢复', 'alert', 'baseline']):
-        tool_results['alerts_and_baselines'] = get_alerts_and_baseline_status(config=config)
+        tool_results['alerts_and_baselines'] = get_alerts_and_baseline_status(
+            config=config, configs=visible_configs)
 
     # 3. 记忆宫殿 (Palace of Long-term Memory) 自动检索
-    recalled_memories = recall_memory_palace(query, config=config)
+    recalled_memories = recall_memory_palace(
+        query, config=config, configs=visible_configs,
+        include_global=include_global_memories)
     if recalled_memories:
         tool_results['recalled_memories_from_palace'] = recalled_memories
 
     # 4. 表空间/磁盘容量探查工具触发
     if any(k in q for k in ['空间', '表空间', '磁盘', '容量', 'tablespace', 'disk', '水位', '扩容']):
-        tool_results['tablespace_and_capacity'] = get_tablespace_and_capacity_status(config=config)
+        tool_results['tablespace_and_capacity'] = get_tablespace_and_capacity_status(
+            config=config, configs=visible_configs)
 
-    if config_id:
-        config = DatabaseConfig.objects.filter(id=config_id).first()
-        if config:
-            context_data = _get_database_context(config)
-
-            # 🛠️ 自动触发工具调用 (Tool Calling)
+    if config:
+            # 关键词证据路由：工具由服务端按意图触发，结果均带 available 证据状态。
             if any(k in q for k in ['ash', '等待', '阻塞', 'lock', '慢', '卡', '会话']):
                 tool_results['ash'] = get_realtime_ash(config)
             if any(k in q for k in ['sql', 'explain', '计划', '索引', 'index', '优化']):
-                sample_sql = "UPDATE trade_order SET status = 2 WHERE batch_id = 90218"
-                tool_results['explain'] = explain_sql(config, sample_sql)
+                sql_text = _extract_sql(query)
+                tool_results['explain'] = (explain_sql(config, sql_text) if sql_text else {
+                    'available': False,
+                    'reason': '提问中没有可识别的 SQL 原文，无法匹配已采集执行计划',
+                    'execution_plan_tree': [],
+                    'missing_index_suggestion': None,
+                })
             if any(k in q for k in ['预演', 'dryrun', 'dry-run', '评估']):
-                tool_results['dryrun'] = dry_run_playbook(config, 'KILL_ROOT_BLOCKER', {'username': 'app_trade_user', 'session_id': '1845'})
+                tool_results['dryrun'] = {
+                    'available': False,
+                    'reason': 'Playbook 预演必须从已授权事故进入，以绑定服务端证据与审批链',
+                }
             if 'tablespace_and_capacity' not in tool_results and any(k in q for k in ['空间', '表空间', '磁盘', '容量', 'tablespace', 'disk']):
                 tool_results['tablespace_and_capacity'] = get_tablespace_and_capacity_status(config=config)
 
@@ -466,7 +538,7 @@ def run_copilot_chat(query: str, config_id: Optional[int] = None, history: Optio
         if context_data:
             user_prompt += f"\n【当前目标数据库实时上下文与时序】:\n```json\n{json.dumps(context_data, ensure_ascii=False, indent=2)}\n```\n"
         if tool_results:
-            user_prompt += f"\n【Copilot 工具链实时探测产出 (Tool Calling Output)】:\n```json\n{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n```\n"
+            user_prompt += f"\n【Copilot 证据路由观测结果】:\n```json\n{json.dumps(tool_results, ensure_ascii=False, indent=2)}\n```\n"
 
         messages.append({'role': 'user', 'content': user_prompt})
 
@@ -500,23 +572,28 @@ def _fallback_copilot_response(query: str, config: Optional[DatabaseConfig], con
     target_desc = f"数据库 **{config.name}** ({config.db_type})" if config else "当前未关联特定数据库"
     sections.append(f"### 🤖 DB-AIOps 智能运维助手 (专家工具链驱动模式)\n\n> 🎯 **目标对象**: {target_desc}\n")
 
-    # 工具调用结果呈现
+    # 证据工具结果呈现
     if 'ash' in tool_results:
         ash = tool_results['ash']
         sections.append("#### ⏱️ 实时 ASH 等待事件探查结果 (Tool: `get_realtime_ash`)")
-        sections.append(f"- **目标 SQL ID**: `{ash['sql_id']}`")
-        sections.append(f"- **SQL 语句**: `{ash['sql_text']}`")
-        sections.append(f"- **主要等待事件**: **`{ash['wait_event']}`** (等待类: `{ash['wait_class']}`)")
-        sections.append(f"- **阻塞影响**: 阻塞了下游 **{ash['blocked_session_count']}** 个业务会话，建议立即处置根源会话 `1845`。")
+        if not ash.get('available'):
+            sections.append(f"- **暂无可核验数据**：{ash.get('reason', 'ASH 样本不可用')}")
+        else:
+            sections.append(f"- **目标 SQL ID**: `{ash.get('sql_id') or '—'}`")
+            sections.append(f"- **SQL 语句**: `{ash.get('sql_text') or '未采集原文'}`")
+            sections.append(f"- **主要等待事件**: **`{ash.get('wait_event') or '—'}`** (等待类: `{ash.get('wait_class') or '—'}`)")
+            sections.append(f"- **阻塞影响**: 最新样本中有 **{ash.get('blocked_session_count', 0)}** 个被阻塞会话；处置前须在事故证据链复核根阻塞者。")
 
     if 'explain' in tool_results:
         exp = tool_results['explain']
         sections.append("\n#### 🔬 执行计划诊断与索引推导 (Tool: `explain_sql`)")
-        sections.append(f"- **诊断结论**: 检测到目标 SQL 触发了 **全表扫描 (Full Table Scan)**；")
+        if not exp.get('available'):
+            sections.append(f"- **暂无可核验数据**：{exp.get('reason', '执行计划不可用')}")
         miss = exp.get('missing_index_suggestion')
         if miss:
-            sections.append(f"- **推荐优化 DDL**: \n```sql\n{miss['suggested_index_ddl']}\n```")
-            sections.append(f"- **预期收益**: **{miss['estimated_improvement']}**")
+            ddl = miss.get('create_sql') or miss.get('suggested_index_ddl')
+            if ddl:
+                sections.append(f"- **规则式候选 DDL（须人工复核）**: \n```sql\n{ddl}\n```")
 
     if 'global_inventory' in tool_results:
         inv = tool_results['global_inventory']
@@ -531,6 +608,9 @@ def _fallback_copilot_response(query: str, config: Optional[DatabaseConfig], con
         ts_data = tool_results['tablespace_and_capacity']
         sections.append("\n#### 💾 表空间与存储容量探测 (Tool: `get_tablespace_and_capacity_status`)")
         for db_rep in ts_data.get('databases_tablespace_report', []):
+            if not db_rep.get('available'):
+                sections.append(f"**实例 [{db_rep['db_name']}]**：暂无可核验数据（{db_rep.get('reason')}）。")
+                continue
             sections.append(f"**实例 [{db_rep['db_name']}] 表空间明细** (高水位表空间数: `{db_rep['high_watermark_count']}`):")
             sections.append("| 表空间名称 | 已用容量 | 总容量 | 使用率 | 状态 | 自动扩展 |\n| :--- | :--- | :--- | :--- | :--- | :--- |")
             for t in db_rep.get('tablespaces', []):

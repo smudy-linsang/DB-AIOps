@@ -160,7 +160,6 @@ export default function LLMConfigSettings() {
       model_name: 'MiniMax-Text-01',
       priority: 10,
       weight: 1,
-      proxy_url: '',
       is_active: true,
     });
     setCredModalVisible(true);
@@ -173,7 +172,6 @@ export default function LLMConfigSettings() {
       provider_type: record.provider_type,
       base_url: record.base_url,
       model_name: record.model_name,
-      proxy_url: record.proxy_url || '',
       api_key: '', // 保持为空，输入新值才覆盖
       priority: record.priority,
       weight: record.weight,
@@ -313,16 +311,11 @@ export default function LLMConfigSettings() {
       ),
     },
     {
-      title: '接入端点 / 本地代理',
+      title: '接入端点',
       dataIndex: 'base_url',
-      render: (text, r) => (
+      render: (text) => (
         <div>
           <div style={{ wordBreak: 'break-all' }}>{text}</div>
-          {r.proxy_url && (
-            <Tag color="cyan" style={{ fontSize: 11, marginTop: 2 }}>
-              代理: {r.proxy_url}
-            </Tag>
-          )}
         </div>
       ),
     },
@@ -661,14 +654,6 @@ export default function LLMConfigSettings() {
 
           <Form.Item label="模型名称 (Model ID)" name="model_name" rules={[{ required: true, message: '请输入模型名称' }]}>
             <Input placeholder="例如: MiniMax-Text-01 / gemini-1.5-pro" />
-          </Form.Item>
-
-          <Form.Item
-            label="本地/正向代理 URL (可选)"
-            name="proxy_url"
-            tooltip="针对境外大模型（如 Gemini / OpenAI / Claude 等），若国内网络无法直连，可配置本地 Clash/V2ray 代理地址，如 http://127.0.0.1:7890 或 socks5://127.0.0.1:1080"
-          >
-            <Input placeholder="例如: http://127.0.0.1:7890 (不填则直连)" prefix={<ApiOutlined style={{ color: '#888' }} />} />
           </Form.Item>
 
           <Row gutter={16}>

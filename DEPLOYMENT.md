@@ -74,6 +74,11 @@ DBMONITOR_HTTP_PORT=3000
 
 # 可选：通知目标仍会经过 HTTPS/域名/端口校验。
 WEBHOOK_ALLOWED_HOSTS=oapi.dingtalk.com,qyapi.weixin.qq.com
+
+# 可选：LLM 只接受 HTTPS。解析为私网地址的行内模型必须由部署白名单精确授权。
+LLM_ALLOWED_ENDPOINT_HOSTS=llm-gateway.example.bank
+# 代理只能在部署期配置，同样必须是 HTTPS；禁止在 Web 页面录入代理。
+LLM_PROXY_URL=https://llm-egress-proxy.example.bank
 CONTENT_SECURITY_POLICY=default-src 'self'; object-src 'none'; base-uri 'self'; frame-ancestors 'none'; form-action 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: blob:; connect-src 'self'
 ```
 
@@ -88,6 +93,8 @@ openssl rand -base64 48
 重要约束：
 
 - `DB_MONITOR_SECRET_KEY` 加密目标数据库密码，升级时必须保持稳定；丢失或误换会使已有凭据不可解密。
+- v2.5 的 `0030` 迁移也使用同一密钥加密存量 LLM API Key；所有 Web/worker/迁移容器必须注入完全相同的值。
+- LLM Base URL 必须使用 HTTPS、443 端口且不得内嵌凭据；行内私网模型域名须登记到 `LLM_ALLOWED_ENDPOINT_HOSTS`，不要登记 IP 段或通配符。
 - `DJANGO_SECRET_KEY`、数据库、Redis、Elasticsearch 密码和 host/origin 缺失时，生产配置会拒绝启动。
 - 不要把 `.env.production` 提交到 Git；部署后运行 `python scripts/scan_secrets.py` 复核。
 - Compose 将可信代理限制到专用后端 CIDR。不要配置 `0.0.0.0/0` 或生产网大网段。
