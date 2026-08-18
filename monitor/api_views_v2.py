@@ -58,11 +58,7 @@ ACTIVE_INCIDENT_STATUSES = ('open', 'diagnosing', 'plan_ready', 'executing', 've
 
 def _scoped_database(request, config_id):
     """按当前用户的数据范围解析实例；越权与不存在统一为 None。"""
-    qs = DatabaseConfig.objects.filter(id=config_id)
-    allowed = get_user_database_ids(request.user)
-    if allowed is not None:
-        qs = qs.filter(id__in=allowed)
-    cfg = qs.first()
+    cfg = DatabaseConfig.objects.visible_to(request.user).filter(id=config_id).first()
     if cfg is None:
         logger.warning(
             "[api-v2] 实例访问被拒 config_id=%s user=%s exists=%s",
@@ -73,11 +69,10 @@ def _scoped_database(request, config_id):
 
 def _scoped_incident(request, incident_id):
     """按当前用户的数据范围解析事故；防止通过事故 ID 绕过实例授权。"""
-    qs = Incident.objects.select_related('config').filter(incident_id=incident_id)
-    allowed = get_user_database_ids(request.user)
-    if allowed is not None:
-        qs = qs.filter(config_id__in=allowed)
-    inc = qs.first()
+    inc = (Incident.objects.select_related('config')
+           .filter(incident_id=incident_id,
+                   config__in=DatabaseConfig.objects.visible_to(request.user))
+           .first())
     if inc is None:
         logger.warning(
             "[api-v2] 事故访问被拒 incident_id=%s user=%s exists=%s",

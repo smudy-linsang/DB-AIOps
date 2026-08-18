@@ -64,14 +64,13 @@ def _get_incident(request, incident_id):
 
 
 def _get_config(request, config_id):
+    """按调用者数据范围解析实例；越权与不存在一律返回 None。
+
+    统一走 DatabaseConfig.objects.visible_to()，不再各自拼 allowed 判断 ——
+    数据范围只保留一个原语，才不会"换个楼层又忘记过滤"。
+    """
     from monitor.models import DatabaseConfig
-    cfg = DatabaseConfig.objects.filter(id=config_id).first()
-    if not cfg:
-        return None
-    allowed = get_user_database_ids(request.user)
-    if allowed is not None and cfg.id not in allowed:
-        return None
-    return cfg
+    return DatabaseConfig.objects.visible_to(request.user).filter(id=config_id).first()
 
 
 # =============================================================================

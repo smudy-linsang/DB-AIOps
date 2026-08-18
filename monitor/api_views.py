@@ -163,7 +163,6 @@ class DatabaseListView(JSONResponseMixin, View):
         获取所有数据库配置列表（不含密码）
         """
         # 获取用户可见的数据库ID列表（RBAC 数据范围过滤）
-        allowed_db_ids = get_user_database_ids(request.user)
 
         # 预取每个数据库的最新采集日志，避免 N+1 查询
         from .models import DatabaseConfig
@@ -177,15 +176,13 @@ class DatabaseListView(JSONResponseMixin, View):
         # 前端把「启停监控」开关关掉后该行就不见了，再也无法重新启用。
         # 改为默认返回全部并带上 is_active 供前端灰显，需要时用参数收窄。
         include_inactive = request.GET.get('include_inactive', '1') not in ('0', 'false', 'False')
-        configs = DatabaseConfig.objects.all()
+        configs = DatabaseConfig.objects.visible_to(request.user)
         if not include_inactive:
             configs = configs.filter(is_active=True)
         # REVIEW-02: 排除自监控伪实例。它靠 is_active=False 藏在列表外，
         # 而 BUG-135 的修复恰恰改成了"默认也返回停用实例" —— 两处改动叠加，
         # __system__ 就冒到了实例列表和导航树里。必须显式排除。
         configs = configs.exclude(name=SYSTEM_CONFIG_NAME)
-        if allowed_db_ids is not None:
-            configs = configs.filter(id__in=allowed_db_ids)
 
         configs = configs.annotate(
             latest_status=Subquery(latest_log_subq.values('status')[:1], output_field=CharField()),
@@ -257,7 +254,7 @@ class DatabaseListView(JSONResponseMixin, View):
         
         # 检查是否已存在同名配置
         from .models import DatabaseConfig
-        if DatabaseConfig.objects.filter(name=name).exists():
+        if DatabaseConfig.objects.filter(name=name).exists():  # scope-check: allow 名称全局唯一性校验
             return self.error_response(f'Database with name "{name}" already exists', 400)
         
         # 加密密码并保存
@@ -454,7 +451,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
             return self.error_response(f'Invalid db_type. Must be one of: {", ".join(valid_db_types)}', 400)
 
         # 检查名称是否与其他配置冲突
-        if DatabaseConfig.objects.filter(name=name).exclude(id=config_id).exists():
+        if DatabaseConfig.objects.filter(name=name).exclude(id=config_id).exists():  # scope-check: allow 名称全局唯一性校验
             return self.error_response(f'Database with name "{name}" already exists', 400)
 
         # 更新字段
@@ -2082,6 +2079,7 @@ class AlertAvailableMetricsView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission('metrics.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -2102,7 +2100,8 @@ class AlertAvailableMetricsView(JSONResponseMixin, View):
         md_map = {m.metric_key: m.display_name for m in MetricDefinition.objects.all()}
 
         # 找该类型所有数据库的最新一条 UP 日志
-        configs = DatabaseConfig.objects.filter(db_type=db_type, is_active=True)
+        configs = DatabaseConfig.objects.visible_to(request.user).filter(
+            db_type=db_type, is_active=True)
         metric_info = {}  # metric_key -> {display_name, sample_value}
 
         for cfg in configs:
@@ -3112,12 +3111,13 @@ class DashboardStatsView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission('metrics.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request):
         from .models import DatabaseConfig, HealthScore
-        dbs = DatabaseConfig.objects.filter(is_active=True)
+        dbs = DatabaseConfig.objects.visible_to(request.user).filter(is_active=True)
         total = dbs.count()
         # 用子查询获取每个库最新状态
         from django.db.models import Subquery, OuterRef
@@ -3154,6 +3154,7 @@ class DashboardChartsView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission('metrics.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -3170,7 +3171,8 @@ class DashboardChartsView(JSONResponseMixin, View):
                 with ts.cursor() as cur:
                     rows = []
                     if cur is not None:
-                        db_ids = list(DatabaseConfig.objects.filter(is_active=True).values_list('id', flat=True))
+                        db_ids = list(DatabaseConfig.objects.visible_to(request.user)
+                                      .filter(is_active=True).values_list('id', flat=True))
                         # 简单查询最近指标
                         cur.execute(
                             "SELECT time, db_config_id, metric_name, metric_value "
@@ -3903,6 +3905,7 @@ class CapacityOverviewView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission('metrics.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -3913,7 +3916,7 @@ class CapacityOverviewView(JSONResponseMixin, View):
         """
         from monitor.models import PredictionResult
 
-        configs = DatabaseConfig.objects.filter(is_active=True)
+        configs = DatabaseConfig.objects.visible_to(request.user).filter(is_active=True)
         overview = []
         total_emergency = 0
         total_warning = 0
@@ -4037,6 +4040,7 @@ class TopologyOverviewView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission('databases.view'))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -4047,8 +4051,13 @@ class TopologyOverviewView(JSONResponseMixin, View):
         """
         from monitor.models import DatabaseTopology, MonitorLog
 
-        # 获取所有拓扑记录
-        topologies = DatabaseTopology.objects.all().select_related('db_config').prefetch_related('peer_databases')
+        # 拓扑同样受数据范围约束：节点会外泄实例名称与主机地址，
+        # 不能因为它挂在 DatabaseTopology 上就绕过 DatabaseConfig 的可见性。
+        visible_ids = set(
+            DatabaseConfig.objects.visible_to(request.user).values_list('id', flat=True))
+        topologies = (DatabaseTopology.objects
+                      .filter(db_config_id__in=visible_ids)
+                      .select_related('db_config').prefetch_related('peer_databases'))
 
         nodes = []
         edges = []
@@ -4075,6 +4084,8 @@ class TopologyOverviewView(JSONResponseMixin, View):
 
             # 添加关联连线
             for peer in topo.peer_databases.all():
+                if peer.id not in visible_ids:
+                    continue  # 邻接节点不在数据范围内，不得经由拓扑外泄
                 if peer.id not in node_set:
                     peer_topo = DatabaseTopology.objects.filter(db_config=peer).first()
                     peer_latest = MonitorLog.objects.filter(config=peer).order_by('-create_time').first()
@@ -4103,7 +4114,8 @@ class TopologyOverviewView(JSONResponseMixin, View):
                 })
 
         # 补充无拓扑配置的独立数据库
-        standalone = DatabaseConfig.objects.filter(is_active=True).exclude(id__in=node_set)
+        standalone = DatabaseConfig.objects.visible_to(request.user).filter(
+            is_active=True).exclude(id__in=node_set)
         for config in standalone:
             latest = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
             nodes.append({
@@ -4436,3 +4448,4 @@ class RoleDetailView(JSONResponseMixin, View):
             'status': 'success',
             'message': 'Role deleted',
         })
+

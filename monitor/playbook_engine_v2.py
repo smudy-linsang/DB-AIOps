@@ -14,57 +14,10 @@ from monitor.models import (
 
 logger = logging.getLogger("monitor.playbook")
 
-# 预置标准化 Playbook 初始数据
-DEFAULT_PLAYBOOKS = [
-    {
-        'code': 'KILL_ROOT_BLOCKER',
-        'name': '安全终止根源阻塞会话',
-        'db_types': ['oracle', 'mysql', 'pgsql', 'dm', 'tdsql', 'gbase'],
-        'risk_level': 'low',
-        'min_autonomy_level': 1,
-        'description': '精准终止持有排他锁并阻塞下游多个事务的长事务会话，快速释放阻塞链',
-        'steps_payload': [{'action': 'KILL_SESSION', 'target': 'session_id'}],
-        'rollback_payload': [{'action': 'LOG', 'msg': '会话已终止，无需回滚'}]
-    },
-    {
-        'code': 'RESIZE_TABLESPACE',
-        'name': '数据表空间自动扩容',
-        'db_types': ['oracle', 'dm'],
-        'risk_level': 'medium',
-        'min_autonomy_level': 2,
-        'description': '对水位超过 85% 的数据表空间自动追加数据文件或扩展物理文件大小',
-        'steps_payload': [{'action': 'EXTEND_DATAFILE', 'size_gb': 10}],
-        'rollback_payload': [{'action': 'LOG', 'msg': '数据文件已扩展'}]
-    },
-    {
-        'code': 'FLUSH_QUERY_CACHE',
-        'name': '释放临时表与缓存重置',
-        'db_types': ['mysql', 'pgsql'],
-        'risk_level': 'low',
-        'min_autonomy_level': 1,
-        'description': '清理临时表空间并刷新缓存，释放锁定的系统资源',
-        'steps_payload': [{'action': 'FLUSH_TEMP', 'target': 'temp_pool'}],
-        'rollback_payload': []
-    }
-]
-
-
-def init_default_playbooks():
-    """只补建缺失的兼容模板，绝不在请求路径覆盖 DBA 的定制内容。"""
-    for item in DEFAULT_PLAYBOOKS:
-        PlaybookTemplate.objects.get_or_create(
-            code=item['code'],
-            defaults={
-                'name': item['name'],
-                'db_types': item['db_types'],
-                'risk_level': item['risk_level'],
-                'min_autonomy_level': item['min_autonomy_level'],
-                'description': item['description'],
-                'steps_payload': item['steps_payload'],
-                'rollback_payload': item['rollback_payload'],
-                'is_active': True
-            }
-        )
+# 预置 Playbook 模板的种子数据已迁至 migration 0030（get_or_create，
+# 保留 DBA 自定义）。此处曾有 DEFAULT_PLAYBOOKS 与 init_default_playbooks()，
+# 因在预演读路径上被反复调用、会覆盖运维改动而下线（见 R25-12）；
+# 整改后已无任何调用点，一并删除，避免让人以为运行期还有 bootstrap。
 
 
 class PlaybookExecutor:

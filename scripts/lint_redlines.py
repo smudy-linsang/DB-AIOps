@@ -44,12 +44,27 @@ def _git(*args):
         return ''
 
 
+def _has_commit(rev: str) -> bool:
+    """该修订在当前检出里是否可达（浅克隆/force-push 后可能不可达）。"""
+    return bool(rev) and bool(_git('rev-parse', '--verify', rev).strip())
+
+
 def _diff_args():
-    """本地扫描工作区；CI 干净检出扫描本次提交。"""
+    """本地扫描工作区；CI 干净检出扫描本次推送引入的全部提交。
+
+    为什么不能只用 HEAD^..HEAD：一次 push 含多个 commit 时，HEAD^ 只覆盖最后
+    一个，前面几个提交里的违规会直接漏过去。CI 通过 REDLINE_DIFF_BASE 传入
+    推送前的基线（GitHub 为 github.event.before），才能覆盖整段。
+    保留 HEAD^ 兜底：新分支首推时 before 是全零、force-push 后旧基线可能已不可达。
+    """
     if _git('diff', 'HEAD', '--name-status').strip():
         return ('HEAD',)
-    if os.environ.get('CI') and _git('rev-parse', '--verify', 'HEAD^').strip():
-        return ('HEAD^', 'HEAD')
+    if os.environ.get('CI'):
+        base = (os.environ.get('REDLINE_DIFF_BASE') or '').strip()
+        if base and set(base) != {'0'} and _has_commit(base):
+            return (base, 'HEAD')
+        if _has_commit('HEAD^'):
+            return ('HEAD^', 'HEAD')
     return ('HEAD',)
 
 
@@ -235,6 +250,55 @@ def check_copilot_fabricated_literals(added_lines):
     return violations
 
 
+# 请求处理路径中，实例查询必须经过数据范围原语。
+# 背景：BUG-103 → REV-01 → R25-01 → RT-01，同一类越权复发了四次，
+# 每次都是"新写一个视图时忘了套数据范围"。visible_to() 是唯一原语，
+# 这条规则确保"忘记"会在提交时就被拦下，而不是等下一轮复审。
+SCOPED_QUERY_FILES = ('api_views', 'views_enhanced')
+SCOPE_ALLOW_MARK = 'scope-check: allow'
+
+
+def check_unscoped_config_queries(changed_py, added_lines):
+    """请求路径里裸查 DatabaseConfig 且未走 visible_to() 的地方。"""
+    violations = []
+    for relpath in changed_py:
+        name = Path(relpath).name
+        if not any(token in name for token in SCOPED_QUERY_FILES):
+            continue
+        path = PROJECT_DIR / relpath
+        if not path.exists():
+            continue
+        try:
+            source = path.read_text(encoding='utf-8')
+            tree = ast.parse(source)
+        except (OSError, SyntaxError):
+            continue
+        lines = source.splitlines()
+        touched = added_lines.get(relpath, set())
+        for func in ast.walk(tree):
+            if not isinstance(func, (ast.FunctionDef, ast.AsyncFunctionDef)):
+                continue
+            if not any(arg.arg == 'request' for arg in func.args.args):
+                continue
+            for node in ast.walk(func):
+                if not isinstance(node, ast.Attribute):
+                    continue
+                if node.attr not in ('all', 'filter', 'exclude'):
+                    continue
+                segment = ast.get_source_segment(source, node) or ''
+                if 'DatabaseConfig.objects' not in segment:
+                    continue
+                if 'visible_to' in segment:
+                    continue
+                if node.lineno not in touched:
+                    continue
+                line = lines[node.lineno - 1] if node.lineno <= len(lines) else ''
+                if SCOPE_ALLOW_MARK in line:
+                    continue
+                violations.append((relpath, node.lineno))
+    return violations
+
+
 def main() -> int:
     specs_keys = _parse_specs_keys()
     diff_args = _diff_args()
@@ -259,6 +323,13 @@ def main() -> int:
     for relpath in check_deleted_migrations(changed):
         all_violations.append(
             f'  [删除迁移] {relpath}  不应删除 migration 文件'
+        )
+
+    for relpath, lineno in check_unscoped_config_queries(changed_py, added_lines):
+        all_violations.append(
+            f'  [未套数据范围] {relpath}:{lineno}  '
+            f'请求路径查询 DatabaseConfig 未经 visible_to()；'
+            f'确属全局查询请加注释 `# {SCOPE_ALLOW_MARK} <理由>`'
         )
 
     for relpath, lineno, literal in check_copilot_fabricated_literals(added_lines):

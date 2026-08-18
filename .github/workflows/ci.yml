@@ -26,8 +26,9 @@ jobs:
     steps:
       - uses: actions/checkout@v6
         with:
-          # 红线扫描在干净检出时比较 HEAD^..HEAD，必须保留父提交。
-          fetch-depth: 2
+          # 红线扫描要覆盖本次推送引入的**全部**提交（不只是最后一个），
+          # 需要能访问推送前的基线提交，因此取全量历史。
+          fetch-depth: 0
       - uses: actions/setup-python@v6
         with:
           python-version: '3.11'
@@ -38,6 +39,10 @@ jobs:
           pip install --require-hashes -r requirements.lock
           pip install ruff
       - name: 红线与确定性静态错误
+        env:
+          # push 场景传入推送前基线，使扫描覆盖整段提交；
+          # PR 场景 GitHub 给的是 merge commit，HEAD^ 即 base，无需额外传。
+          REDLINE_DIFF_BASE: ${{ github.event.before }}
         run: |
           python scripts/lint_redlines.py
           ruff check monitor dbmonitor --select F821,F601,F811

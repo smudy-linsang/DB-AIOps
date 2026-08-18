@@ -80,3 +80,11 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
 - 并发相关的测试必须标 `@tag('integration')`：SQLite 没有真实行锁语义，
   放进 unit 层会得到假绿（参见 PROJECT_IMPROVEMENT_DESIGN.md W3.2 的限制说明）
 - 涉及"唯一性"的业务不变量，光靠应用层加锁不够，要有数据库约束兜底（BUG-119）
+- **请求路径取实例一律用 `DatabaseConfig.objects.visible_to(request.user)`**，
+  不要自己拼 `get_user_database_ids` 判断，更不要裸 `filter/all`。
+  这类越权已复发四次（BUG-103 → REV-01 → R25-01 → RT-01），每次都是新写视图时
+  忘了套范围。`scripts/lint_redlines.py` 的 `[未套数据范围]` 规则会在提交时拦截；
+  确属全局查询（如名称唯一性校验）请加 `# scope-check: allow <理由>`
+- 权限与数据范围是**两道独立的闸**：`require_permission` 管"能不能调这个接口"，
+  `visible_to` 管"能看到哪些实例"，缺一不可。写测试时也要分开验 ——
+  用零权限账号测范围会被 403 短路，等于没测到范围
