@@ -4,6 +4,12 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>DB Monitor - 数据库监控系统</title>
+    <script>
+      // 兼容某些开发插件或浏览器扩展环境的 console forwarder 变量
+      if (typeof window !== 'undefined' && typeof window.__SERVER_FORWARD_CONSOLE__ === 'undefined') {
+        window.__SERVER_FORWARD_CONSOLE__ = function() {};
+      }
+    </script>
   </head>
   <body>
     <div id="root"></div>
