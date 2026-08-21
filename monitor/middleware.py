@@ -4,21 +4,31 @@
 ==========
 
 包含：
+- RequestIdMiddleware: 请求关联 ID 注入与透传
 - ExceptionMiddleware: 统一异常处理
 - AuditLogMiddleware: 操作审计日志
 """
 
 import json
 import logging
+import re
 import traceback
+import uuid
 
 from django.http import JsonResponse
 from django.conf import settings
 from django.utils import timezone
 
 from .exceptions import DBMonitorError
+from .request_context import set_request_id, reset_request_id
 
 logger = logging.getLogger(__name__)
+
+# 关联 ID 请求头（Django META 键名）与响应头
+REQUEST_ID_HEADER = 'HTTP_X_REQUEST_ID'
+REQUEST_ID_RESPONSE_HEADER = 'X-Request-ID'
+# 上游传入的关联 ID 白名单：防日志注入，只允许安全字符且限长
+_REQUEST_ID_RE = re.compile(r'^[A-Za-z0-9._-]{1,64}$')
 
 
 # =============================================================================
@@ -36,6 +46,36 @@ AUDIT_EXEMPT_PREFIXES = (
 
 # 需要记录审计日志的 HTTP 方法
 AUDIT_METHODS = {'POST', 'PUT', 'PATCH', 'DELETE'}
+
+
+class RequestIdMiddleware:
+    """
+    请求关联 ID 中间件
+
+    为每个请求注入关联 ID 并透传：
+    - 上游传入合法 X-Request-ID 时沿用（便于跨系统串联），否则自行生成；
+    - 写入 ContextVar（monitor.request_context），日志 Filter 会将其附加到
+      该请求期间产生的每条日志行，实现「同一请求日志用同一 ID 串联」；
+    - 同时挂在 request.request_id 并回写响应头，便于前后端归因。
+
+    必须放在 MIDDLEWARE 最外层，确保后续中间件/视图的日志都能带上 ID。
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        incoming = request.META.get(REQUEST_ID_HEADER, '').strip()
+        request_id = incoming if _REQUEST_ID_RE.match(incoming) else uuid.uuid4().hex
+        request.request_id = request_id
+        token = set_request_id(request_id)
+        try:
+            response = self.get_response(request)
+        finally:
+            # 线程复用场景下必须复位，避免关联 ID 串到下一个请求
+            reset_request_id(token)
+        response[REQUEST_ID_RESPONSE_HEADER] = request_id
+        return response
 
 
 class SecurityHeadersMiddleware:

@@ -19,6 +19,7 @@ Author: DB-AIOps Team
 """
 
 import json
+import logging
 from datetime import datetime, timedelta
 from typing import Optional
 from django.conf import settings
@@ -39,6 +40,9 @@ from .models import BusinessSystem, DatabaseTopology, ReportRecord
 from .slow_query_engine import SlowQueryEngine
 from .self_monitor import SYSTEM_CONFIG_NAME
 from .auth import require_auth, require_role, require_permission, require_any_permission, get_user_role_code, get_user_database_ids, get_user_permissions, get_user_menu_permissions, is_super_admin
+from . import degrade
+
+logger = logging.getLogger(__name__)
 
 
 class JSONResponseMixin:
@@ -284,6 +288,7 @@ class DatabaseListView(JSONResponseMixin, View):
                 'create_time': config.create_time.isoformat() if config.create_time else None
             }, status=201)
         except Exception as e:
+            degrade.note('api.database.create', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to create database config: {str(e)}', 500)
 
 
@@ -486,6 +491,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
                 'message': '数据库配置更新成功'
             })
         except Exception as e:
+            degrade.note('api.database.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to update database config: {str(e)}', 500)
 
     @method_decorator(require_permission('databases.delete'))
@@ -525,6 +531,7 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         except DatabaseConfig.DoesNotExist:
             return self.error_response('Database config not found', 404)
         except Exception as e:
+            degrade.note('api.database.delete', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to delete database config: {str(e)}', 500)
 
 
@@ -1642,6 +1649,7 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
         try:
             conn = get_db_connection(config)
         except Exception as e:
+            degrade.note('api.audit.dryrun.connect', reason=f'{request.path}: {e}', exc=e)
             return self.json_response({
                 'status': 'invalid',
                 'message': f"数据库连接失败: {str(e)}",
@@ -1698,6 +1706,7 @@ class AuditLogExecuteDryRunView(JSONResponseMixin, View):
             })
 
         except Exception as e:
+            degrade.note('api.audit.dryrun', reason=f'{request.path}: {e}', exc=e)
             return self.json_response({
                 'status': 'invalid',
                 'message': f"预执行失败: {str(e)}",
@@ -3029,6 +3038,7 @@ class DatabaseSlowQueriesView(JSONResponseMixin, View):
                 'time_range': time_range,
             })
         except Exception as e:
+            degrade.note('api.slow_query.collect', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to collect slow queries: {str(e)}', 500)
 
 
@@ -3060,6 +3070,7 @@ class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
                 'time_range': time_range,
             })
         except Exception as e:
+            degrade.note('api.slow_query.analyze', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to analyze slow queries: {str(e)}', 500)
 
 
@@ -3095,6 +3106,7 @@ class DatabaseSQLTextSearchView(JSONResponseMixin, View):
                 'keyword': keyword,
             })
         except Exception as e:
+            degrade.note('api.slow_query.search', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'Failed to search SQL: {str(e)}', 500)
 
 
@@ -3471,6 +3483,7 @@ class SilenceWindowListView(JSONResponseMixin, View):
             )
             return self.json_response({'id': w.id, 'name': w.name, 'message': '静默窗口已创建'}, status=201)
         except Exception as e:
+            degrade.note('api.silence_window.create', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'创建失败: {str(e)}', 400)
 
 
@@ -3498,6 +3511,7 @@ class SilenceWindowDetailView(JSONResponseMixin, View):
             w.save()
             return self.json_response({'message': '更新成功'})
         except Exception as e:
+            degrade.note('api.silence_window.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
     def delete(self, request, pk):
@@ -3546,6 +3560,7 @@ class NotificationRuleListView(JSONResponseMixin, View):
             r.channels = body.get('channels', ['email'])
             return self.json_response({'id': r.id, 'message': '通知规则已创建'}, status=201)
         except Exception as e:
+            degrade.note('api.notification_rule.create', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'创建失败: {str(e)}', 400)
 
 
@@ -3568,6 +3583,7 @@ class NotificationRuleDetailView(JSONResponseMixin, View):
             r.save()
             return self.json_response({'message': '更新成功'})
         except Exception as e:
+            degrade.note('api.notification_rule.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
     def delete(self, request, pk):
@@ -3634,6 +3650,7 @@ class BusinessSystemListView(JSONResponseMixin, View):
                 s.databases.set(body['database_ids'])
             return self.json_response({'id': s.id, 'message': '业务系统已创建'}, status=201)
         except Exception as e:
+            degrade.note('api.business_system.create', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
 
@@ -3663,6 +3680,7 @@ class BusinessSystemDetailView(JSONResponseMixin, View):
                 s.databases.set(body['database_ids'])
             return self.json_response({'message': '更新成功'})
         except Exception as e:
+            degrade.note('api.business_system.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
     def delete(self, request, pk):
@@ -3711,6 +3729,7 @@ class DatabaseTopologyView(JSONResponseMixin, View):
                 topo.peer_databases.set(body['peer_database_ids'])
             return self.json_response({'id': topo.id, 'message': '拓扑已保存'}, status=201 if created else 200)
         except Exception as e:
+            degrade.note('api.topology.save', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
 
@@ -3893,6 +3912,7 @@ class TicketCreateView(JSONResponseMixin, View):
                 'message': '工单已创建',
             }, status=201)
         except Exception as e:
+            degrade.note('api.ticket.create', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'创建工单失败: {str(e)}', 400)
 
 
@@ -4028,6 +4048,7 @@ class CapacityPredictNowView(JSONResponseMixin, View):
                 'generated_at': timezone.now().isoformat(),
             })
         except Exception as e:
+            degrade.note('api.capacity.predict', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'容量预测失败: {str(e)}', 500)
 
 
@@ -4199,6 +4220,7 @@ class ReportGenerateView(JSONResponseMixin, View):
                 'message': '报表生成成功',
             }, status=201)
         except Exception as e:
+            degrade.note('api.report.generate', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'报表生成失败: {str(e)}', 500)
 
 
@@ -4244,6 +4266,7 @@ class NotificationTestView(JSONResponseMixin, View):
                 'message': '测试通知已发送',
             })
         except Exception as e:
+            degrade.note('api.notification.test', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(f'测试通知发送失败: {str(e)}', 500)
 
 

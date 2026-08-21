@@ -172,6 +172,8 @@ INSTALLED_APPS = [
 ]
 
 MIDDLEWARE = [
+    # 请求关联 ID：最外层注入，确保后续中间件/视图的日志都能串联（X-Request-ID）
+    'monitor.middleware.RequestIdMiddleware',
     'django.middleware.security.SecurityMiddleware',
     # API 限流（仅 /api/ 路径，默认关闭，生产建议开启；BUG-006）
     'monitor.rate_limit.RateLimitMiddleware',
@@ -584,11 +586,11 @@ LOGGING = {
     'disable_existing_loggers': False,
     'formatters': {
         'verbose': {
-            'format': '[{asctime}] {levelname} {name} {process:d} {thread:d} {message}',
+            'format': '[{asctime}] {levelname} {name} {process:d} {thread:d} rid={request_id} {message}',
             'style': '{',
         },
         'simple': {
-            'format': '[{asctime}] {levelname} {name}: {message}',
+            'format': '[{asctime}] {levelname} {name} rid={request_id}: {message}',
             'style': '{',
         },
     },
@@ -599,12 +601,17 @@ LOGGING = {
         'require_debug_false': {
             '()': 'django.utils.log.RequireDebugFalse',
         },
+        # 为每条日志附加当前请求关联 ID（请求上下文外为 '-'）
+        'request_id': {
+            '()': 'monitor.request_context.RequestIdFilter',
+        },
     },
     'handlers': {
         'console': {
             'level': 'INFO',
             'class': 'logging.StreamHandler',
             'formatter': 'simple',
+            'filters': ['request_id'],
         },
         'file': {
             'level': 'INFO',
@@ -613,6 +620,7 @@ LOGGING = {
             'maxBytes': 50 * 1024 * 1024,  # 50MB
             'backupCount': 10,
             'formatter': 'verbose',
+            'filters': ['request_id'],
         },
         'error_file': {
             'level': 'ERROR',
@@ -621,6 +629,7 @@ LOGGING = {
             'maxBytes': 50 * 1024 * 1024,
             'backupCount': 5,
             'formatter': 'verbose',
+            'filters': ['request_id'],
         },
     },
     'loggers': {
