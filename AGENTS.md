@@ -68,6 +68,11 @@ Django 后端 + React 前端的数据库智能运维平台：纳管 MySQL/Postgr
 
 ## 红线约束
 - 禁止提交 `.env`、密钥、密码（`scripts/scan_secrets.py` 会在 pre-commit 与 CI 拦截）
+- **数据库凭据传递通道约定**：数据库连接凭据（主机、端口、用户名、密码）
+  只通过以下两条通道传递，**禁止在会话中明文粘贴**：
+  1. `db-aiops/.env`（已被 `.gitignore` 忽略，提交受 `scripts/scan_secrets.py` 拦截）；
+  2. 系统纳管配置界面（`DatabaseConfig` 模型，密码字段落库时加密存储）。
+  AI Agent 在任何对话、分析工件、日志输出中均不得回显或记录真实凭据明文。
 - 不得删除或覆盖已有 migration 文件
 - 新增配置项必须登记到 `monitor/appconf.py` 的 SPECS（否则运行期读不到、也不会被校验）
 - 捕获异常后不得完全静默：按 `monitor/degrade.py` 的分级留痕
