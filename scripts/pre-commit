@@ -14,6 +14,25 @@ set -uo pipefail
 cd "$(git rev-parse --show-toplevel)" || exit 0
 for v in .venv venv; do [ -f "$v/bin/activate" ] && { . "$v/bin/activate"; break; }; done
 
+# 失败状态强制复验：编辑时刻钩子（.qoder/hooks/）在验证失败或环境异常放行时
+# 会保留 logs/qoder-edit-validate.fail。任何提交（不限 Python 文件）进入交付前
+# 都必须先复验通过并清除该状态，堵住"钩子放行后直接 commit"的漏洞。
+STATE_FILE="logs/qoder-edit-validate.fail"
+if [ -f "$STATE_FILE" ]; then
+  echo "[pre-commit] 检测到未解除的编辑后验证失败状态（${STATE_FILE}），强制复验"
+  # set -u 下用 || rc=$? 惯用法取退出码
+  scripts/validate.sh unit --json >/dev/null 2>&1 || rc=$?
+  rc=${rc:-0}
+  if [ "$rc" -eq 0 ]; then
+    rm -f "$STATE_FILE"
+    echo "[pre-commit] 复验通过，已清除失败状态"
+  else
+    echo "[pre-commit] 复验未通过（退出码 ${rc}），禁止提交。运行 scripts/validate.sh unit 查看详情；"
+    echo "             若为环境错误，修复环境后重试。失败记录：$(cat "$STATE_FILE" 2>/dev/null)"
+    exit 1
+  fi
+fi
+
 STAGED_PY=$(git diff --cached --name-only --diff-filter=ACM | grep '\.py$' || true)
 if [ -n "$STAGED_PY" ]; then
   echo "[pre-commit] 语法检查 $(echo "$STAGED_PY" | wc -l | tr -d ' ') 个文件"

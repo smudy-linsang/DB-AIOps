@@ -43,22 +43,32 @@ trigger: always_on
 - validate 退出码 0 → 钩子 exit 0 放行，并清除失败状态文件
 - validate 退出码 1 → 钩子 exit 0 + feedback JSON（实测以 additional context 注入会话，
   给出失败阶段名与修复指引），并写失败状态文件 `db-aiops/logs/qoder-edit-validate.fail`
-- validate 退出码 2 → 钩子 exit 1 上报环境/用法错误，不阻断
-- jq 缺失 → 钩子 exit 1 并显式留痕，无静默放行分支
+- validate 退出码 2 → 钩子 exit 1 + 写失败状态文件（环境异常不得静默，
+  由 Stop 钩子与 pre-commit 后续强制复验）
+- jq 缺失 → 降级解析（post-edit 用 sed 提取 file_path，stop-gate 用 grep 判定
+  stop_hook_active）：降级成功则照常验证；降级也失败才写失败状态文件 + exit 1，
+  无静默放行分支
 - 每次运行留痕于 `db-aiops/logs/qoder-edit-validate.log`（已被 .gitignore 忽略）
 
 Stop 兜底闸（工作区根 `.qoder/hooks/stop-validate-gate.sh`，可阻断事件）：
 Agent 尝试结束响应时，若失败状态文件存在则复验——复验通过自动清除状态放行；
 仍失败则 exit 2 阻断结束，理由注入会话强制先修复；`stop_hook_active=true` 时
-按平台要求放行防死循环；环境异常（jq 缺失/validate 不可执行）放行但显式留痕。
+按平台要求放行防死循环；环境异常（validate 不可执行/复验 rc=2）防误阻断而放行，
+但失败状态文件保留（仅复验通过才清除），由下次编辑/响应结束/提交前继续强制复验，
+无静默分支。
 
 钩子不改变 validate.sh 的分层结构与退出码语义，只做触发面接入；
 钩子注册在 Qoder 启动时加载（注册变更需新会话生效，脚本内容变更即时生效）。
-pre-commit 仍是提交时刻辅助安全网。
+
+pre-commit 失败状态强制复验：提交时若失败状态文件存在（不限 Python 文件），
+先复验 `scripts/validate.sh unit` —— 通过则清除状态继续，未通过则阻断提交，
+保证任何在编辑阶段被放行的失败状态在进入交付（commit）前必然被再次拦截。
+pre-commit 仍是提交时刻辅助安全网（本地文件、不随仓库分发、可 --no-verify 跳过）。
 
 ## pre-commit 钩子（辅助安全网）
 
-`scripts/validate.sh unit` 已接入 pre-commit 钩子（`scripts/pre-commit`），提交 Python 文件时自动执行。
+`scripts/validate.sh unit` 已接入 pre-commit 钩子（`scripts/pre-commit`），提交 Python 文件时自动执行；
+且任何提交前若存在编辑后验证失败状态文件（`logs/qoder-edit-validate.fail`），都会强制复验（见上节）。
 安装钩子：`bash scripts/install-hooks.sh`。
 此钩子仅作为辅助安全网 —— 主要依赖编辑后验证，不替代它。
 
