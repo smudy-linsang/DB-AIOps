@@ -29,19 +29,32 @@ trigger: always_on
 | 提交前（前端改动） | `scripts/validate.sh frontend` | ~30s |
 | 两侧都改 | `scripts/validate.sh all` | ~2min |
 
-## 编辑时刻 Qoder Hook（确定性强制层）
+## 编辑时刻 Qoder Hook（确定性验证层）
 
 `scripts/validate.sh unit --json` 已接入 Qoder 编辑时刻触发面：工作区根
-`.qoder/settings.json` 注册 `PostToolUse` 钩子（matcher `Write|Edit|SearchReplace`），
-脚本为工作区根 `.qoder/hooks/post-edit-validate.sh`。db-aiops 内文件被编辑后钩子自动运行 unit 验证：
+`.qoder/settings.json` 注册 `PostToolUse` 钩子（matcher `Write|Edit|SearchReplace`，
+脚本为工作区根 `.qoder/hooks/post-edit-validate.sh`）。db-aiops 内文件被编辑后
+钩子自动运行 unit 验证并留痕。
 
-- validate.sh 退出码 0 → 钩子放行（exit 0）
-- validate.sh 退出码 1 → 钩子以 exit 2 阻断，stderr 注入会话并给出首个失败阶段名与修复指引
-- validate.sh 退出码 2 → 上报环境/用法错误，不阻断
+平台约束（docs.qoder.com/extensions/hooks，2026-08 实测核实）：PostToolUse 不可阻断
+（事件表 Blockable=No），exit 2 的「阻断 + stderr 注入会话」仅对可阻断事件生效。
+因此编辑时刻的语义是「留痕 + 反馈 + 规则强制」，确定性阻断由 Stop 钩子兜底：
+
+- validate 退出码 0 → 钩子 exit 0 放行，并清除失败状态文件
+- validate 退出码 1 → 钩子 exit 0 + feedback JSON（实测以 additional context 注入会话，
+  给出失败阶段名与修复指引），并写失败状态文件 `db-aiops/logs/qoder-edit-validate.fail`
+- validate 退出码 2 → 钩子 exit 1 上报环境/用法错误，不阻断
+- jq 缺失 → 钩子 exit 1 并显式留痕，无静默放行分支
 - 每次运行留痕于 `db-aiops/logs/qoder-edit-validate.log`（已被 .gitignore 忽略）
 
+Stop 兜底闸（工作区根 `.qoder/hooks/stop-validate-gate.sh`，可阻断事件）：
+Agent 尝试结束响应时，若失败状态文件存在则复验——复验通过自动清除状态放行；
+仍失败则 exit 2 阻断结束，理由注入会话强制先修复；`stop_hook_active=true` 时
+按平台要求放行防死循环；环境异常（jq 缺失/validate 不可执行）放行但显式留痕。
+
 钩子不改变 validate.sh 的分层结构与退出码语义，只做触发面接入；
-钩子配置在 Qoder 启动加载后生效（通常需新会话）。pre-commit 仍是提交时刻辅助安全网。
+钩子注册在 Qoder 启动时加载（注册变更需新会话生效，脚本内容变更即时生效）。
+pre-commit 仍是提交时刻辅助安全网。
 
 ## pre-commit 钩子（辅助安全网）
 
