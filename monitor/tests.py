@@ -2,13 +2,18 @@ import json
 from contextlib import ExitStack
 from unittest import mock
 
-from django.test import TestCase, tag
+from django.test import Client, TestCase, tag
 
 from monitor.alert_manager import AlertManager, reset_aggregation
+from monitor.auth import Perm, RoleCode
 from monitor.crypto import decrypt_password, encrypt_password, is_encrypted
 from monitor.management.commands.start_monitor import Command
-from monitor.models import AlertLog, DatabaseConfig, MonitorLog
+from monitor.models import (
+    AlertLog, AlertNotificationLog, AlertSilenceWindow, DatabaseConfig,
+    MonitorLog, NotificationRule,
+)
 from monitor.pg_capacity import postgresql_db_used_pct
+from monitor.tests_bugfix import login, make_db, make_user
 
 
 # BUG-008: AlertManager v3.0 改为"通知规则驱动"，fire()/resolve() 统一走
@@ -257,3 +262,128 @@ class AlertOpsTests(TestCase):
                 am._add_to_aggregation(a, ("down", "agg_key"))
         # 达到 MIN_COUNT=3 应触发一次聚合推送
         self.assertTrue(send.called)
+
+
+@tag('unit')
+class AlertViewSecurityTests(TestCase):
+    """告警配置/通知规则/通知日志视图的越权与状态机缺陷回归。
+
+    修复前：这些视图只要求登录（require_auth），无任何 require_permission，
+    只读账号即可创建全局静默窗口/增删通知规则，且通知日志无数据范围过滤。
+    """
+
+    def setUp(self):
+        reset_aggregation()
+        self.db1 = make_db('sec-db1', port=3306)
+        self.db2 = make_db('sec-db2', port=3307)
+        # 只读账号：仅 alerts.view，无任何 manage 权限
+        self.readonly = make_user(
+            'sec-ro', RoleCode.READONLY, [Perm.ALERTS_VIEW], allowed_dbs=[self.db1.id])
+        # DBA 账号：数据范围仅限 db1
+        self.dba = make_user(
+            'sec-dba', RoleCode.DBA,
+            [Perm.ALERTS_VIEW, Perm.ALERTS_ACKNOWLEDGE], allowed_dbs=[self.db1.id])
+
+    # ---------- 缺陷A：静默窗口越权 ----------
+    def test_readonly_cannot_create_silence_window(self):
+        c = Client(); login(c, self.readonly)
+        r = c.post('/api/v1/silence-windows/',
+                   data=json.dumps({'name': '全局静默'}), content_type='application/json')
+        self.assertEqual(r.status_code, 403, '只读账号不应能创建静默窗口')
+        self.assertEqual(AlertSilenceWindow.objects.count(), 0)
+
+    def test_readonly_cannot_delete_silence_window(self):
+        w = AlertSilenceWindow.objects.create(
+            name='w', start_time='00:00', end_time='01:00')
+        c = Client(); login(c, self.readonly)
+        r = c.delete(f'/api/v1/silence-windows/{w.id}/')
+        self.assertEqual(r.status_code, 403, '只读账号不应能删除静默窗口')
+        self.assertTrue(AlertSilenceWindow.objects.filter(id=w.id).exists())
+
+    # ---------- 缺陷A：通知规则越权 ----------
+    def test_readonly_cannot_create_notification_rule(self):
+        c = Client(); login(c, self.readonly)
+        r = c.post('/api/v1/notification-rules/',
+                   data=json.dumps({'name': 'rule'}), content_type='application/json')
+        self.assertEqual(r.status_code, 403, '只读账号不应能创建通知规则')
+        self.assertEqual(NotificationRule.objects.count(), 0)
+
+    def test_readonly_cannot_update_notification_rule(self):
+        rule = NotificationRule.objects.create(name='r1')
+        c = Client(); login(c, self.readonly)
+        r = c.put(f'/api/v1/notification-rules/{rule.id}/',
+                  data=json.dumps({'is_enabled': False}), content_type='application/json')
+        self.assertEqual(r.status_code, 403, '只读账号不应能改通知规则')
+        self.assertTrue(NotificationRule.objects.get(id=rule.id).is_enabled)
+
+    # ---------- 缺陷B：通知日志无数据范围 ----------
+    def test_notification_log_respects_scope(self):
+        a1 = AlertLog.objects.create(config=self.db1, alert_type='down', title='t1',
+                                     description='d', status='active')
+        a2 = AlertLog.objects.create(config=self.db2, alert_type='down', title='t2',
+                                     description='d', status='active')
+        AlertNotificationLog.objects.create(alert=a1, channel='email', status='success')
+        AlertNotificationLog.objects.create(alert=a2, channel='email', status='success')
+        c = Client(); login(c, self.dba)  # 仅可见 db1
+        r = c.get('/api/v1/alert-notifications/')
+        self.assertEqual(r.status_code, 200)
+        ids = {n['alert_id'] for n in r.json()['notifications']}
+        self.assertIn(a1.id, ids)
+        self.assertNotIn(a2.id, ids, '通知日志泄露了数据范围外实例')
+
+    # ---------- 缺陷C：acknowledge 状态机 ----------
+    def test_cannot_acknowledge_resolved_alert(self):
+        alert = AlertLog.objects.create(config=self.db1, alert_type='down', title='t',
+                                        description='d', status='resolved')
+        c = Client(); login(c, self.dba)
+        with mock.patch('monitor.elasticsearch_engine.sync_alert', return_value=True):
+            r = c.post(f'/api/v1/alerts/{alert.id}/acknowledge/')
+        self.assertIn(r.status_code, (400, 409), '已恢复告警不应能被重新确认')
+        self.assertEqual(AlertLog.objects.get(id=alert.id).status, 'resolved')
+
+    def test_acknowledge_active_alert_ok_and_syncs_es(self):
+        alert = AlertLog.objects.create(config=self.db1, alert_type='down', title='t',
+                                        description='d', status='active')
+        c = Client(); login(c, self.dba)
+        with mock.patch('monitor.elasticsearch_engine.sync_alert', return_value=True) as sync:
+            r = c.post(f'/api/v1/alerts/{alert.id}/acknowledge/')
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(AlertLog.objects.get(id=alert.id).status, 'acknowledged')
+        self.assertTrue(sync.called, '确认后应同步 ES 避免列表陈旧')
+
+    # ---------- 正向：合法 manage 角色不应被误伤 ----------
+    def test_config_operator_can_manage_silence_window(self):
+        op = make_user('sec-op', RoleCode.CONFIG_OPERATOR,
+                       [Perm.ALERT_CONFIG_VIEW, Perm.ALERT_CONFIG_MANAGE],
+                       allowed_dbs=[self.db1.id])
+        c = Client(); login(c, op)
+        r = c.post('/api/v1/silence-windows/',
+                   data=json.dumps({'name': '维护窗口', 'config_id': self.db1.id}),
+                   content_type='application/json')
+        self.assertEqual(r.status_code, 201, '有 manage 权限应能创建静默窗口')
+
+    def test_config_operator_can_manage_notification_rule(self):
+        op = make_user('sec-op2', RoleCode.CONFIG_OPERATOR,
+                       [Perm.NOTIFICATION_VIEW, Perm.NOTIFICATION_MANAGE],
+                       allowed_dbs=[self.db1.id])
+        c = Client(); login(c, op)
+        r = c.post('/api/v1/notification-rules/',
+                   data=json.dumps({'name': 'r', 'db_config_id': self.db1.id,
+                                    'channels': ['email']}),
+                   content_type='application/json')
+        self.assertEqual(r.status_code, 201, '有 manage 权限应能创建通知规则')
+
+    # ---------- 数据范围：受限用户不能为范围外实例配置 ----------
+    def test_scoped_user_cannot_config_other_db(self):
+        op = make_user('sec-op3', RoleCode.CONFIG_OPERATOR,
+                       [Perm.ALERT_CONFIG_MANAGE, Perm.NOTIFICATION_MANAGE],
+                       allowed_dbs=[self.db1.id])  # 仅可见 db1
+        c = Client(); login(c, op)
+        r = c.post('/api/v1/silence-windows/',
+                   data=json.dumps({'name': 'x', 'config_id': self.db2.id}),
+                   content_type='application/json')
+        self.assertEqual(r.status_code, 403, '不能为数据范围外实例创建静默窗口')
+        r2 = c.post('/api/v1/notification-rules/',
+                    data=json.dumps({'name': 'x', 'db_config_id': self.db2.id}),
+                    content_type='application/json')
+        self.assertEqual(r2.status_code, 403, '不能为数据范围外实例创建通知规则')

@@ -1165,9 +1165,21 @@ class AlertAcknowledgeView(JSONResponseMixin, View):
         if allowed_db_ids is not None and alert.config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
         
+        # 仅活跃告警可确认：已恢复/已确认的不重复处理，避免状态回退
+        if alert.status != 'active':
+            return self.error_response(
+                f'告警当前状态为 {alert.status}，仅活跃(active)告警可确认', 409)
+        
         # 更新告警状态
         alert.status = 'acknowledged'
-        alert.save()
+        alert.last_notified_at = timezone.now()
+        alert.save(update_fields=['status', 'last_notified_at'])
+        # 一致性: 同步 ES 文档状态, 避免列表(优先读ES)显示陈旧 active
+        try:
+            from monitor.elasticsearch_engine import sync_alert
+            sync_alert(alert)
+        except Exception as e:
+            degrade.note('alert.ack.es_sync', exc=e)
         
         return self.json_response({
             'status': 'success',
@@ -3449,8 +3461,13 @@ class SilenceWindowListView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission('alert_config.view'))
     def get(self, request):
+        # 数据范围：受限用户仅见其可见库的窗口与全局窗口
+        allowed_db_ids = get_user_database_ids(request.user)
         windows = AlertSilenceWindow.objects.all().order_by('-is_active', '-create_time')
+        if allowed_db_ids is not None:
+            windows = windows.filter(Q(config_id__in=allowed_db_ids) | Q(config_id__isnull=True))
         data = []
         for w in windows:
             data.append({
@@ -3464,10 +3481,16 @@ class SilenceWindowListView(JSONResponseMixin, View):
             })
         return self.json_response({'silence_windows': data})
 
+    @method_decorator(require_permission('alert_config.manage'))
     def post(self, request):
         try:
             body = json.loads(request.body)
             config_id = body.get('config_id')
+            # 数据范围：受限用户仅能为其可见库创建静默窗口
+            if config_id:
+                allowed_db_ids = get_user_database_ids(request.user)
+                if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
+                    return self.error_response('Permission denied', 403)
             config = DatabaseConfig.objects.get(id=config_id) if config_id else None
             w = AlertSilenceWindow.objects.create(
                 config=config, name=body['name'],
@@ -3495,14 +3518,26 @@ class SilenceWindowDetailView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission('alert_config.view'))
     def get(self, request, pk):
         w = get_object_or_404(AlertSilenceWindow, id=pk)
         return self.json_response({'id': w.id, 'name': w.name, 'alert_type': w.alert_type,
             'start_time': str(w.start_time), 'end_time': str(w.end_time),
             'weekdays': w.weekdays, 'is_active': w.is_active, 'reason': w.reason})
 
+    def _check_scope(self, request, w):
+        """受限用户仅能操作其可见库的窗口；全局窗口(config 为空)仅超级管理员可见范围外。"""
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and w.config_id is not None \
+                and w.config_id not in allowed_db_ids:
+            return False
+        return True
+
+    @method_decorator(require_permission('alert_config.manage'))
     def put(self, request, pk):
         w = get_object_or_404(AlertSilenceWindow, id=pk)
+        if not self._check_scope(request, w):
+            return self.error_response('Permission denied', 403)
         try:
             body = json.loads(request.body)
             for k in ('name', 'alert_type', 'start_time', 'end_time', 'weekdays', 'is_active', 'reason'):
@@ -3514,8 +3549,11 @@ class SilenceWindowDetailView(JSONResponseMixin, View):
             degrade.note('api.silence_window.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
+    @method_decorator(require_permission('alert_config.manage'))
     def delete(self, request, pk):
         w = get_object_or_404(AlertSilenceWindow, id=pk)
+        if not self._check_scope(request, w):
+            return self.error_response('Permission denied', 403)
         w.delete()
         return self.json_response({'message': '已删除'})
 
@@ -3532,8 +3570,13 @@ class NotificationRuleListView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission('notification.view'))
     def get(self, request):
+        # 数据范围：受限用户仅见其可见库的规则与全局规则
+        allowed_db_ids = get_user_database_ids(request.user)
         rules = NotificationRule.objects.all().order_by('-priority', 'name')
+        if allowed_db_ids is not None:
+            rules = rules.filter(Q(db_config_id__in=allowed_db_ids) | Q(db_config_id__isnull=True))
         data = [{'id': r.id, 'name': r.name, 'alert_types': r.alert_types,
                  'severities': r.severities, 'channels': r.channels,
                  'db_config_id': r.db_config_id, 'schedule': r.schedule,
@@ -3542,10 +3585,16 @@ class NotificationRuleListView(JSONResponseMixin, View):
                 for r in rules]
         return self.json_response({'rules': data})
 
+    @method_decorator(require_permission('notification.manage'))
     def post(self, request):
         try:
             body = json.loads(request.body)
             config_id = body.get('db_config_id')
+            # 数据范围：受限用户仅能为其可见库创建规则
+            if config_id:
+                allowed_db_ids = get_user_database_ids(request.user)
+                if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
+                    return self.error_response('Permission denied', 403)
             config = DatabaseConfig.objects.get(id=config_id) if config_id else None
             # 4NF: 多值字段(alert_types/severities/channels)经兼容属性写入子表
             r = NotificationRule.objects.create(
@@ -3572,8 +3621,19 @@ class NotificationRuleDetailView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    def _check_scope(self, request, r):
+        """受限用户仅能操作其可见库的规则。"""
+        allowed_db_ids = get_user_database_ids(request.user)
+        if allowed_db_ids is not None and r.db_config_id is not None \
+                and r.db_config_id not in allowed_db_ids:
+            return False
+        return True
+
+    @method_decorator(require_permission('notification.manage'))
     def put(self, request, pk):
         r = get_object_or_404(NotificationRule, id=pk)
+        if not self._check_scope(request, r):
+            return self.error_response('Permission denied', 403)
         try:
             body = json.loads(request.body)
             for k in ('name', 'alert_types', 'severities', 'channels', 'schedule',
@@ -3586,8 +3646,11 @@ class NotificationRuleDetailView(JSONResponseMixin, View):
             degrade.note('api.notification_rule.update', reason=f'{request.path}: {e}', exc=e)
             return self.error_response(str(e), 400)
 
+    @method_decorator(require_permission('notification.manage'))
     def delete(self, request, pk):
         r = get_object_or_404(NotificationRule, id=pk)
+        if not self._check_scope(request, r):
+            return self.error_response('Permission denied', 403)
         r.delete()
         return self.json_response({'message': '已删除'})
 
@@ -3604,12 +3667,19 @@ class AlertNotificationLogView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission('alerts.view'))
     def get(self, request, alert_id=None):
+        # 数据范围：受限用户仅见其可见库告警的通知记录
+        allowed_db_ids = get_user_database_ids(request.user)
         # 支持两种模式：按 alert_id 过滤，或列出全部
         if alert_id:
-            queryset = AlertNotificationLog.objects.filter(alert_id=alert_id).order_by('-send_time')
+            queryset = AlertNotificationLog.objects.filter(alert_id=alert_id)
         else:
-            queryset = AlertNotificationLog.objects.all().order_by('-send_time')[:100]
+            queryset = AlertNotificationLog.objects.all()
+        if allowed_db_ids is not None:
+            queryset = queryset.filter(alert__config_id__in=allowed_db_ids)
+        # 先过滤再排序+切片（切片返回 list，不可逆）
+        queryset = queryset.order_by('-send_time')[:100]
         data = [{'id': n.id, 'alert_id': n.alert_id, 'channel': n.channel, 'status': n.status,
                  'error_message': n.error_message, 'send_time': n.send_time.isoformat()}
                 for n in queryset]
