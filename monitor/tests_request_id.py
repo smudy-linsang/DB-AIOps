@@ -17,10 +17,10 @@ from django.http import HttpResponse
 from django.test import Client, RequestFactory, TestCase, tag
 
 from monitor import degrade
-from monitor.auth import RoleCode
+from monitor.auth import Perm, RoleCode
 from monitor.crypto import encrypt_password
 from monitor.middleware import RequestIdMiddleware
-from monitor.models import DatabaseConfig, Role, UserProfile
+from monitor.models import DatabaseConfig, Role, RolePermission, UserProfile
 from monitor.request_context import (
     RequestIdFilter, get_request_id, reset_request_id, set_request_id,
 )
@@ -29,10 +29,20 @@ from monitor.request_context import (
 # =============================================================================
 # 公共夹具（与 tests_bugfix.py 同款最小实现）
 # =============================================================================
-def _make_user(username):
+def _make_user(username, perms=()):
+    """建用户并挂只读角色。
+
+    V2.6 W1：`/databases/<id>/slow-queries/` 已补上
+    `sql_monitoring.view` 权限闸（此前该接口仅 require_auth，任何登录用户都能
+    读慢查询 SQL 原文）。本文件的用例聚焦的是"失败分支留痕与关联 ID 串联"，
+    不是权限，故显式授予所需权限 —— 否则会被 403 短路，等于没测到留痕逻辑。
+    权限与数据范围是两道独立的闸，这里只为通过权限闸。
+    """
     user = User.objects.create_user(username=username, password='Pw!23456')  # secret-scan: allow 测试夹具
     role, _ = Role.objects.get_or_create(
         code=RoleCode.READONLY, defaults={'name': RoleCode.READONLY, 'is_builtin': True})
+    for code in perms:
+        RolePermission.objects.get_or_create(role=role, permission_code=code)
     UserProfile.objects.create(user=user, role=role)
     return user
 
@@ -109,7 +119,8 @@ class ApiFailureDiagnosticLogTests(TestCase):
     """关键失败分支：degrade 分级留痕，且日志行与响应用同一关联 ID 串联。"""
 
     def setUp(self):
-        self.user = _make_user('diag')
+        # V2.6 W1: 该端点在本次加固中补了 sql_monitoring.view 权限闸
+        self.user = _make_user('diag', perms=[Perm.SQL_MONITORING_VIEW])
         self.db = _make_db()
         degrade.reset()
 
