@@ -56,6 +56,10 @@ jobs:
       - name: 依赖完整性
         # 防 BUG-137 复现：requirements 里声明了但装不上/装漏
         run: python scripts/check_deps.py
+      - name: 文档版本一致性
+        # V2.6 W5-03：README/PROJECT_SUMMARY 的版本声明必须与
+        # dbmonitor/version.py（单一版本源）一致，禁止文档漂移
+        run: python scripts/check_doc_version.py
 
   # ── 单元测试：无外部服务，最快反馈 ──────────────────────────
   test-unit:

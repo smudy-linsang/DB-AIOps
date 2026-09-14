@@ -77,6 +77,8 @@ run_backend() {
   # 新增（H 方案缺失）：模型改了没生成 migration 是最高频的"本地能跑、部署即炸"
   _run "迁移漂移检查" python manage.py makemigrations --check --dry-run || return 1
   _run "依赖完整性"  python scripts/check_deps.py               || return 1
+  # V2.6 W5-03：文档版本声明必须与 dbmonitor/version.py 一致（消除文档漂移）
+  _run "文档版本一致" python scripts/check_doc_version.py        || return 1
   # Django 自动发现 monitor 下所有 TestCase/SimpleTestCase 模块
   # （tests.py, tests_self_monitor.py, tests_phase8.py 等）。
   # tests_phase7.py 是纯函数脚本（非 TestCase），不在自动发现范围内，

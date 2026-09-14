@@ -1,6 +1,12 @@
-# 数据库监控系统 v2.1
+# DB-AIOps 数据库智能运维平台 v2.6
 
-🛡️ **全能型数据库监控解决方案** - 支持 Oracle, MySQL, PostgreSQL, 达梦，Gbase8a, TDSQL
+🛡️ **全能型数据库智能运维平台** - 支持 Oracle, MySQL, PostgreSQL, 达梦，Gbase8a, TDSQL
+
+> **版本说明**：当前版本号以 `dbmonitor/version.py` 为**单一版本源**（现为 `2.6.0`），
+> 由 `scripts/check_doc_version.py` 在 CI 中机械校验，禁止文档与代码版本漂移。
+>
+> **能力边界诚实声明**：下文标注 `【未实现】` 的能力目前仅有设计稿或部分实现，
+> 请勿据此评估生产可用性 —— 这条约定正是为消除"文档画大饼"而设。
 
 ## 📋 功能特性
 
