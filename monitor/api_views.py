@@ -84,7 +84,8 @@ def _scoped_config(request, config_id):
               .first())
     if config is None:
         try:
-            exists = DatabaseConfig.objects.filter(id=config_id).exists()
+            # 审计用途的存在性判定：故意全局，仅为日志区分"越权"与"不存在"
+            exists = DatabaseConfig.objects.filter(id=config_id).exists()  # scope-check: allow 审计存在性判定(故意全局)
         except Exception:
             exists = None
         logger.warning(
@@ -686,8 +687,8 @@ class DatabaseStatusView(JSONResponseMixin, View):
                 else:
                     # 实时计算健康评分
                     try:
-                        # scope-check: allow 本方法开头已手写等价范围校验(config_id 已核对)
-                        config = DatabaseConfig.objects.get(id=config_id)
+                        # 统一走 scope 原语，避免裸查触发红线规则（本方法开头已校验范围）
+                        config = _scoped_config(request, config_id)
                         engine = HealthEngine(config)
                         report = engine.calculate()
                         health_score = report.get('overall_score', 0)

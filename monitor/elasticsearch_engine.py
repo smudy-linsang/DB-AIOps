@@ -45,7 +45,19 @@ def get_es_client():
     """获取 Elasticsearch 客户端（全局单例，复用连接池）
 
     BUG-017 修复：加锁避免并发重复创建客户端；替换前显式关闭失效客户端释放连接池。
+
+    V2.6 W2-01：新增 ES_ENABLED 短路。此前本函数不读开关，而
+    alert_manager.fire() 每次告警都会经 index_alert() 走到这里；于是在
+    ES_ENABLED=False（含 dbmonitor.settings_test_unit）时仍去连
+    localhost:9200，并按 request_timeout=30 / max_retries=3 反复重试 ——
+    实测把声明"零外部依赖、~10s"的 unit 层拖到 5 分钟以上仍不返回，
+    直接损害 AGENTS.md 唯一强制的编辑后质量闸（scripts/validate.sh unit）。
+    关闭时返回 None：所有调用点均已具备 None 分支（提前返回并 degrade 留痕）。
     """
+    from monitor import appconf
+    if not appconf.get('ES_ENABLED'):
+        return None
+
     global _es_client
 
     # 快速路径：已有可用客户端时无锁返回

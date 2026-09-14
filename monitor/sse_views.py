@@ -15,7 +15,6 @@ import redis
 import threading
 import time
 
-from django.conf import settings
 from django.http import StreamingHttpResponse
 from django.views import View
 from django.utils.decorators import method_decorator
@@ -30,9 +29,22 @@ _connections_lock = threading.Lock()
 
 
 def get_redis_client():
-    """获取 Redis 客户端"""
-    redis_url = getattr(settings, 'REDIS_URL', 'redis://localhost:6379/0')
-    return redis.from_url(redis_url)
+    """获取 Redis 客户端（供 Pub/Sub 使用）。
+
+    V2.6 W2-02：改为复用 monitor.redis_bus 的进程级单例连接池，并新增
+    USE_REDIS_CACHE 短路。此前此处自建 redis.from_url(settings.REDIS_URL)，
+    绕过了 settings.CACHES 与 REDIS_MAX_CONNECTIONS —— 于是在 unit 层
+    （LocMemCache + 无 Redis）仍去连 localhost:6379 并反复重试，是
+    "零外部依赖 ~10s" 契约被破坏的第二个来源。
+    redis_bus.get_bus() 已按 BUG-112 修复为单例（含 max_connections /
+    socket_timeout / health_check_interval），故本函数只是收敛到既有正确实现。
+    未启用时返回 None，调用方已具备 None 分支（降级而非崩溃）。
+    """
+    from monitor import appconf
+    if not appconf.get('USE_REDIS_CACHE'):
+        return None
+    from monitor.redis_bus import get_bus
+    return get_bus()
 
 
 def publish_event(channel: str, data: dict):
@@ -45,6 +57,9 @@ def publish_event(channel: str, data: dict):
     """
     try:
         r = get_redis_client()
+        if r is None:
+            # 未启用 Redis（开发/测试）：静默降级，不视为错误
+            return
         r.publish(channel, json.dumps(data, ensure_ascii=False, default=str))
     except Exception as e:
         logger.warning(f"[SSE] 发布事件失败 channel={channel}: {e}")
@@ -148,6 +163,12 @@ class SSEView(View):
 
         try:
             r = get_redis_client()
+            if r is None:
+                # V2.6 W2-02：Redis 未启用（开发/测试）→ 明确告知不可用，
+                # 而不是抛出 AttributeError 或空转。
+                yield self._format_sse('degraded', {
+                    'message': 'Redis 未启用，实时事件流不可用（USE_REDIS_CACHE=False）'})
+                return
             pubsub = r.pubsub()
             pubsub.subscribe('monitor:alerts', 'monitor:metrics')
 
