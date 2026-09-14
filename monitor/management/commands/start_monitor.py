@@ -24,7 +24,7 @@ from django.utils import timezone
 from monitor.alert_manager import AlertManager
 from monitor.alert_engine import AlertEngine  # Phase 3 智能告警引擎
 from monitor.baseline_engine import BaselineEngine
-from monitor.rca_engine import RCAEngine
+# V2.6 W4-02: RCA 统一到 rca_engine_v2（原 from monitor.rca_engine import RCAEngine）
 from monitor.capacity_engine import CapacityEngine
 from monitor.health_engine import HealthEngine
 from monitor.models import DatabaseConfig, MonitorLog
@@ -808,44 +808,50 @@ class Command(BaseCommand):
         except Exception as e:
             print(f"  [WARNING] 基线检测异常：{e}")
 
-        # --- D2. RCA 根因分析 ---
+        # --- D2. RCA 根因分析 (V2.6 W4-02: 统一到 RCAEngineV2) ---
+        #
+        # 此前本处调 v1 RCAEngine，而 diagnosis_pipeline 调 v2 —— 两套规则同时
+        # 在生产路径报警，同名规则（如 R001 连接数泄漏）两处实现、口径可能不同，
+        # 产生重复/矛盾告警。现统一到 v2（RULES_V2，39 条 + 复合规则）。
+        # v1 独有的 5 条规则（分片不均衡/日志激增/实例DOWN/连接来源集中/
+        # 日志写入瓶颈）与复合规则已在 W4-01 迁移进 v2，故本切换不回退能力。
         _d2_start = datetime.datetime.now()
         print(f"  [P2-TIMING] {config.name} D1 baseline={(_d2_start-_p2_start).total_seconds():.1f}s")
         try:
-            rca_engine = RCAEngine(config)
-            rca_report = rca_engine.analyze(data)
+            from monitor.rca_engine_v2 import RCAEngineV2, evaluate_compound_rules
+            rca_engine = RCAEngineV2(db_type=config.db_type)
+            diagnoses = rca_engine.diagnose(data, context=None)
 
-            if rca_report.get('diagnoses'):
-                for diag in rca_report['diagnoses']:
-                    if diag['severity'] == 'critical':
-                        body = (
-                            f"规则ID：{diag['rule_id']}\n"
-                            f"问题描述：{diag['description']}\n\n"
-                            f"建议措施：\n" + "\n".join(f"• {s}" for s in diag['suggestions'])
-                        )
-                        am.fire(
-                            alert_type='rca', metric_key=diag['rule_id'],
-                            title=f"[CRITICAL] RCA根因：{diag['name']}",
-                            description=body,
-                            severity='critical',
-                        )
-                        print(f"  [RCA] {diag['rule_id']} - {diag['name']}")
+            for diag in diagnoses:
+                if diag.severity != 'critical':
+                    continue
+                body = (
+                    f"规则ID：{diag.rule_id}\n"
+                    f"问题描述：{diag.description}\n\n"
+                    f"建议措施：\n" + "\n".join(f"• {s}" for s in diag.suggestions)
+                )
+                am.fire(
+                    alert_type='rca', metric_key=diag.rule_id,
+                    title=f"[CRITICAL] RCA根因：{diag.rule_name}",
+                    description=body,
+                    severity='critical',
+                )
+                print(f"  [RCA] {diag.rule_id} - {diag.rule_name}")
 
-            # 复合故障告警
-            if rca_report.get('compound_diagnoses'):
-                for compound in rca_report['compound_diagnoses']:
-                    body = (
-                        f"复合故障：{compound['name']}\n"
-                        f"关联规则：{', '.join(compound['requires'])}\n\n"
-                        f"建议措施：\n" + "\n".join(f"• {s}" for s in compound['suggestions'])
-                    )
-                    am.fire(
-                        alert_type='rca_compound', metric_key=compound['id'],
-                        title=f"[CRITICAL] 复合故障：{compound['name']}",
-                        description=body,
-                        severity='critical',
-                    )
-                    print(f"  [RCA-COMPOUND] {compound['id']} - {compound['name']}")
+            # 复合故障告警（v1 COMPOUND_RULES 的等价能力，W4-01 已迁移）
+            for compound in evaluate_compound_rules(diagnoses):
+                body = (
+                    f"复合故障：{compound['name']}\n"
+                    f"关联规则：{', '.join(compound['requires'])}\n\n"
+                    f"建议措施：\n" + "\n".join(f"• {s}" for s in compound['suggestions'])
+                )
+                am.fire(
+                    alert_type='rca_compound', metric_key=compound['id'],
+                    title=f"[CRITICAL] 复合故障：{compound['name']}",
+                    description=body,
+                    severity='critical',
+                )
+                print(f"  [RCA-COMPOUND] {compound['id']} - {compound['name']}")
 
         except Exception as e:
             print(f"  [WARNING] RCA分析异常：{e}")

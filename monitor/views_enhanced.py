@@ -26,7 +26,7 @@ from django.views.decorators.csrf import csrf_exempt
 from monitor.models import DatabaseConfig, MonitorLog, AuditLog
 from monitor.baseline_engine import BaselineEngine
 from monitor.intelligent_baseline_engine import IntelligentBaselineEngine
-from monitor.rca_engine import RCAEngine
+# V2.6 W4-03: RCA 统一到 rca_engine_v2（原 from monitor.rca_engine import RCAEngine）
 from monitor.auto_remediation_engine import AutoRemediationEngine
 from monitor.auth import require_auth, require_permission, Perm
 
@@ -147,11 +147,33 @@ def api_baseline_trend(request, config_id):
 @require_auth
 @require_permission(Perm.METRICS_VIEW)
 def api_rca(request, config_id):
-    config = get_object_or_404(DatabaseConfig, id=config_id)
+    """GET /api/rca/<config_id>/ (legacy)
+
+    V2.6 W4-03 两处修正：
+    ① 引擎统一 —— 原调 v1 RCAEngine（10 条规则），改用 RCAEngineV2
+       （39 条 + 复合规则），与 diagnosis_pipeline / start_monitor 一致；
+    ② 数据范围 —— 原用 get_object_or_404(DatabaseConfig, id=...) 裸取实例，
+       越权用户可读范围外实例的 RCA 报告。改用 visible_to()，越权与不存在
+       统一 404（不回 403，避免泄露实例 id 存在性）。
+    """
+    config = (DatabaseConfig.objects
+              .visible_to(request.user)
+              .filter(id=config_id)
+              .first())
+    if config is None:
+        return JsonResponse({'error': 'Database config not found'}, status=404)
     try:
-        engine = RCAEngine(config)
-        report = engine.analyze()
-        return JsonResponse(report)
+        from monitor.rca_engine_v2 import (RCAEngineV2, evaluate_compound_rules,
+                                           load_latest_metrics)
+        data = load_latest_metrics(config)
+        engine = RCAEngineV2(db_type=config.db_type)
+        diagnoses = engine.diagnose(data, context=None)
+        return JsonResponse({
+            'config_id': config.id,
+            'engine': 'rca_v2',
+            'diagnoses': [d.to_dict() for d in diagnoses],
+            'compound_diagnoses': evaluate_compound_rules(diagnoses),
+        })
     except Exception:
         logger.exception("[api_rca] 根因分析失败 config_id=%s", config_id)
         return _error('根因分析失败')

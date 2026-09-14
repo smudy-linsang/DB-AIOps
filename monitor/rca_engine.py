@@ -224,17 +224,24 @@ COMPOUND_RULES = [
 
 class RCAEngine:
     """
-    根因分析引擎 v2.0
-    
-    支持:
-    - 10+ 条诊断规则
-    - 复合因果链推导
-    - 严重程度动态计算
-    - 修复命令生成
+    [已废弃] 根因分析引擎 v1 —— **兼容薄壳**（V2.6 W4-05）。
+
+    本项目 RCA 已统一到 monitor.rca_engine_v2.RCAEngineV2：
+      * RULES_V2          39 条规则（含 V2.6 W4-01 自本模块迁移的 R081-R085）
+      * COMPOUND_RULES_V2 复合规则（等价于本模块的 COMPOUND_RULES）
+
+    analyze() 一律转发到 v2，**不再使用本模块的 RULES/COMPOUND_RULES**，
+    以免两套规则对同一指标给出不同结论并重复告警（这正是统一前的实际行为）。
+
+    本模块保留的 RULES / COMPOUND_RULES 常量仅供历史引用与差异比对，
+    不参与任何运行期判定。新代码请直接使用 RCAEngineV2。
+    计划于下个版本移除本类。
     """
-    
+
     def __init__(self, config: DatabaseConfig):
         self.config = config
+        # 注意：刻意不再持有 self.rules 作为判定依据（见类文档）。
+        # 保留该属性名仅为兼容可能读取它的外部脚本。
         self.rules = RULES
         self.compound_rules = COMPOUND_RULES
     
@@ -278,71 +285,69 @@ class RCAEngine:
     
     def analyze(self, current_data: Dict = None) -> Dict[str, Any]:
         """
-        执行根因分析
-        
-        参数:
-            current_data: 当前监控数据 (如果不传则自动获取最新数据)
-        
-        返回:
-            {
-                'timestamp': 分析时间,
-                'config': 数据库配置,
-                'diagnoses': [诊断结果列表],
-                'compound_diagnoses': [复合因果诊断],
-                'summary': 总结文本
-            }
+        [已废弃] 执行根因分析 —— 转发到 RCAEngineV2。
+
+        V2.6 W4-05：本项目 RCA 已统一到 monitor.rca_engine_v2.RCAEngineV2
+        （RULES_V2 共 39 条规则 + COMPOUND_RULES_V2）。本类保留为**兼容薄壳**，
+        诊断能力一律转发到 v2，不再使用本模块的 RULES/COMPOUND_RULES。
+
+        为什么必须转发而不是继续各跑各的：
+        此前 v1 由 start_monitor 调用、v2 由 diagnosis_pipeline 调用，两套规则
+        同时在生产路径报警；同名规则（如 R001 连接数泄漏）两处实现、判定口径
+        可能不同，会产生重复甚至相互矛盾的告警。统一后只有一个事实源。
+
+        返回结构保持 v1 旧形状（dict + 字符串 severity），以免破坏既有调用方
+        （scripts/test_phase2_features.py 等）。
+
+        新代码请直接使用 RCAEngineV2。
         """
+        import warnings
+        warnings.warn(
+            'RCAEngine 已废弃（V2.6 W4-05），诊断已统一到 RCAEngineV2，'
+            '请改用 monitor.rca_engine_v2.RCAEngineV2',
+            DeprecationWarning, stacklevel=2)
+
+        from monitor.rca_engine_v2 import (RCAEngineV2, evaluate_compound_rules,
+                                           load_latest_metrics)
+
         if current_data is None:
-            current_data = self.get_latest_data()
-        
+            current_data = load_latest_metrics(self.config)
         if not current_data:
             return {'error': '无可用数据', 'config_name': self.config.name}
-        
-        diagnoses = []
-        triggered_rule_ids = set()
-        
-        # 遍历所有规则
-        for rule in self.rules:
-            try:
-                if rule['condition'](current_data):
-                    severity = self._calculate_severity(rule, current_data)
-                    diagnoses.append({
-                        'rule_id': rule['id'],
-                        'name': rule['name'],
-                        'description': rule['description'],
-                        'severity': severity,
-                        'suggestions': rule['suggestions']
-                    })
-                    triggered_rule_ids.add(rule['id'])
-            except Exception as e:
-                # 规则执行失败，跳过
-                pass
-        
-        # 检查复合因果链
-        compound_diagnoses = []
-        for compound in self.compound_rules:
-            if all(req in triggered_rule_ids for req in compound['requires']):
-                compound_diagnoses.append({
-                    'rule_id': compound['id'],
-                    'name': compound['name'],
-                    'description': compound['description'],
-                    'requires': compound['requires'],
-                    'priority_boost': compound['priority_boost'],
-                    'suggestions': compound['suggestions']
-                })
-        
-        # 生成总结
+
+        engine = RCAEngineV2(db_type=self.config.db_type)
+        v2_diags = engine.diagnose(current_data, context=None)
+
+        diagnoses = [{
+            'rule_id': d.rule_id,
+            'name': d.rule_name,
+            'description': d.description,
+            'severity': d.severity,
+            'suggestions': list(d.suggestions),
+            'confidence': d.confidence,
+        } for d in v2_diags]
+
+        compound_diagnoses = [{
+            'rule_id': c['id'],
+            'name': c['name'],
+            'description': c.get('description', ''),
+            'requires': c['requires'],
+            'priority_boost': c.get('priority_boost', ''),
+            'suggestions': c['suggestions'],
+        } for c in evaluate_compound_rules(v2_diags)]
+
         summary = self._generate_summary(diagnoses, compound_diagnoses, current_data)
-        
+
         return {
             'timestamp': datetime.now().isoformat(),
             'config_name': self.config.name,
             'db_type': self.config.db_type,
+            'engine': 'rca_v2 (via v1 compatibility shell)',
             'diagnoses': diagnoses,
             'compound_diagnoses': compound_diagnoses,
             'summary': summary,
             'current_metrics': self._extract_current_metrics(current_data),
-            'rules_total': len(self.rules),
+            'rules_total': self.get_rule_count(),
             'rules_triggered': len(diagnoses),
         }
     
@@ -511,8 +516,9 @@ class RCAEngine:
         return commands
     
     def get_rule_count(self) -> int:
-        """获取规则总数"""
-        return len(self.rules)
+        """规则总数（V2.6 W4-05：返回 v2 的规则数，与 analyze 的实际口径一致）。"""
+        from monitor.rca_engine_v2 import RULES_V2
+        return len(RULES_V2)
 
 
 # ==========================================

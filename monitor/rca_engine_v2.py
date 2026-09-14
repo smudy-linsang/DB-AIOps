@@ -445,7 +445,194 @@ RULES_V2 = [
         ],
         'severity_default': 'warning',
     },
+    # =====================================================================
+    # R081-R085: 由 v1 rca_engine.RULES 迁移而来 (V2.6 W4-01)
+    #
+    # 背景：v1 与 v2 曾同时在生产路径报警（start_monitor 调 v1、
+    # diagnosis_pipeline 调 v2），同名规则两处实现、口径可能不同。
+    # 统一到 v2 前必须先把 v1 **独有**的规则迁过来，否则直接下线会回退能力。
+    # 逐条比对结论：v1 的 R001-R005 在 v2 已有对应域（R001/R002/R004/R031/R061），
+    # 以下 5 条为 v2 完全缺失的能力。
+    # =====================================================================
+    {
+        'id': 'R081', 'domain': 'cluster', 'name': '分片数据不均衡',
+        'condition': lambda d: (len(d.get('shards', []) or []) > 1
+                                and _v1_shard_imbalance(d.get('shards', []) or [])),
+        'description': 'TDSQL/GBase 分片间数据量差异过大，可能影响性能',
+        'typical_chain': '分片键选择不当 → 数据倾斜 → 热点分片 CPU/IO 打满',
+        'suggestions': [
+            '检查分片键选择是否合理',
+            '考虑重新平衡分片数据',
+            '评估是否需要增加分片数量',
+        ],
+        'severity_default': 'warning',
+    },
+    {
+        'id': 'R082', 'domain': 'io', 'name': '日志生成速率突增',
+        'condition': lambda d: _v1_log_burst(d),
+        'description': 'Redo/Binlog 生成速率异常突增，可能存在计划外大批量 DML',
+        'typical_chain': '计划外批量 DML → 日志生成激增 → 归档/磁盘压力 → 提交延迟',
+        'suggestions': [
+            '确认是否有计划内批量作业在执行',
+            '若非计划内操作，立即定位来源会话',
+            '检查是否有异常的数据写入行为',
+        ],
+        'severity_default': 'warning',
+    },
+    {
+        'id': 'R083', 'domain': 'connection', 'name': '实例状态异常',
+        'condition': lambda d: d.get('current_status') == 'DOWN',
+        'description': '数据库实例当前处于 DOWN 状态',
+        'typical_chain': '实例宕机/网络中断 → 应用连接失败 → 业务不可用',
+        'suggestions': [
+            '立即检查数据库服务状态',
+            '查看数据库 Alert Log / 错误日志',
+            '确认是否为计划内停机或意外故障',
+        ],
+        'severity_default': 'critical',
+    },
+    {
+        'id': 'R084', 'domain': 'connection', 'name': '连接来源集中度过高',
+        'condition': lambda d: (d.get('conn_usage_pct', 0) > 80
+                                and _v1_conn_source_concentration(d)),
+        'description': '连接数使用率高且连接来自少数几个来源 IP，'
+                       '可能是特定应用连接池配置异常',
+        'typical_chain': '单应用连接池配置过大 → 连接来源集中 → 连接耗尽风险',
+        'suggestions': [
+            '按来源 IP 分析连接分布',
+            '检查问题 IP 对应的应用程序连接池配置',
+            '考虑限制特定 IP 的最大连接数',
+        ],
+        'severity_default': 'warning',
+    },
+    {
+        'id': 'R085', 'domain': 'io', 'name': '日志写入瓶颈',
+        'condition': lambda d: _v1_log_sync_wait(d),
+        'description': '等待事件显示 log file sync 成为瓶颈，'
+                       'Redo Log 写入可能存在问题',
+        'typical_chain': '存储 I/O 延迟升高 → log file sync 等待 → 提交变慢 → 事务堆积',
+        'suggestions': [
+            '检查 Redo Log 所在磁盘的 I/O 延迟',
+            '评估是否需要将 Redo Log 迁移到更快的存储',
+            '检查是否存在大批量提交操作',
+        ],
+        'severity_default': 'warning',
+    },
 ]
+
+
+# ---------------------------------------------------------------------------
+# v1 规则判据迁移（V2.6 W4-01）
+# 逐行照搬 rca_engine.py 的实现，保证迁移前后判定口径一致。
+# ---------------------------------------------------------------------------
+def _v1_shard_imbalance(shards) -> bool:
+    """分片数据量偏差 > 50% 视为不均衡（判据与 v1 一致）。"""
+    if len(shards) < 2:
+        return False
+    sizes = [s.get('data_size_mb', 0) for s in shards]
+    if not sizes or max(sizes) == 0:
+        return False
+    avg = sum(sizes) / len(sizes)
+    if avg == 0:
+        return False
+    return max(abs(s - avg) / avg for s in sizes) > 0.5
+
+
+def _v1_log_burst(data) -> bool:
+    """日志生成速率突增（判据与 v1 一致）。"""
+    if 'binlog_size_delta' in data and data['binlog_size_delta'] > 1000:
+        return True
+    if 'redo_rate_mb_per_hour' in data and data['redo_rate_mb_per_hour'] > 500:
+        return True
+    return False
+
+
+def _v1_conn_source_concentration(data) -> bool:
+    """连接来源集中于少数 IP（判据与 v1 一致）。"""
+    if 'top_conn_sources' in data:
+        sources = data.get('top_conn_sources', [])
+        if len(sources) <= 3 and sources:
+            return True
+    return False
+
+
+def _v1_log_sync_wait(data) -> bool:
+    """是否处于 log file sync 等待（判据与 v1 一致）。"""
+    if 'top_wait_event' in data and 'log file sync' in str(data.get('top_wait_event', '')):
+        return True
+    return False
+
+
+# ---------------------------------------------------------------------------
+# 复合规则（V2.6 W4-01：从 v1 rca_engine.COMPOUND_RULES 迁移）
+# 语义：requires 中列出的规则全部命中时，产出一条更高置信度的复合结论。
+# v2 原无此能力，而它是 start_monitor 目前唯一在产出复合告警的来源。
+# ---------------------------------------------------------------------------
+COMPOUND_RULES_V2 = [
+    {
+        'id': 'CR001',
+        'name': '连接堆积引发锁竞争',
+        # v1 原为 requires=['R001','R002']，但 v1 的 R002 是"锁等待"，
+        # 而 v2 的 R002 是"连接风暴" —— 编号语义不同，直接照搬会指错规则。
+        # 按 v2 语义修正：连接数泄漏(R001) + 锁等待激增(R021)。
+        'requires': ['R001', 'R021'],
+        'description': '连接数泄漏同时伴随锁等待，可能形成复合故障',
+        'priority_boost': 'P1',
+        'suggestions': [
+            '这是复合故障场景，应优先处理',
+            '先解决连接泄漏问题 (R001)',
+            '同时清理锁等待会话 (R021)',
+            '检查应用层连接管理逻辑',
+        ],
+    },
+]
+
+
+def evaluate_compound_rules(diagnoses) -> list:
+    """输入 RCADiagnosis 列表，返回复合结论列表（dict）。
+
+    命中判据与 v1 rca_engine.analyze 一致：
+    requires 中每个 rule_id 都出现在本次命中的规则集合里。
+    """
+    hit = {getattr(d, 'rule_id', None) for d in (diagnoses or [])}
+    hit.discard(None)
+    out = []
+    for comp in COMPOUND_RULES_V2:
+        if all(req in hit for req in comp['requires']):
+            out.append({
+                'id': comp['id'],
+                'name': comp['name'],
+                'requires': list(comp['requires']),
+                'description': comp.get('description', ''),
+                'priority_boost': comp.get('priority_boost', ''),
+                'suggestions': list(comp.get('suggestions', [])),
+                'confidence': round(min(1.0, 0.80 + 0.05 * len(comp['requires'])), 2),
+            })
+    return out
+
+
+def load_latest_metrics(config) -> dict:
+    """读该实例最新一条 UP 采集快照，返回 metrics dict。
+
+    V2.6 W4-02：v2 引擎是**无状态**的（diagnose(current_data)），而 v1 自带
+    get_latest_data()。迁移调用方时必须补一个取数步骤，故在此提供共享实现，
+    避免 views_enhanced / start_monitor 各自重复拼装。
+    """
+    from monitor.models import MonitorLog
+    latest = (MonitorLog.objects
+              .filter(config=config, status='UP')
+              .order_by('-create_time')
+              .first())
+    if not latest:
+        return {}
+    try:
+        data = json.loads(latest.message) if isinstance(latest.message, str) else latest.message
+    except Exception:
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    data.setdefault('current_status', latest.status)
+    return data
 
 
 # ==========================================

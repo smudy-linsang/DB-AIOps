@@ -660,3 +660,105 @@ class V26CausalWindowTests(TestCase):
         )
         self.assertEqual(exec_res['status'], 'pending_approval')
         self.assertIn('PBR-', exec_res['run_id'])
+
+
+# ==========================================================================
+# V2.6 W4: RCA 引擎统一（v1 独有规则迁移 + v1 降级为转发薄壳）
+# ==========================================================================
+class V26RcaUnificationTests(TestCase):
+    """统一前：start_monitor 调 v1（10 规则）、diagnosis_pipeline 调 v2（34 规则），
+    两套规则同时在生产路径报警，同名规则口径可能不同。
+    统一后：v2 为唯一事实源；v1 降级为转发薄壳，且 v1 独有规则不丢。
+    """
+
+    def setUp(self):
+        from monitor.models import DatabaseConfig
+
+        self.cfg = DatabaseConfig.objects.create(
+            name='w4-rca-db', db_type='mysql', host='127.0.0.1', port=3306,
+            username='u', password='enc:x', is_active=True)
+
+    def test_v1_unique_rules_migrated_into_v2(self):
+        """W4-01: v1 独有的 5 条规则必须已迁移（否则统一下线即能力回退）。"""
+        from monitor.rca_engine_v2 import RULES_V2
+
+        ids = {r['id'] for r in RULES_V2}
+        for rid in ('R081', 'R082', 'R083', 'R084', 'R085'):
+            with self.subTest(rule=rid):
+                self.assertIn(rid, ids, f'v1 独有规则 {rid} 未迁移到 v2')
+
+    def test_migrated_rules_keep_v1_semantics(self):
+        """迁移必须保判据，不能只搬名字。逐条用 v1 的触发条件验证。"""
+        from monitor.rca_engine_v2 import RULES_V2
+
+        by_id = {r['id']: r for r in RULES_V2}
+        self.assertTrue(by_id['R081']['condition'](
+            {'shards': [{'data_size_mb': 100}, {'data_size_mb': 10}]}))
+        self.assertFalse(by_id['R081']['condition'](
+            {'shards': [{'data_size_mb': 100}, {'data_size_mb': 100}]}))
+        self.assertTrue(by_id['R082']['condition']({'redo_rate_mb_per_hour': 600}))
+        self.assertFalse(by_id['R082']['condition']({'redo_rate_mb_per_hour': 10}))
+        self.assertTrue(by_id['R083']['condition']({'current_status': 'DOWN'}))
+        self.assertFalse(by_id['R083']['condition']({'current_status': 'UP'}))
+        self.assertTrue(by_id['R084']['condition'](
+            {'conn_usage_pct': 90, 'top_conn_sources': ['10.0.0.1']}))
+        self.assertFalse(by_id['R084']['condition'](
+            {'conn_usage_pct': 10, 'top_conn_sources': ['10.0.0.1']}))
+        self.assertTrue(by_id['R085']['condition'](
+            {'top_wait_event': 'log file sync'}))
+        self.assertFalse(by_id['R085']['condition'](
+            {'top_wait_event': 'db file sequential read'}))
+
+    def test_compound_rules_available_and_gated(self):
+        """W4-01: 复合规则能力保留（v2 原本没有），且按命中集合判定。"""
+        from monitor.rca_engine_v2 import evaluate_compound_rules
+
+        class D:
+            def __init__(self, rid):
+                self.rule_id = rid
+
+        # CR001 requires R001 + R021（按 v2 语义修正，非 v1 的 R001+R002）
+        out = evaluate_compound_rules([D('R001'), D('R021')])
+        self.assertEqual(len(out), 1)
+        self.assertEqual(out[0]['id'], 'CR001')
+        self.assertEqual(evaluate_compound_rules([D('R001')]), [])
+
+    def test_v1_engine_is_deprecated_shell(self):
+        """W4-05: v1 仍可用（兼容），但必须告警废弃且结果来自 v2。"""
+        import warnings
+
+        from monitor.rca_engine import RCAEngine
+
+        engine = RCAEngine(self.cfg)
+        with warnings.catch_warnings(record=True) as caught:
+            warnings.simplefilter('always')
+            report = engine.analyze({'current_status': 'DOWN'})
+        self.assertTrue(any(issubclass(w.category, DeprecationWarning)
+                            for w in caught),
+                        'v1 兼容薄壳未发出 DeprecationWarning')
+        self.assertEqual(report.get('engine'),
+                         'rca_v2 (via v1 compatibility shell)',
+                         'v1 analyze 未转发到 v2')
+        self.assertTrue(any(d['rule_id'] == 'R083' for d in report['diagnoses']),
+                        'DOWN 实例未命中 R083（实例状态异常）')
+
+    def test_rule_count_consistent_between_engines(self):
+        """v1 报告的规则数必须等于 v2 实际规则数，避免两处口径漂移。"""
+        from monitor.rca_engine import RCAEngine
+        from monitor.rca_engine_v2 import RULES_V2
+
+        self.assertEqual(RCAEngine(self.cfg).get_rule_count(), len(RULES_V2))
+
+    def test_v1_rule_constants_are_reference_only(self):
+        """v1 的 RULES 常量保留供比对，但不得再参与 analyze 判定。
+
+        v1 R009「连接来源集中」的字段组合在 v1 里会命中，v2 的等价规则是
+        R084（编号不同）—— 断言输出出现 R084 而不出现 R009。
+        """
+        from monitor.rca_engine import RCAEngine
+
+        report = RCAEngine(self.cfg).analyze(
+            {'conn_usage_pct': 90, 'top_conn_sources': ['10.0.0.1']})
+        ids = {d['rule_id'] for d in report['diagnoses']}
+        self.assertIn('R084', ids, 'v2 的等价规则未命中')
+        self.assertNotIn('R009', ids, 'v1 规则仍在参与判定（统一未生效）')
