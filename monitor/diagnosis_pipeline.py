@@ -14,6 +14,8 @@ from django.conf import settings
 from django.db import transaction
 from django.utils import timezone
 
+from monitor import degrade
+
 logger = logging.getLogger("monitor.diagnosis")
 
 # 信号 → 派生主根因 (保证每事故都有可用根因; RCA 规则命中则补充)
@@ -214,6 +216,20 @@ def _search_cases(incident, features):
         return []
 
 
+def _run_causal_chain(incident) -> int:
+    """阶段 2.6: 构建并落库因果推理链。返回节点数。
+
+    V2.6 W3-01：接通 rca_engine_v3.CausalInferenceEngine —— 此前它无生产
+    调用点，导致 IncidentCauseChain 恒空、WarRoom 因果链区块有页面无数据。
+
+    幂等性：infer_and_build_cause_chain 内部为"先删后插"(transaction.atomic
+    + filter().delete() + bulk_create)，重复诊断不会产生重复节点。
+    """
+    from monitor.rca_engine_v3 import CausalInferenceEngine
+    chains = CausalInferenceEngine.infer_and_build_cause_chain(incident)
+    return len(chains or [])
+
+
 def run_diagnosis(incident_id: str) -> dict:
     """诊断管道主入口。返回诊断摘要 dict。"""
     from monitor.models import Incident, IncidentStateError
@@ -272,6 +288,30 @@ def run_diagnosis(incident_id: str) -> dict:
     }
     if llm_extra:
         rca_result['llm'] = llm_extra
+
+    # 阶段2.6: 因果推理链 (V2.6 W3-01)
+    #
+    # 为什么放在这里、且必须先落库：
+    # CausalInferenceEngine.infer_and_build_cause_chain() 读的是
+    # incident.rca_result['root_causes']（见 rca_engine_v3.py:52），
+    # 故必须等 RCA + LLM 融合完成、且 rca_result 已持久化之后才能推导。
+    #
+    # 为什么必须有这一步：
+    # 该方法此前**没有任何生产调用点**（全项目仅测试引用），而
+    # api_views_v2.WarRoomContextView 正是读 IncidentCauseChain 组装
+    # causal_chain —— 于是正常流程下 WarRoom 的因果链恒为空数组，
+    # "有页面无数据"。本步把它接进主管道。
+    #
+    # 降级契约：异常绝不外抛，仅留痕；失败时因果链为空 == 接入前行为，
+    # 不影响 1-5-15 SLA。
+    causal_nodes = 0
+    try:
+        inc.rca_result = rca_result
+        inc.save(update_fields=['rca_result', 'updated_at'])
+        causal_nodes = _run_causal_chain(inc)
+    except Exception as e:
+        logger.warning("[diag] %s 因果链构建降级: %s", incident_id, e)
+        degrade.note('diag.causal_chain', reason=str(incident_id), exc=e)
 
     # 阶段3: 影响量化
     from monitor.impact_engine import assess_incident_impact

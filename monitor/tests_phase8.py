@@ -15,7 +15,7 @@ Phase 8 单元测试 (phase8/20 设计验收)。
 
 运行: ./venv/bin/python manage.py test monitor.tests_phase8
 """
-from datetime import datetime, timezone as dt_tz
+from datetime import datetime, timedelta, timezone as dt_tz
 from types import SimpleNamespace
 
 from django.test import SimpleTestCase, TestCase, override_settings
@@ -475,6 +475,156 @@ class V2OperationsTests(TestCase):
         self.inc.save(update_fields=['title', 'rca_result', 'health_snapshot'])
         self.assertEqual(CausalInferenceEngine.infer_and_build_cause_chain(self.inc), [])
         self.assertFalse(IncidentCauseChain.objects.filter(incident=self.inc).exists())
+
+
+class V26CausalChainWiringTests(TestCase):
+    """V2.6 W3: 因果链必须由诊断管道真实产出（此前无生产调用点）。
+
+    背景：CausalInferenceEngine 全项目仅测试引用，而 WarRoomContextView 正是
+    读 IncidentCauseChain 组装 causal_chain —— 正常流程下因果链恒为空，
+    "有页面无数据"。本类钉死"管道跑完必须有节点"。
+    与 V2OperationsTests 的区别：那批只测引擎本身，这批测**接入**。
+    """
+
+    def setUp(self):
+        from monitor.models import DatabaseConfig, Event, Incident
+
+        self.cfg = DatabaseConfig.objects.create(
+            name='w3-causal-db', db_type='mysql', host='127.0.0.1', port=3306,
+            username='u', password='enc:x', is_active=True)
+        self.inc = Incident.objects.create(
+            incident_id='INC-W3-001', title='锁阻塞', priority='P1',
+            category='lock', db_type='mysql', config=self.cfg, status='diagnosing',
+            occurred_at=timezone.now())
+        # 注意：必须挂 incident 外键。诊断管道 _run_rca 会**重建** root_causes
+        # （读 incident.events 的信号 + rca_engine_v2 规则），并不复用预置的
+        # rca_result；而因果链引擎又依赖 rca_result.root_causes 与 events，
+        # 故本用例按真实生产路径造数据。
+        Event.objects.create(
+            event_uid='EVT-W3-1', config=self.cfg, db_type='mysql',
+            source='sentinel', signal='blocked_session', metric_key='blocked_sessions',
+            value=3, threshold=0, severity='critical', dedup_key='k1',
+            occurred_at=timezone.now(), incident=self.inc,
+            detail={'chains': [{'blocker': '101', 'waiter': '102', 'wait_sec': 40}]})
+
+    def test_run_diagnosis_produces_cause_chain(self):
+        """W3-01 核心断言：诊断管道跑完，IncidentCauseChain 非空。"""
+        from monitor.diagnosis_pipeline import run_diagnosis
+        from monitor.models import IncidentCauseChain
+
+        run_diagnosis(self.inc.incident_id)
+        nodes = IncidentCauseChain.objects.filter(incident=self.inc)
+        self.assertTrue(nodes.exists(),
+                        'W3 未接通：诊断管道跑完仍无因果链节点（WarRoom 会显示空因果图）')
+        node = nodes.first()
+        for field in ('step_seq', 'node_type', 'node_name', 'description',
+                      'confidence', 'evidence_refs'):
+            self.assertTrue(hasattr(node, field))
+
+    def test_diagnosis_is_idempotent_for_cause_chain(self):
+        """W3-02 幂等：重复诊断不得产生重复节点。"""
+        from monitor.diagnosis_pipeline import run_diagnosis
+        from monitor.models import IncidentCauseChain
+
+        run_diagnosis(self.inc.incident_id)
+        first = IncidentCauseChain.objects.filter(incident=self.inc).count()
+        self.inc.refresh_from_db()
+        self.inc.status = 'diagnosing'
+        self.inc.save(update_fields=['status'])
+        run_diagnosis(self.inc.incident_id)
+        second = IncidentCauseChain.objects.filter(incident=self.inc).count()
+        self.assertEqual(first, second, '重复诊断产生了重复因果链节点')
+
+    def test_cause_chain_failure_does_not_break_diagnosis(self):
+        """W3 降级契约：因果链构建异常时诊断仍须成功完成。
+
+        这是 phase8 设计的红线之一（可降级）：LLM/ES/因果链任一不可用，
+        诊断管道必须无损回退，不影响 1-5-15 SLA。
+        """
+        from unittest import mock
+
+        from monitor.diagnosis_pipeline import run_diagnosis
+
+        with mock.patch('monitor.rca_engine_v3.CausalInferenceEngine'
+                        '.infer_and_build_cause_chain',
+                        side_effect=RuntimeError('boom')):
+            result = run_diagnosis(self.inc.incident_id)
+        self.assertTrue(result, '因果链异常导致整个诊断失败（违反降级红线）')
+        self.inc.refresh_from_db()
+        self.assertIn(self.inc.status, ('plan_ready', 'diagnosing'),
+                      '降级后事故状态机未正常推进')
+
+    def test_warroom_context_returns_non_empty_chain(self):
+        """W3-03 端到端：WarRoom 接口的 causal_chain 必须非空。"""
+        from monitor.diagnosis_pipeline import run_diagnosis
+        from monitor.models import IncidentCauseChain
+
+        run_diagnosis(self.inc.incident_id)
+        chains = IncidentCauseChain.objects.filter(incident=self.inc).order_by('step_seq')
+        payload = [{
+            'step': c.step_seq, 'node_type': c.node_type, 'name': c.node_name,
+            'desc': c.description, 'confidence': float(c.confidence),
+            'evidence': c.evidence_refs,
+        } for c in chains]
+        self.assertTrue(payload, 'WarRoom causal_chain 为空')
+        for item in payload:
+            for key in ('step', 'node_type', 'name', 'desc', 'confidence', 'evidence'):
+                self.assertIn(key, item)
+
+
+class V26CausalWindowTests(TestCase):
+    """V2.6 W3-02: 变更事件检索时间窗修正。
+
+    原实现上界固定为 incident.created_at + 5min，长事故重诊断时永远看不到
+    "创建之后的变更"，因果链丢失最新线索。
+    """
+
+    def setUp(self):
+        from monitor.models import DatabaseConfig, Incident
+
+        self.cfg = DatabaseConfig.objects.create(
+            name='w3-window-db', db_type='mysql', host='127.0.0.1', port=3306,
+            username='u', password='enc:x', is_active=True)
+        # 事故创建于 3 小时前（模拟长事故）
+        self.inc = Incident.objects.create(
+            incident_id='INC-W3-WIN', title='长事故', priority='P2',
+            category='lock', db_type='mysql', config=self.cfg, status='open',
+            occurred_at=timezone.now() - timedelta(hours=3),
+            rca_result={})
+
+    def test_change_after_creation_is_visible(self):
+        """事故之后发生的变更，在重诊断时应被检索到。
+
+        注意基准取 incident.occurred_at（发生时刻），不是 created_at
+        （auto_now_add 的入库时刻）—— 引擎也以 occurred_at 为锚点。
+        """
+        from monitor.models import ChangeEvent
+        from monitor.rca_engine_v3 import CausalInferenceEngine
+
+        after = self.inc.occurred_at + timedelta(hours=1)
+        ChangeEvent.objects.create(
+            config=self.cfg, source='manual', change_type='ddl',
+            title='事后变更', detail={'ddl_text': 'ALTER TABLE t ADD c INT'},
+            dedup_key='w3win1', occurred_at=after)
+        chains = CausalInferenceEngine.infer_and_build_cause_chain(self.inc)
+        types = [c['node_type'] for c in chains]
+        self.assertIn('CHANGE', types,
+                      '事故发生之后的变更未被纳入因果链（时间窗上界过窄）')
+
+    def test_change_before_cutoff_is_ignored(self):
+        """窗外（发生前 3 小时）的变更不应被采纳，避免误关联。"""
+        from monitor.models import ChangeEvent
+        from monitor.rca_engine_v3 import CausalInferenceEngine
+
+        ChangeEvent.objects.create(
+            config=self.cfg, source='manual', change_type='ddl',
+            title='很久以前的变更', detail={'ddl_text': 'x'},
+            dedup_key='w3win2',
+            occurred_at=self.inc.occurred_at - timedelta(hours=3))
+        chains = CausalInferenceEngine.infer_and_build_cause_chain(self.inc)
+        self.assertNotIn('CHANGE', [c['node_type'] for c in chains],
+                         '窗外的历史变更被误当作根因')
+
 
     def test_playbook_dryrun_and_execution(self):
         from django.core.management import call_command

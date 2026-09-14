@@ -5,6 +5,7 @@ DB-AIOps v2.0: RCA 3.0 智能因果图谱推导引擎
 基于数据库多维异动特征、变更流、锁等待拓扑与等待事件，推导级联故障因果链并保存结构化节点。
 """
 import logging
+from datetime import timedelta
 from typing import Dict, Any, List, Optional
 from django.db import transaction
 from django.utils import timezone
@@ -24,24 +25,43 @@ class CausalInferenceEngine:
         config = incident.config
         steps = []
 
-        # 1. 检查近 2 小时的变更事件 (DDL / 参数配置 / 应用发布) -> 作为最先验根源 (Step 1)
-        recent_cutoff = incident.created_at - timezone.timedelta(hours=2)
+        # 1. 检查变更事件 (DDL / 参数配置 / 应用发布) -> 作为最先验根源 (Step 1)
+        #
+        # V2.6 W3-02 三处修正：
+        # ① **锚点**：原用 incident.created_at，但该字段是 auto_now_add 的
+        #    "入库时刻"，不是故障发生时刻。对补录/回填的事故，created_at 可能是
+        #    数小时之后才写库，窗口会整体偏移到错误的时间段。改用 occurred_at
+        #    （"发生时刻"，语义正确）；异常情况回退 created_at。
+        # ② 时间窗上界原为 anchor + 5min。对持续数小时的事故做重诊断时，
+        #    "事故之后的变更"永远落在窗外，因果链丢失最新线索。改为
+        #    max(now, anchor + 5min)：短事故行为不变，长事故能看到全窗。
+        # ③ 原用 timezone.timedelta —— 依赖 django.utils.timezone 恰好重导出
+        #    datetime.timedelta 这一未文档化行为。改用显式 datetime.timedelta。
+        anchor = incident.occurred_at or incident.created_at
+        recent_cutoff = anchor - timedelta(hours=2)
+        window_upper = max(timezone.now(), anchor + timedelta(minutes=5))
         recent_change = ChangeEvent.objects.filter(
             config=config,
             occurred_at__gte=recent_cutoff,
-            occurred_at__lte=incident.created_at + timezone.timedelta(minutes=5)
+            occurred_at__lte=window_upper
         ).order_by('-occurred_at').first()
 
         step_seq = 1
         if recent_change:
-            distance_min = max(
-                0, (incident.created_at - recent_change.occurred_at).total_seconds() / 60)
+            # 距离与置信度同样以 anchor（发生时刻）为基准，保持与窗口一致。
+            # 变更晚于故障时距离取 0（不出现负数分钟数）。
+            delta_min = (anchor - recent_change.occurred_at).total_seconds() / 60
+            distance_min = max(0, delta_min)
             confidence = round(max(0.50, 0.95 - min(distance_min, 120) / 120 * 0.35), 3)
+            if delta_min >= 0:
+                timing = f"在故障发生前 {int(delta_min)} 分钟"
+            else:
+                timing = f"在故障发生后 {int(-delta_min)} 分钟"
             steps.append({
                 'step_seq': step_seq,
                 'node_type': 'CHANGE',
                 'node_name': f"变更事件: {recent_change.title}",
-                'description': f"在故障发生前 {int((incident.created_at - recent_change.occurred_at).total_seconds()/60)} 分钟登记了 [{recent_change.change_type}] 变更",
+                'description': f"{timing}登记了 [{recent_change.change_type}] 变更",
                 'evidence_refs': [f'change:{recent_change.id}'],
                 'confidence': confidence,
                 'metric_snapshot': recent_change.detail or {}
@@ -88,22 +108,28 @@ class CausalInferenceEngine:
             step_seq += 1
 
         # 4. 资源或连接耗尽衍生影响 (Step 4)
+        #
+        # V2.6 W3-02 修正：此处原读 incident.health_snapshot，但该字段是
+        # FloatField（models.py 的 "生成时健康分"），而代码按 dict 使用且加了
+        # isinstance(..., dict) 判断 —— 恒为 False，conn_snapshot 永远是空字典，
+        # 该分支实际只依赖 conn_events，且描述文本与证据不符（假证据）。
+        # 真正的连接水位快照在 incident.impact（JSONField）里，改读它。
         conn_events = list(incident.events.filter(signal='conn_high')[:20])
-        health = incident.health_snapshot if isinstance(incident.health_snapshot, dict) else {}
+        impact_doc = incident.impact if isinstance(incident.impact, dict) else {}
         conn_snapshot = {
-            key: health[key] for key in
+            key: impact_doc[key] for key in
             ('conn_usage_pct', 'active_connections', 'max_connections')
-            if health.get(key) is not None
+            if impact_doc.get(key) is not None
         }
         if conn_events or conn_snapshot:
             refs = [f'event:{event.event_uid}' for event in conn_events]
             if conn_snapshot:
-                refs.append(f'incident:{incident.incident_id}:health_snapshot')
+                refs.append(f'incident:{incident.incident_id}:impact')
             steps.append({
                 'step_seq': step_seq,
                 'node_type': 'RESOURCE',
                 'node_name': "数据库连接水位异常",
-                'description': '事件或事故快照显示连接水位超过基线',
+                'description': '事件或事故影响评估显示连接水位超过基线',
                 'evidence_refs': refs,
                 'confidence': min(0.95, 0.60 + 0.05 * len(refs)),
                 'metric_snapshot': {
