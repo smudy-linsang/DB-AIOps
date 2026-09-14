@@ -27,28 +27,28 @@ BUILTIN_ROLES = [
 
 
 def create_roles_and_migrate_data(apps, schema_editor):
-    """数据迁移：创建内置角色，迁移 UserProfile.role 字段"""
-    Role = apps.get_model('monitor', 'Role')
-    UserProfile = apps.get_model('monitor', 'UserProfile')
+    """数据迁移：创建内置角色。
 
-    # 1. 创建5个内置角色
-    role_map = {}
+    V2.6 修复（fresh-DB 阻塞）：本函数原先还遍历 UserProfile 并读取
+    `profile.role_id`，但它在 operations 中排在 Step 4 —— 此时 `role` 仍是
+    **CharField**（第 5 步才 RemoveField+AddField 换成 FK），该属性根本不存在，
+    于是全新库执行到 0012 必定 `AttributeError: 'UserProfile' object has no
+    attribute 'role_id'`，migrate 直接中断。
+
+    逐条核对后确认：设置 FK 的工作已由 Step 6 的 `_migrate_role_fk()` 依据
+    `_old_role` 临时列完成，本函数的那段循环既跑不到、也无必要 —— 属纯冗余。
+    因此这里只保留"创建内置角色"这一真正职责。
+
+    注意：已有环境此前从未成功执行过本函数（必然抛错中断），故本修正对存量
+    数据无影响；仅让全新库能够完整跑通迁移链。
+    """
+    Role = apps.get_model('monitor', 'Role')
+
     for code, name, desc, is_builtin in BUILTIN_ROLES:
-        role, _ = Role.objects.get_or_create(
+        Role.objects.get_or_create(
             code=code,
             defaults={'name': name, 'description': desc, 'is_builtin': is_builtin}
         )
-        role_map[code] = role
-
-    # 2. 迁移 UserProfile 的旧 role 字符串值到新的 FK
-    for profile in UserProfile.objects.all():
-        old_role = profile.role_id  # 此时已经是 FK，但旧数据可能是 None
-        if old_role is None:
-            # 尝试从原来的 role 字段值映射
-            # 由于 AlterField 已经执行，旧的字符串值已丢失
-            # 默认分配 readonly 角色
-            profile.role = role_map.get('readonly')
-            profile.save(update_fields=['role'])
 
 
 def reverse_migrate(apps, schema_editor):
@@ -66,6 +66,15 @@ class Migration(migrations.Migration):
     dependencies = [
         ('monitor', '0011_databaseconfig_password_changed_at_and_more'),
     ]
+
+    # V2.6 修复（fresh-DB 阻塞）：本迁移在 Step 3 用裸 SQL 写 _old_role，
+    # 随后 Step 5 对同一张表做 RemoveField/AddField。PostgreSQL 不允许在
+    # 同一事务里"DML 之后紧跟该表的 DDL"，会报：
+    #     cannot ALTER TABLE "monitor_userprofile" because it has pending
+    #     trigger events
+    # 嵌套 transaction.atomic() 只是保存点、无法解决；必须让本迁移逐操作提交。
+    # Django 官方对"迁移中混用 schema 变更与数据操作"的建议同样是 atomic=False。
+    atomic = False
 
     operations = [
         # Step 1: 创建 Role 表
@@ -150,12 +159,20 @@ class Migration(migrations.Migration):
 
 
 def _save_old_roles(apps, schema_editor):
-    """保存旧的 role 字符串值到 _old_role 字段"""
-    UserProfile = apps.get_model('monitor', 'UserProfile')
-    # 使用 raw SQL 读取旧 role 值并写入 _old_role
-    from django.db import connection
-    with connection.cursor() as cursor:
-        cursor.execute('UPDATE monitor_userprofile SET _old_role = role')
+    """保存旧的 role 字符串值到 _old_role 字段。
+
+    V2.6 修复（fresh-DB 阻塞）：本函数用裸 SQL UPDATE 写 _old_role，而紧接着的
+    Step 5 要 RemoveField/AddField 改同一张表。PostgreSQL 在同一事务里混用
+    "DML 后跟 DDL" 会报：
+        cannot ALTER TABLE "monitor_userprofile" because it has pending trigger events
+    故把这条 UPDATE 放进独立的 atomic 块，让它先提交、触发器事件结算完，
+    再做表结构变更。
+    """
+    from django.db import connection, transaction
+
+    with transaction.atomic():
+        with connection.cursor() as cursor:
+            cursor.execute('UPDATE monitor_userprofile SET _old_role = role')
 
 
 def _migrate_role_fk(apps, schema_editor):
