@@ -216,13 +216,20 @@ class AuditLogMiddleware:
 
     @staticmethod
     def _extract_db_config_id(path):
-        """从 URL 路径中提取数据库配置 ID，如 /api/v1/databases/5/ → 5"""
+        """从 URL 路径中提取数据库配置 ID，如 /api/v1/databases/5/ → 5
+
+        注意（V2.6 W1）：这里的 exists() 是**故意不受用户数据范围限制**的。
+        审计中间件的职责是记录"这个写请求打在了哪个实例上"，必须先判断该 id
+        是否真实存在，才能决定是否关联 AuditLog.config。若套上 visible_to()，
+        越权请求的审计记录反而会丢失实例关联 —— 最需要留痕的场景查不到。
+        故保留全局存在性判定，并显式标记豁免。
+        """
         import re
         m = re.search(r'/databases/(\d+)', path)
         if m:
             from monitor.models import DatabaseConfig
             db_id = int(m.group(1))
-            if DatabaseConfig.objects.filter(id=db_id).exists():
+            if DatabaseConfig.objects.filter(id=db_id).exists():  # scope-check: allow 审计中间件存在性判定(故意全局)
                 return db_id
         return None
 

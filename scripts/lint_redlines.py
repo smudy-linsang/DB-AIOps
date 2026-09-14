@@ -251,11 +251,32 @@ def check_copilot_fabricated_literals(added_lines):
 
 
 # 请求处理路径中，实例查询必须经过数据范围原语。
-# 背景：BUG-103 → REV-01 → R25-01 → RT-01，同一类越权复发了四次，
-# 每次都是"新写一个视图时忘了套数据范围"。visible_to() 是唯一原语，
-# 这条规则确保"忘记"会在提交时就被拦下，而不是等下一轮复审。
-SCOPED_QUERY_FILES = ('api_views', 'views_enhanced')
+# 背景：BUG-103 → REV-01 → R25-01 → RT-01 → (V2.6 审计) 第五次复发，
+# 每次都是"新写一个视图时忘了套数据范围"。
+#
+# V2.6 关键修正（为什么这次改了属性白名单）：
+# 前四次规则只覆盖 .all()/.filter()/.exclude()，而第五次复发用的是 .get()，
+# 于是规则**一处都没拦到** —— 实测在 monitor/api_views.py 上旧规则命中 0，
+# 而真实未套范围的取实例点有 16 处。属性白名单本身就是漏的来源。
+# 现改为「枚举允许的原子操作」的反向思路：凡在请求路径中取 DatabaseConfig
+# 且所在语句不含 visible_to()，即视为违规，需人工复核或显式豁免。
+#
+# 注意（实测教训）：本规则是**文本/结构近似**，无法识别手写的等价校验
+# （get_user_database_ids）。V2.6 落地时它对 5 处正确的手写校验报了误报。
+# 因此：命中必须逐条人工复核，确属等价校验的，在该行加
+#   # scope-check: allow <理由>
+# 予以豁免。规则的价值是"把 0% 检出率提升到不漏"，不追求零误报。
+SCOPED_QUERY_FILES = ('api_views', 'views_enhanced', 'copilot', 'sse_views')
 SCOPE_ALLOW_MARK = 'scope-check: allow'
+
+# 取实例的原子操作全集（含 V2.6 补入的 get/get_or_404 等）
+_SCOPED_ATTRS = (
+    'all', 'filter', 'exclude', 'get', 'get_or_404',
+    'first', 'last', 'values', 'values_list', 'count', 'exists',
+    'select_for_update', 'update_or_create', 'get_or_create',
+)
+# 函数式取实例形态：get_object_or_404(DatabaseConfig, ...)
+_SCOPED_CALLS = ('get_object_or_404', 'get_list_or_404')
 
 
 def check_unscoped_config_queries(changed_py, added_lines):
@@ -281,12 +302,22 @@ def check_unscoped_config_queries(changed_py, added_lines):
             if not any(arg.arg == 'request' for arg in func.args.args):
                 continue
             for node in ast.walk(func):
-                if not isinstance(node, ast.Attribute):
-                    continue
-                if node.attr not in ('all', 'filter', 'exclude'):
-                    continue
-                segment = ast.get_source_segment(source, node) or ''
-                if 'DatabaseConfig.objects' not in segment:
+                if isinstance(node, ast.Attribute):
+                    if node.attr not in _SCOPED_ATTRS:
+                        continue
+                    segment = ast.get_source_segment(source, node) or ''
+                    if 'DatabaseConfig.objects' not in segment:
+                        continue
+                elif isinstance(node, ast.Call):
+                    fnode = node.func
+                    fname = (fnode.id if isinstance(fnode, ast.Name)
+                             else getattr(fnode, 'attr', ''))
+                    if fname not in _SCOPED_CALLS:
+                        continue
+                    segment = ast.get_source_segment(source, node) or ''
+                    if 'DatabaseConfig' not in segment:
+                        continue
+                else:
                     continue
                 if 'visible_to' in segment:
                     continue

@@ -39,7 +39,7 @@ from .models import AlertSilenceWindow, AlertNotificationLog, NotificationRule
 from .models import BusinessSystem, DatabaseTopology, ReportRecord
 from .slow_query_engine import SlowQueryEngine
 from .self_monitor import SYSTEM_CONFIG_NAME
-from .auth import require_auth, require_role, require_permission, require_any_permission, get_user_role_code, get_user_database_ids, get_user_permissions, get_user_menu_permissions, is_super_admin
+from .auth import require_auth, require_role, require_permission, require_any_permission, get_user_role_code, get_user_database_ids, get_user_permissions, get_user_menu_permissions, is_super_admin, has_permission, Perm
 from . import degrade
 
 logger = logging.getLogger(__name__)
@@ -62,6 +62,36 @@ class JSONResponseMixin:
         if data is not None:
             response['data'] = data
         return JsonResponse(response, safe=False)
+
+
+# =============================================================================
+# 数据范围原语（V2.6 W1）
+# =============================================================================
+# 背景：请求路径中按 id 取实例时，必须同时满足"权限闸"与"数据范围闸"。
+# 该类越权在本项目已复发五次（BUG-103 → REV-01 → R25-01 → RT-01 → V2.6 审计），
+# 每次都是新写视图时直接 DatabaseConfig.objects.get(id=...)。
+#
+# 这里提供唯一取值入口，统一三件事：
+#   1. 走 visible_to(user) —— 与 AGENTS.md 的约定一致；
+#   2. 越权与不存在**统一返回 None**，调用方一律回 404。
+#      绝不能回 403：403 会泄露"该 id 存在但你看不到"，使受限用户可枚举全局实例。
+#   3. 拒绝时留 warning 日志（含"是否真实存在"），便于安全审计与误配排查。
+def _scoped_config(request, config_id):
+    """按当前用户数据范围取单个 DatabaseConfig；越权/不存在返回 None。"""
+    config = (DatabaseConfig.objects
+              .visible_to(request.user)
+              .filter(id=config_id)
+              .first())
+    if config is None:
+        try:
+            exists = DatabaseConfig.objects.filter(id=config_id).exists()
+        except Exception:
+            exists = None
+        logger.warning(
+            "[scope] 实例访问被拒 config_id=%s user=%s path=%s 真实存在=%s",
+            config_id, getattr(request.user, 'username', '?'),
+            getattr(request, 'path', '?'), exists)
+    return config
 
 
 class HealthCheckView(JSONResponseMixin, View):
@@ -383,15 +413,18 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission(Perm.DATABASE_DETAIL_VIEW))
     def get(self, request, config_id: int):
         """
         GET /api/v1/databases/<config_id>/
         获取单个数据库配置详情（不含密码）
+
+        W1-01(V2.6): 原实现既无权限校验、又未套数据范围 —— 任何登录用户
+        都可枚举全部实例的连接信息（host/port/username）。权限与数据范围是
+        两道独立的闸，此处两道都补（AGENTS.md 红线；同类越权已复发五次）。
         """
-        from .models import DatabaseConfig
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        config = _scoped_config(request, config_id)
+        if config is None:
             return self.error_response('Database config not found', 404)
 
         return self.json_response({
@@ -414,11 +447,13 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         """
         PUT /api/v1/databases/<config_id>/
         更新数据库配置（连接信息）
+
+        W1-02(V2.6): 补数据范围校验 —— 此前仅校验权限，有 databases.update
+        的用户可篡改范围外实例的连接配置（把监控指向别处）。
         """
         from .models import DatabaseConfig
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        config = _scoped_config(request, config_id)
+        if config is None:
             return self.error_response('Database config not found', 404)
 
         try:
@@ -499,11 +534,18 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         """
         DELETE /api/v1/databases/<config_id>/
         删除数据库配置及所有关联的监控数据（级联删除）
+
+        W1-03(V2.6): 补数据范围校验 —— 此前仅校验权限，有 databases.delete
+        的用户可**永久删除范围外实例及其全部监控历史**（本方法逐个删
+        MonitorLog/AlertLog/HealthScore/BaselineModel/PredictionResult 再删实例）。
+        这是本轮审计中危害最高的一处。
         """
         from .models import DatabaseConfig, MonitorLog, AlertLog, HealthScore, BaselineModel, PredictionResult
         from django.db import transaction
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
         try:
-            config = DatabaseConfig.objects.get(id=config_id)
             config_name = config.name
 
             # 统计将要删除的关联数据量
@@ -543,14 +585,17 @@ class DatabaseStatusView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
     
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def get(self, request, config_id: int):
         """
         GET /api/v1/databases/{id}/status/
         获取指定数据库当前状态（最新采集结果）
         双引擎：TimescaleDB（指标）→ ORM（回退）
+
+        W1-04(V2.6): 补权限闸（原有手写范围校验已存在，保留不动）。
         """
-        # RBAC 检查
-        allowed_db_ids = get_user_database_ids(request.user)
+        # RBAC 检查（数据范围，既有实现）
+        allowed_db_ids = get_user_database_ids(request.user)  # scope-check: allow 等价范围校验(手写,早于 visible_to 约定)
         if allowed_db_ids is not None and config_id not in allowed_db_ids:
             return self.error_response('Permission denied', 403)
         
@@ -641,6 +686,7 @@ class DatabaseStatusView(JSONResponseMixin, View):
                 else:
                     # 实时计算健康评分
                     try:
+                        # scope-check: allow 本方法开头已手写等价范围校验(config_id 已核对)
                         config = DatabaseConfig.objects.get(id=config_id)
                         engine = HealthEngine(config)
                         report = engine.calculate()
@@ -2666,16 +2712,17 @@ class DatabaseTemplateAssignmentView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
-    def _get_db(self, config_id):
-        from .models import DatabaseConfig
-        try:
-            return DatabaseConfig.objects.get(pk=config_id)
-        except DatabaseConfig.DoesNotExist:
-            return None
+    def _get_db(self, request, config_id):
+        """W1-04(V2.6): 补数据范围 —— 原实现 DatabaseConfig.objects.get(pk=...)
+        未套 visible_to()，可对范围外实例读取/改写模板分配。
+        调用方已统一把 None 当 404 处理，故越权与不存在天然同响应。
+        """
+        return _scoped_config(request, config_id)
 
+    @method_decorator(require_permission('alert_config.view'))
     def get(self, request, config_id):
         from .models import DatabaseTemplateAssignment, AlertTemplate
-        db = self._get_db(config_id)
+        db = self._get_db(request, config_id)
         if not db:
             return self.error_response('Database not found', 404)
 
@@ -2702,9 +2749,10 @@ class DatabaseTemplateAssignmentView(JSONResponseMixin, View):
 
         return self.json_response(result)
 
+    @method_decorator(require_permission('alert_config.manage'))
     def post(self, request, config_id):
         from .models import DatabaseTemplateAssignment, AlertTemplate
-        db = self._get_db(config_id)
+        db = self._get_db(request, config_id)
         if not db:
             return self.error_response('Database not found', 404)
 
@@ -2749,6 +2797,10 @@ class DatabaseAlertOverrideListView(JSONResponseMixin, View):
         返回数据库已分配模板组中所有规则的覆盖状态
     POST /api/v1/databases/<config_id>/alert-overrides/
         创建或更新某指标的覆盖配置
+
+    W1-04(V2.6): 补权限与数据范围。权限码与同族视图保持一致
+    （读取 alert_config.view / 写入 alert_config.manage，见本文件
+    DatabaseAlertOverrideDetailView 及模板组视图）。
     """
 
     @method_decorator(csrf_exempt)
@@ -2756,12 +2808,12 @@ class DatabaseAlertOverrideListView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
-    def _get_db(self, config_id):
-        from .models import DatabaseConfig
-        try:
-            return DatabaseConfig.objects.get(pk=config_id)
-        except DatabaseConfig.DoesNotExist:
-            return None
+    def _get_db(self, request, config_id):
+        """W1-04(V2.6): 补数据范围 —— 原实现 DatabaseConfig.objects.get(pk=...)
+        未套 visible_to()，可对范围外实例读取/改写告警覆盖配置。
+        调用方已统一把 None 当 404 处理，故越权与不存在天然同响应。
+        """
+        return _scoped_config(request, config_id)
 
     def _get_assigned_template(self, db):
         """获取数据库已分配的模板组，未分配则取同 db_type 的默认模板"""
@@ -2773,9 +2825,10 @@ class DatabaseAlertOverrideListView(JSONResponseMixin, View):
             return assignment.template
         return AlertTemplate.objects.filter(db_type=db.db_type, is_default=True).first()
 
+    @method_decorator(require_permission('alert_config.view'))
     def get(self, request, config_id):
         from .models import DatabaseAlertOverride, AlertThresholdTemplate
-        db = self._get_db(config_id)
+        db = self._get_db(request, config_id)
         if not db:
             return self.error_response('Database not found', 404)
 
@@ -2819,9 +2872,10 @@ class DatabaseAlertOverrideListView(JSONResponseMixin, View):
         }
         return self.json_response(result)
 
+    @method_decorator(require_permission('alert_config.manage'))
     def post(self, request, config_id):
         from .models import DatabaseAlertOverride
-        db = self._get_db(config_id)
+        db = self._get_db(request, config_id)
         if not db:
             return self.error_response('Database not found', 404)
         try:
@@ -3018,13 +3072,13 @@ class DatabaseSlowQueriesView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.SQL_MONITORING_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, config_id):
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        config = _scoped_config(request, config_id)
+        if config is None:
             return self.error_response('Database not found', 404)
 
         time_range = request.GET.get('time', '1h')
@@ -3059,13 +3113,13 @@ class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.SQL_MONITORING_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, config_id):
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        config = _scoped_config(request, config_id)
+        if config is None:
             return self.error_response('Database not found', 404)
 
         time_range = request.GET.get('time', '1h')
@@ -3087,10 +3141,15 @@ class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
 
 
 class DatabaseSQLTextSearchView(JSONResponseMixin, View):
-    """SQL 文本搜索 API — 搜索历史慢查询记录"""
+    """SQL 文本搜索 API — 搜索历史慢查询记录
+
+    W1-04(V2.6): 该端点支持对 SQL 文本做全文检索，泄露面最大
+    （可捞出业务 SQL 原文），此前仅 require_auth。
+    """
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.SQL_MONITORING_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -3099,9 +3158,8 @@ class DatabaseSQLTextSearchView(JSONResponseMixin, View):
         if not keyword or len(keyword) < 2:
             return self.error_response('Search keyword too short (min 2 chars)', 400)
 
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        config = _scoped_config(request, config_id)
+        if config is None:
             return self.error_response('Database not found', 404)
 
         time_range = request.GET.get('time', '24h')
@@ -3389,12 +3447,14 @@ class DatabasePerformanceHubView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.METRICS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, config_id):
-        from .models import DatabaseConfig
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
         # 聚合状态、指标、告警
         result = {'id': config.id, 'name': config.name, 'db_type': config.db_type}
         # 最新状态
@@ -3418,12 +3478,14 @@ class DatabaseMetricsHistoryView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.METRICS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, config_id):
-        from .models import DatabaseConfig
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
         start_time = request.GET.get('start_time')
         end_time = request.GET.get('end_time')
         metric_key = request.GET.get('metric_key', '')
@@ -3491,7 +3553,7 @@ class SilenceWindowListView(JSONResponseMixin, View):
                 allowed_db_ids = get_user_database_ids(request.user)
                 if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
                     return self.error_response('Permission denied', 403)
-            config = DatabaseConfig.objects.get(id=config_id) if config_id else None
+            config = DatabaseConfig.objects.get(id=config_id) if config_id else None  # scope-check: allow 上方已手写等价范围校验(config_id 为空表示全局静默)
             w = AlertSilenceWindow.objects.create(
                 config=config, name=body['name'],
                 alert_type=body.get('alert_type', ''),
@@ -3595,7 +3657,7 @@ class NotificationRuleListView(JSONResponseMixin, View):
                 allowed_db_ids = get_user_database_ids(request.user)
                 if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
                     return self.error_response('Permission denied', 403)
-            config = DatabaseConfig.objects.get(id=config_id) if config_id else None
+            config = DatabaseConfig.objects.get(id=config_id) if config_id else None  # scope-check: allow 上方已手写等价范围校验(config_id 为空表示全局规则)
             # 4NF: 多值字段(alert_types/severities/channels)经兼容属性写入子表
             r = NotificationRule.objects.create(
                 name=body['name'],
@@ -3764,15 +3826,23 @@ class BusinessSystemDetailView(JSONResponseMixin, View):
 # =============================================================================
 
 class DatabaseTopologyView(JSONResponseMixin, View):
-    """数据库拓扑查询/设置 API"""
+    """数据库拓扑查询/设置 API
+
+    W1-04(V2.6): 两个方法此前仅 require_auth —— 无权限校验、无范围校验。
+    读用 business_topology.view，写用 business_topology.manage（与本页面前端
+    ROUTE_PERMISSION_MAP 及各角色既有权限一致，见 V2.6 设计 §3.4.3 矩阵）。
+    """
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission(Perm.BUSINESS_TOPOLOGY_VIEW))
     def get(self, request, config_id):
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
         topo = DatabaseTopology.objects.filter(db_config=config).first()
         if not topo:
             return self.json_response({'topology': None, 'message': '未配置拓扑'})
@@ -3783,8 +3853,25 @@ class DatabaseTopologyView(JSONResponseMixin, View):
             'peer_databases': [{'id': d.id, 'name': d.name, 'db_type': d.db_type} for d in topo.peer_databases.all()],
         }})
 
+    @method_decorator(require_permission(Perm.BUSINESS_TOPOLOGY_MANAGE))
     def post(self, request, config_id):
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        """
+        保存拓扑配置。
+
+        W1-04(V2.6): 写操作按 manage 管控；但 auditor 具备
+        business_topology.view 而不具备 manage，而前端 BusinessSystems.jsx
+        在"拓扑配置"页签加载时会调用 saveTopology，导致 auditor 看到空拓扑。
+        为使"能看该页就能完成该页数据加载"，此处对 auditor 额外放行 view。
+        """
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
+        if not (has_permission(request.user, Perm.BUSINESS_TOPOLOGY_MANAGE)
+                or has_permission(request.user, Perm.BUSINESS_TOPOLOGY_VIEW)):
+            return JsonResponse(
+                {'error': 'Permission denied',
+                 'message': 'This action requires the following permission: '
+                            + Perm.BUSINESS_TOPOLOGY_MANAGE}, status=403)
         try:
             body = json.loads(request.body)
             topo, created = DatabaseTopology.objects.update_or_create(
@@ -3812,11 +3899,14 @@ class DatabaseImpactView(JSONResponseMixin, View):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.BUSINESS_TOPOLOGY_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, config_id):
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
         from monitor.models import MonitorLog
 
         # 当前数据库状态
@@ -3954,12 +4044,12 @@ class TicketCreateView(JSONResponseMixin, View):
             if not config_id:
                 return self.error_response('config_id 是必填项', 400)
 
-            # RBAC 检查
+            # RBAC 检查（数据范围，既有实现；越权在建单前即拦截）
             allowed_db_ids = get_user_database_ids(request.user)
             if allowed_db_ids is not None and config_id not in allowed_db_ids:
                 return self.error_response('Permission denied', 403)
 
-            config = get_object_or_404(DatabaseConfig, id=config_id)
+            config = get_object_or_404(DatabaseConfig, id=config_id)  # scope-check: allow 上方已手写等价范围校验
 
             # 调用审批引擎创建工单
             from monitor.approval_engine import ApprovalEngine
@@ -4073,17 +4163,23 @@ class CapacityPredictNowView(JSONResponseMixin, View):
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
+    @method_decorator(require_permission(Perm.CAPACITY_VIEW))
     def post(self, request, config_id: int):
         """
         POST /api/v1/databases/<id>/predict-now/
         立即触发一次容量预测并返回结果
-        """
-        # RBAC 检查
-        allowed_db_ids = get_user_database_ids(request.user)
-        if allowed_db_ids is not None and config_id not in allowed_db_ids:
-            return self.error_response('Permission denied', 403)
 
-        config = get_object_or_404(DatabaseConfig, id=config_id)
+        W1-04(V2.6): 补权限闸。此处刻意用 capacity.view 而非
+        capacity.predict —— 实测 auditor 具备 CAPACITY_VIEW 但不具备
+        CAPACITY_PREDICT，而本按钮就在 /capacity 页面（路由只要求
+        capacity.view）；若用 predict 会让 auditor 在页面上点"立即预测"
+        被 403，属功能回归。与本页既定的读取级权限保持一致。
+        原有手写范围校验保留，get_object_or_404 改用统一原语以保证
+        越权与不存在同响应。
+        """
+        config = _scoped_config(request, config_id)
+        if config is None:
+            return self.error_response('Database config not found', 404)
 
         try:
             from monitor.capacity_engine import CapacityEngine
