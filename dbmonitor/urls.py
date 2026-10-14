@@ -85,6 +85,11 @@ from monitor.api_views_v2 import (
     RealtimeActiveIncidentsView, WarRoomContextView, BlockingGraphView,
     PlaybookDryRunView, PlaybookExecuteView,
 )
+from monitor.api_views_v3 import (
+    OamBenchReportView, OamBenchRunView, OamCaseListView, OamCaseSnapshotView,
+    OamDiagnoseView, OamKbDocumentsView, OamKbRebuildView, OamKbStalenessView,
+    OamToolsView, OamTrajectoryAuditView, OamTrajectoryView,
+)
 
 FRONTEND_DIST = os.path.join(settings.BASE_DIR, 'frontend', 'dist')
 
@@ -322,6 +327,20 @@ urlpatterns = [
     path('api/v2/databases/<int:config_id>/blocking-graph/', BlockingGraphView.as_view()),
     path('api/v2/playbooks/execute-dryrun/', PlaybookDryRunView.as_view()),
     path('api/v2/playbooks/execute-safely/', PlaybookExecuteView.as_view()),
+
+    # ========== REST API v3.0 OAM（V3.0_DBAGENT_REDESIGN.md §6）==========
+    # 注意：必须放在下面的 SPA 兜底 re_path 之前，且 API 路由不写 name=（与 v1/v2 一致）。
+    path('api/v3/oam/diagnose/', OamDiagnoseView.as_view()),
+    path('api/v3/oam/trajectories/<str:traj_id>/', OamTrajectoryView.as_view()),
+    path('api/v3/oam/trajectories/<str:traj_id>/audit/', OamTrajectoryAuditView.as_view()),
+    path('api/v3/oam/cases/', OamCaseListView.as_view()),
+    path('api/v3/oam/cases/<str:case_id>/snapshot/', OamCaseSnapshotView.as_view()),
+    path('api/v3/oam/bench/run/', OamBenchRunView.as_view()),
+    path('api/v3/oam/bench/report/<str:run_id>/', OamBenchReportView.as_view()),
+    path('api/v3/oam/kb/staleness/', OamKbStalenessView.as_view()),
+    path('api/v3/oam/kb/documents/', OamKbDocumentsView.as_view()),
+    path('api/v3/oam/kb/rebuild/', OamKbRebuildView.as_view()),
+    path('api/v3/oam/tools/', OamToolsView.as_view()),
 
     # ========== Observability ==========
     path('metrics', prometheus_metrics_view, name='prometheus-metrics'),

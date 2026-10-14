@@ -71,6 +71,40 @@ SPECS = {
     'LLM_ALLOWED_ENDPOINT_HOSTS': Spec('LLM_ALLOWED_ENDPOINT_HOSTS', (), tuple),
     'AGENT_ENABLED':           Spec('AGENT_ENABLED', False, bool),
     'EMBED_ENABLED':           Spec('EMBED_ENABLED', False, bool),
+    # Phase 8C Agent 循环预算
+    'AGENT_MAX_STEPS':         Spec('AGENT_MAX_STEPS', 6, int, lambda v: 1 <= v <= 50,
+                                    'ReAct 循环步数上限；与 AGENT_BUDGET_SEC 共同约束'),
+    'AGENT_BUDGET_SEC':        Spec('AGENT_BUDGET_SEC', 120, int, lambda v: 5 <= v <= 3600,
+                                    '单次排查的时间预算（秒）'),
+    # ===== V3.0 OAM（见 V3.0_DBAGENT_REDESIGN.md）=====
+    # 下面 4 个超参是**论文原文没给值**的（§0.1 五：L_tool / β / G / ALIGN_WINDOW），
+    # 设计要求"一律先登记进 SPECS 再给默认值"，故在此定义唯一默认。
+    'OAM_ENABLED':             Spec('OAM_ENABLED', False, bool, hint='OAM 总开关；与既有 AGENT_ENABLED 各自独立、并存'),
+    'OAM_MAX_TURNS':           Spec('OAM_MAX_TURNS', 12, int, lambda v: 1 <= v <= 50,
+                                    'Think-Act-Observe 最大轮数；耗尽则输出升级报告转人工'),
+    'OAM_KB_TOP_K':            Spec('OAM_KB_TOP_K', 5, int, lambda v: 1 <= v <= 20,
+                                    '知识库检索返回条数；论文口径 k=5'),
+    'OAM_REWARD_ALIGN_WINDOW': Spec('OAM_REWARD_ALIGN_WINDOW', 2, int, lambda v: 1 <= v <= 10,
+                                    'r_tool 的计划-执行对齐窗口（轮）。论文只说"若干轮窗口"未给值'),
+    'OAM_REWARD_OVER_PROBE':   Spec('OAM_REWARD_OVER_PROBE', 4, int, lambda v: 1 <= v <= 50,
+                                    '单步奖励的过度探查阈值 L_tool：单轮工具调用数超过它则 r_stepwise 置零'),
+    # §9.3：贝叶斯单步奖励带历史频率偏差，小语料上更严重，故对低频根因做加性平滑
+    'OAM_PRIOR_SMOOTHING':     Spec('OAM_PRIOR_SMOOTHING', 1.0, float, lambda v: v >= 0,
+                                    '根因先验的加性平滑系数；0 表示不平滑（不推荐）'),
+    # §7 P3：KB 新鲜度。论文部署失败主因第一位是"知识库过时"（19%），须有机制而非靠人记得
+    'OAM_KB_STALENESS_WARN_DAYS': Spec('OAM_KB_STALENESS_WARN_DAYS', 90, int,
+                                       lambda v: 1 <= v <= 3650,
+                                       'KB 条目超过该天数未人工复核即视为过期，报告须标注'),
+    'OAM_RETRIEVAL_MISS_SIM':  Spec('OAM_RETRIEVAL_MISS_SIM', 0.12, float,
+                                    lambda v: 0.0 < v < 1.0,
+                                    '知识检索最高相似度低于此值视为未命中，写 OamRetrievalMiss 留痕；'
+                                    '默认 0.12 是冒烟语料实测标定值（同义查询 0.17~0.42、无关查询 0.00），'
+                                    '换语义嵌入后须重标'),
+    # §4.1：回放环境边界。长序列会让 MMA 的 F1 崩塌（论文 Table 3a：500 点降到 3.2%）
+    'OAM_MAX_SERIES_POINTS':   Spec('OAM_MAX_SERIES_POINTS', 500, int, lambda v: 10 <= v <= 10000,
+                                    '单条时序指标在快照中的最大采样点数；超出的分析请求返回确定性错误而非静默截断'),
+    'OAM_EVIDENCE_MIN_REFS':   Spec('OAM_EVIDENCE_MIN_REFS', 1, int, lambda v: v >= 0,
+                                    '报告根因主张至少需要多少个证据引用才通过证据审计'),
 }
 
 

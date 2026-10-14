@@ -2475,3 +2475,456 @@ class CopilotSkill(models.Model):
 
     def __str__(self):
         return f"[{self.get_source_display()}] {self.name} ({self.code})"
+# =============================================================================
+# V3.0 OAM：运维智能体分层（依据 V3.0_DBAGENT_REDESIGN.md §5）
+# -----------------------------------------------------------------------------
+# 这组表与既有业务表**完全解耦**，前缀 oam_，可灰度并行（设计 §10：
+# "一次性替换现有链路"是明确不做的事）。
+#
+# 最关键的三张是地基：
+#   OamCase       —— 任务元组（症状/专家标注根因/修复规格），评测与训练的基本单位
+#   OamSnapshotBlob —— 冻结系统状态，回放与复现的基础
+#   OamTrajectory —— 一次 Think-Act-Observe 回合，既是评测对象也是审计对象
+#
+# 设计 §9.1 的判断："P0 的第一项工作其实是定义根因标签空间 + 建标注流程，
+# 而不是写代码。标签空间定不下来，验证器就无从判定，整条链都是空转。"
+# 所以 gt_root_cause 不只是 CharField —— `clean()` 会用 monitor.oam.labels 校验它
+# 属于该方言的封闭标签空间；split/难度/类别另有数据库约束兜底。
+# =============================================================================
+
+
+class OamCase(models.Model):
+    """一个运维事件/任务 = 论文的任务元组。训练与评估的基本单位。
+
+    论文 §3.1.1 的任务元组：〈任务类别, 系统状态只读快照, 自然语言症状描述,
+    专家标注根因, 修复规格〉。前两项分别落在 OamSnapshotBlob 与其余字段。
+    """
+
+    CATEGORY = (('inspection', '日常巡检'), ('tuning', '查询性能调优'),
+                ('overload', '系统过载诊断'), ('consultation', '数据库咨询'))
+    DIFFICULTY = (('easy', '易'), ('hard', '难'))
+    SPLIT = (('train', '训练集'), ('test', '测试集'), ('ood', '异分布留出集'))
+
+    case_id = models.CharField(max_length=64, primary_key=True)
+    category = models.CharField(max_length=16, choices=CATEGORY, db_index=True)
+    difficulty = models.CharField(max_length=8, choices=DIFFICULTY, db_index=True)
+    db_type = models.CharField(max_length=20, db_index=True, verbose_name="方言")
+    symptom = models.TextField(verbose_name="自然语言症状描述")
+    gt_root_cause = models.CharField(max_length=128, db_index=True,
+                                     verbose_name="专家标注根因（封闭标签空间）")
+    fix_spec = models.JSONField(default=dict, verbose_name="修复规格（验证用）")
+    fix_executable = models.BooleanField(default=False,
+                                         verbose_name="修复是否可在集群内直接执行校验")
+    required_evidence = models.JSONField(
+        default=list,
+        verbose_name="咨询类必需证据集合（KB 文档编号，判定要求集合完全相等）")
+    source_ticket = models.CharField(max_length=128, blank=True, default='',
+                                     verbose_name="来源工单")
+    # 偏离说明（设计 §5 未列此字段，但 §8 有对应验收项）：
+    # §8 要求"用例划分时断言测试集的 db_config_id 与训练集不相交"，出处是论文
+    # ID 划分口径"测试用例来自不同的数据库实例与上下文"。不记录来源实例就无从
+    # 断言，"训练评测同源的假绿"（本项目前三轮复审反复踩的那一条）就无法被拦住。
+    # 设为 SET_NULL：实例被删后用例仍在，评测历史不丢。
+    source_config = models.ForeignKey('DatabaseConfig', on_delete=models.SET_NULL,
+                                      null=True, blank=True, related_name='oam_cases',
+                                      verbose_name="用例采样的数据库实例")
+    split = models.CharField(max_length=16, choices=SPLIT, default='train',
+                             db_index=True)
+    is_deidentified = models.BooleanField(default=False, verbose_name="已去标识")
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        db_table = 'oam_case'
+        verbose_name = "OAM 用例"
+        verbose_name_plural = "OAM 用例列表"
+        indexes = [models.Index(fields=['category', 'difficulty', 'split'])]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(category__in=[
+                'inspection', 'tuning', 'overload', 'consultation']),
+                name='oam_case_category_valid'),
+            models.CheckConstraint(condition=models.Q(difficulty__in=['easy', 'hard']),
+                                   name='oam_case_difficulty_valid'),
+            models.CheckConstraint(condition=models.Q(split__in=['train', 'test', 'ood']),
+                                   name='oam_case_split_valid'),
+        ]
+
+    def clean(self):
+        """根因标签必须落在**该方言**的封闭标签空间内（设计 §9.1/§9.2）。
+
+        这是防"拿造出来的用例自证"的第一道闸：标签空间定不下来，验证器
+        就无从判定，整条链都是空转。
+        """
+        from django.core.exceptions import ValidationError
+        from monitor.oam.labels import assert_label
+        super().clean()
+        try:
+            assert_label(self.gt_root_cause, self.db_type)
+        except ValueError as e:
+            raise ValidationError({'gt_root_cause': str(e)})
+
+    def __str__(self):
+        return f"{self.case_id} {self.db_type}/{self.gt_root_cause} ({self.split})"
+
+
+class OamSnapshotBlob(models.Model):
+    """冻结的系统状态快照。诊断期间只读，保证可回放与可复现。
+
+    论文 §5.3.1 的边界在这里落地：每条时序指标 ≤500 采样点、典型窗口 2-10 小时。
+    超窗口的分析请求要返回确定性错误，**不能静默截断**（静默截断会让评测
+    看起来正常而结论失真）。
+    """
+
+    case = models.OneToOneField(OamCase, on_delete=models.CASCADE,
+                                related_name='snapshot', verbose_name="用例")
+    window_start = models.DateTimeField()
+    window_end = models.DateTimeField()
+    kpi_series = models.JSONField(default=dict,
+                                  verbose_name="{metric_key: [[ts, value], ...]}；每条 ≤500 点")
+    session_samples = models.JSONField(default=list, verbose_name="ASH 采样行")
+    plans = models.JSONField(default=list, verbose_name="执行计划 [{sql_id, plan_text, captured_at}]")
+    logs = models.JSONField(default=list)
+    config_meta = models.JSONField(default=dict, verbose_name="参数与资源配置")
+    schema_meta = models.JSONField(default=dict)
+
+    class Meta:
+        db_table = 'oam_snapshot'
+        verbose_name = "OAM 冻结快照"
+        verbose_name_plural = "OAM 冻结快照列表"
+
+    @property
+    def window_hours(self):
+        return round((self.window_end - self.window_start).total_seconds() / 3600, 3)
+
+    def __str__(self):
+        return f"snapshot({self.case_id}, {self.window_hours}h, {len(self.kpi_series)} 指标)"
+
+
+class OamTrajectory(models.Model):
+    """一次完整的思考-行动-观察回合。既是训练样本，也是审计对象。"""
+
+    BACKEND = (('prompted', '提示词策略'), ('sft', '监督微调策略'), ('rl', '强化学习策略'))
+
+    traj_id = models.CharField(max_length=64, primary_key=True)
+    case = models.ForeignKey(OamCase, on_delete=models.CASCADE,
+                             related_name='trajectories', verbose_name="用例")
+    config = models.ForeignKey('DatabaseConfig', on_delete=models.SET_NULL,
+                               null=True, blank=True,
+                               verbose_name="线上诊断时的目标实例")
+    policy_backend = models.CharField(max_length=16, choices=BACKEND,
+                                      verbose_name="prompted/sft/rl")
+    policy_version = models.CharField(max_length=64)
+    report = models.JSONField(default=dict, verbose_name="最终报告")
+    passed = models.BooleanField(null=True, blank=True, verbose_name="验证器判定")
+    verdict_reason = models.TextField(blank=True, default='')
+    escalated = models.BooleanField(default=False, verbose_name="是否转人工")
+    hallucinated = models.BooleanField(null=True, blank=True,
+                                       verbose_name="审计是否发现无支撑主张")
+    reward_total = models.FloatField(null=True, blank=True)
+    reward_parts = models.JSONField(default=dict,
+                                    verbose_name="format/tool/answer/step 分量")
+    turns = models.IntegerField(default=0)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'oam_trajectory'
+        verbose_name = "OAM 轨迹"
+        verbose_name_plural = "OAM 轨迹列表"
+        indexes = [models.Index(fields=['case', 'policy_backend', 'passed'])]
+        constraints = [
+            models.CheckConstraint(condition=models.Q(policy_backend__in=['prompted', 'sft', 'rl']),
+                                   name='oam_traj_backend_valid'),
+            models.CheckConstraint(condition=models.Q(turns__gte=0), name='oam_traj_turns_nonneg'),
+        ]
+
+    def __str__(self):
+        return f"{self.traj_id} {self.policy_backend} passed={self.passed}"
+
+
+class OamStep(models.Model):
+    """轨迹中的一轮。observation 必须可溯源到工具调用，供证据审计核对。
+
+    `tool_error_code` 非空即本轮工具没产出观测 —— 它进模型的是确定性错误信号，
+    不是空字符串。论文 §5.3.1 要求"每步要么返回格式良好的输出，要么返回
+    确定性错误信号"。
+    """
+
+    trajectory = models.ForeignKey(OamTrajectory, on_delete=models.CASCADE,
+                                   related_name='steps', verbose_name="轨迹")
+    turn = models.IntegerField()
+    thought = models.TextField(blank=True, default='')
+    tool_name = models.CharField(max_length=64, blank=True, default='')
+    tool_params = models.JSONField(default=dict)
+    tool_error_code = models.CharField(max_length=32, blank=True, default='',
+                                       verbose_name="结构化错误信号")
+    observation = models.TextField(blank=True, default='')
+    observation_evidence = models.JSONField(
+        default=dict, verbose_name="观测的原始证据引用（指标/算子/文档编号）")
+    step_reward = models.FloatField(null=True, blank=True)
+    belief_entropy = models.FloatField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'oam_step'
+        verbose_name = "OAM 轨迹轮次"
+        verbose_name_plural = "OAM 轨迹轮次列表"
+        unique_together = [('trajectory', 'turn')]
+        ordering = ['trajectory', 'turn']
+
+    def __str__(self):
+        return f"{self.trajectory_id}#{self.turn} {self.tool_name or '(final)'}"
+
+
+class KbDocument(models.Model):
+    """知识库原始文档，版本化、可溯源。
+
+    最后三个字段（db_versions / ingested_at / reviewed_at / approved_by）
+    对应设计 §7 P3 的"KB 新鲜度"交付项。依据：论文部署失败主因**第一位**
+    是"知识库过时"（19%，且原文把它与罕见故障并列为 primary causes），
+    且教训第四条明确要求 KB "保持新鲜、可溯源且被精确索引"。
+
+    这意味着 KB 新鲜度不是运营琐事，是第一位的失败来源，必须有机制
+    而不是靠人记得。
+    """
+
+    CATEGORY = (('config_manual', '配置参数手册'), ('fault_solution', '故障处理方案'),
+                ('best_practice', '最佳实践指南'), ('basic_fact', '基础事实知识'))
+
+    doc_id = models.CharField(max_length=64, primary_key=True)
+    category = models.CharField(max_length=32, choices=CATEGORY, db_index=True)
+    db_types = models.JSONField(default=list, verbose_name="适用方言")
+    title = models.CharField(max_length=255)
+    body = models.TextField()
+    version = models.CharField(max_length=64, db_index=True)
+    source_uri = models.CharField(max_length=512, blank=True, default='')
+    db_versions = models.JSONField(
+        default=dict,
+        verbose_name="适用版本区间 {db_type: [min, max]}；检索须按实例真实版本过滤")
+    ingested_at = models.DateTimeField(auto_now_add=True,
+                                       verbose_name="并入时间（新鲜度基准）")
+    reviewed_at = models.DateTimeField(null=True, blank=True,
+                                       verbose_name="最近一次人工复核时间")
+    approved_by = models.CharField(max_length=64, blank=True, default='',
+                                   verbose_name="人工复核人（并入 KB 的前置闸门）")
+    is_active = models.BooleanField(default=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = 'oam_kb_document'
+        verbose_name = "OAM 知识库文档"
+        verbose_name_plural = "OAM 知识库文档列表"
+
+    @property
+    def staleness_days(self) -> int:
+        """距最近一次复核（无复核则距并入）的天数。超阈值时报告须标注。
+
+        阈值登记在 appconf.SPECS 的 OAM_KB_STALENESS_WARN_DAYS。
+        """
+        base = self.reviewed_at or self.ingested_at
+        return (timezone.now() - base).days
+
+    def is_stale(self) -> bool:
+        from monitor import appconf
+        return self.staleness_days > appconf.get('OAM_KB_STALENESS_WARN_DAYS')
+
+    def __str__(self):
+        return f"{self.doc_id} [{self.category}] {self.title}"
+
+
+class KbChunk(models.Model):
+    """精炼后的片段。论文口径：每片段 <1000 token。"""
+
+    SPLIT_STRATEGY = (('recursive', '递归切分（叙述性）'),
+                      ('structure_aware', '结构感知切分（配置手册）'))
+
+    chunk_id = models.CharField(max_length=64, primary_key=True)
+    document = models.ForeignKey(KbDocument, on_delete=models.CASCADE,
+                                 related_name='chunks', verbose_name="来源文档")
+    text = models.TextField()
+    token_count = models.IntegerField(default=0)
+    split_strategy = models.CharField(max_length=16, choices=SPLIT_STRATEGY)
+    embedding_indexed = models.BooleanField(default=False, db_index=True)
+
+    class Meta:
+        db_table = 'oam_kb_chunk'
+        verbose_name = "OAM 知识库片段"
+        verbose_name_plural = "OAM 知识库片段列表"
+
+    def __str__(self):
+        return f"{self.chunk_id} ({self.token_count} tokens)"
+
+
+class KbRecord(models.Model):
+    """症状-成因-动作记录：论文知识库的核心产物，循环可直接消费。
+
+    `rca_engine_v2.RULES_V2` 的 39 条专家规则（+1 条复合规则 CR001）迁移到此表。
+    迁移它们**不删规则、只降级角色** —— 从"决策器"变成"策略可检索的记录"，
+    这正是论文使用专家知识的方式：绑定到动作空间，而不是充当决策器。
+    三代 RCA 引擎由此收敛为"一个策略 + 一批 KB 记录"。
+    """
+
+    record_id = models.CharField(max_length=64, primary_key=True)
+    symptom = models.CharField(max_length=255, db_index=True, verbose_name="归一化症状")
+    db_types = models.JSONField(default=list, verbose_name="适用方言")
+    candidate_causes = models.JSONField(
+        default=list, verbose_name="候选成因；须与根因标签空间一致")
+    probe_actions = models.JSONField(default=list, verbose_name="诊断探查动作（工具名）")
+    fix_actions = models.JSONField(default=list, verbose_name="修复动作")
+    source_document = models.ForeignKey(
+        KbDocument, on_delete=models.SET_NULL, null=True, blank=True,
+        verbose_name="来源文档（溯源与版本都经此字段）")
+    db_versions = models.JSONField(
+        default=dict, verbose_name="适用版本区间；与 KbDocument 同口径")
+    version = models.CharField(max_length=64)
+    ingested_at = models.DateTimeField(auto_now_add=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'oam_kb_record'
+        verbose_name = "OAM 症状-成因-动作记录"
+        verbose_name_plural = "OAM 症状-成因-动作记录列表"
+
+    def __str__(self):
+        return f"{self.record_id} {self.symptom} → {self.candidate_causes}"
+
+
+class OamToolSpec(models.Model):
+    """工具注册表 + 语义增强描述（按方言分版本）。
+
+    `enriched_description` 是论文的"工具语义增强"产物：离线一次性生成、
+    入库并版本化，**不在推理时做**。
+    """
+
+    KIND = (('kb', '知识检索'), ('os', 'OS 级指标'),
+            ('db', 'DB 级指标'), ('meta', '元数据或配置'), ('fix', '修复类'))
+
+    name = models.CharField(max_length=64)
+    db_type = models.CharField(max_length=20, verbose_name="方言；空串表示通用")
+    kind = models.CharField(max_length=16, choices=KIND)
+    params_schema = models.JSONField(default=dict)
+    enriched_description = models.TextField(verbose_name="语义增强后的自然语言描述")
+    mutating = models.BooleanField(default=False,
+                                   verbose_name="是否变更类；变更类一律禁止智能体直接调用")
+    replayable = models.BooleanField(default=True)
+    is_active = models.BooleanField(default=True)
+
+    class Meta:
+        db_table = 'oam_tool_spec'
+        verbose_name = "OAM 工具规格"
+        verbose_name_plural = "OAM 工具规格列表"
+        unique_together = [('name', 'db_type')]
+        constraints = [
+            models.CheckConstraint(
+                condition=models.Q(kind__in=['kb', 'os', 'db', 'meta', 'fix']),
+                name='oam_tool_kind_valid'),
+        ]
+
+    def __str__(self):
+        return f"{self.name}[{self.db_type or '*'}]"
+
+
+class OamRetrievalMiss(models.Model):
+    """检索未命中留痕。
+
+    论文部署失败原因里"检索未命中"占 12%，排名靠前。不记下来就无从改进
+    索引与类目划分 —— 这正是"KB 过时"（第一主因，19%）的早期信号。
+    """
+
+    trajectory_id = models.CharField(max_length=64, db_index=True, blank=True, default='')
+    kb_category = models.CharField(max_length=32, db_index=True)
+    query_text = models.TextField()
+    db_type = models.CharField(max_length=20, blank=True, default='')
+    top_similarity = models.FloatField(null=True, blank=True,
+                                       verbose_name="最高相似度；为空表示零结果")
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+
+    class Meta:
+        db_table = 'oam_retrieval_miss'
+        verbose_name = "OAM 检索未命中"
+        verbose_name_plural = "OAM 检索未命中列表"
+        ordering = ['-created_at']
+
+    def __str__(self):
+        return f"miss[{self.kb_category}] sim={self.top_similarity}"
+
+
+# =============================================================================
+# V3.0 OAM 补充表（0032）
+# -----------------------------------------------------------------------------
+# 设计文档 §5 列了 9 张表，但 §6 的接口清单里有
+#   POST /api/v3/oam/bench/run/            → 跑一次基准
+#   GET  /api/v3/oam/bench/report/<run_id>/ → 按 run_id 取回该次成绩
+# `run_id` 必须有地方持久化。不补这一张就只能把批次信息塞进 traj_id 前缀，
+# 那样评测记录既查不出来、也没法把"同一次跑"的结果归拢 —— 而"同一次跑"
+# 恰恰是复现与对比的前提。所以这里补一张最小的批次表，并显式记录该偏离。
+# =============================================================================
+class OamBenchRun(models.Model):
+    """一次基准评测的批次记录（成绩 + 覆盖度同屏存放在这里）。
+
+    `coverage` 字段是本表存在的核心理由：设计 §6 硬约束 3 写明
+    *"缺 `coverage` 视为接口未实现。成功率必须与覆盖度同屏，
+    否则会重演'指标看着好、实际不成立'"*，§8 也把"评测与覆盖度同屏"
+    列为验收项。把它和成绩存在同一条记录里，从数据结构上杜绝只存成功率。
+    """
+
+    STATUS = (('running', '运行中'), ('done', '完成'), ('failed', '失败'))
+
+    run_id = models.CharField(max_length=64, primary_key=True)
+    split = models.CharField(max_length=16, default='test')
+    category = models.CharField(max_length=20, blank=True, default='')
+    difficulty = models.CharField(max_length=16, blank=True, default='')
+    policy_backend = models.CharField(max_length=16, default='prompted')
+    policy_version = models.CharField(max_length=64, default='')
+    status = models.CharField(max_length=16, choices=STATUS, default='running')
+    total = models.IntegerField(default=0)
+    success_rate = models.FloatField(null=True, blank=True,
+                                     verbose_name="按类别宏平均的成功率")
+    success_rate_weighted = models.FloatField(null=True, blank=True,
+                                              verbose_name="按用例数加权的成功率（仅供对照）")
+    hallucination_rate = models.FloatField(null=True, blank=True)
+    escalated_count = models.IntegerField(default=0)
+    avg_turns = models.FloatField(null=True, blank=True)
+    avg_tool_calls = models.FloatField(null=True, blank=True)
+    per_category = models.JSONField(default=dict)
+    coverage = models.JSONField(default=dict,
+                                verbose_name="覆盖度报告；与成绩同屏，缺它即视为未完成")
+    detail = models.JSONField(default=dict)
+    started_at = models.DateTimeField(auto_now_add=True)
+    finished_at = models.DateTimeField(null=True, blank=True)
+
+    class Meta:
+        db_table = 'oam_bench_run'
+        verbose_name = "OAM 基准评测批次"
+        verbose_name_plural = "OAM 基准评测批次列表"
+        ordering = ['-started_at']
+
+    def to_dict_report(self) -> dict:
+        """接口响应体。
+
+        **coverage 与成绩同屏且必须存在** —— 设计 §6 硬约束 3：
+        *"缺 `coverage` 视为接口未实现"*。这里即便 coverage 为空也返回该键，
+        而不是省掉它：那会让"忘了算覆盖度"看起来像"覆盖度没问题"。
+        """
+        return {
+            'run_id': self.run_id,
+            'split': self.split,
+            'category': self.category,
+            'difficulty': self.difficulty,
+            'policy_backend': self.policy_backend,
+            'policy_version': self.policy_version,
+            'status': self.status,
+            'total': self.total,
+            'success_rate': self.success_rate,
+            'success_rate_weighted': self.success_rate_weighted,
+            'hallucination_rate': self.hallucination_rate,
+            'escalated_count': self.escalated_count,
+            'avg_turns': self.avg_turns,
+            'avg_tool_calls': self.avg_tool_calls,
+            'per_category': self.per_category,
+            'coverage': self.coverage,
+            'detail': self.detail,
+            'started_at': self.started_at,
+            'finished_at': self.finished_at,
+        }
+
+    def __str__(self):
+        return f"{self.run_id} {self.split}/{self.policy_backend} SR={self.success_rate}"
