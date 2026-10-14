@@ -3,6 +3,10 @@ name: CI
 on:
   pull_request:
     branches: [master]
+    # 默认只有 opened/synchronize/reopened。方言 job 的触发条件读
+    # pull_request.labels，但打标签本身不在默认事件里 —— 不加 labeled，
+    # `test-dialect` 标签只有等下一次 push 才生效，等于机制形同虚设。
+    types: [opened, synchronize, reopened, labeled]
   push:
     branches: [master]
 
