@@ -88,7 +88,7 @@ def _scoped_config(request, config_id):
     if cfg is None:
         logger.warning("[api-v3] 实例访问被拒 config_id=%s user=%s exists=%s",
                        config_id, _username(request),
-                       DatabaseConfig.objects.filter(id=config_id).exists())
+                       DatabaseConfig.objects.filter(id=config_id).exists())  # scope-check: allow 审计存在性判定(故意全局)
     return cfg
 
 
@@ -115,7 +115,7 @@ def _scoped_trajectory(request, traj_id):
     if not allowed:
         logger.warning("[api-v3] 轨迹越权 traj_id=%s anchor_config=%s user=%s exists=%s",
                        traj_id, anchor_id, _username(request),
-                       DatabaseConfig.objects.filter(id=anchor_id).exists())
+                       DatabaseConfig.objects.filter(id=anchor_id).exists())  # scope-check: allow 审计存在性判定(故意全局)
         return None
     return traj
 

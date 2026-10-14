@@ -169,8 +169,13 @@ def _make_chunk_id(doc_id: str, ordinal: int, text: str) -> str:
 
     加内容摘要是为了让 ID 在"文档局部改动后重切"时尽量保持稳定 ——
     §1.6⑤ 要求咨询类判定按文档集合精确相等，ID 抖动会让这种判定失去意义。
+
+    `usedforsecurity=False` 是显式声明：**这是内容指纹，不是安全哈希**，
+    用途是让 ID 可复现，不承担任何抗碰撞/防篡改职责。碎到 8 位十六进制
+    是为了 ID 短，不代表可以拿来当校验和用。
     """
-    digest = hashlib.sha1(text.encode('utf-8')).hexdigest()[:8]
+    digest = hashlib.sha1(text.encode('utf-8'),
+                          usedforsecurity=False).hexdigest()[:8]
     return f'{doc_id}#{ordinal:03d}-{digest}'
 
 

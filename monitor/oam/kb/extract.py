@@ -126,10 +126,18 @@ class KbRecord:
 
     @property
     def key(self) -> str:
-        """稳定记录 ID：源文档 + 症状 + 方言集合，同输入必同输出。"""
+        """稳定记录 ID：源文档 + 症状 + 方言集合，同输入必同输出。
+
+        `usedforsecurity=False` 是显式声明这是**内容指纹**而非安全哈希：
+        用途是让记录 ID 可复现、可回溯到同一段输入，不承担抗碰撞职责。
+        论文 §1.6⑤ 要求咨询类判定按记录 ID 集合精确相等，ID 抖动会让这种
+        判定失去意义 —— 但那要求的是"稳定"，不是"安全"。
+        """
         payload = '|'.join([self.source_doc_id, self.symptom,
                             ','.join(sorted(self.db_types))])
-        return f'kb-{hashlib.sha1(payload.encode("utf-8")).hexdigest()[:12]}'
+        digest = hashlib.sha1(payload.encode('utf-8'),
+                               usedforsecurity=False).hexdigest()[:12]
+        return f'kb-{digest}'
 
     @property
     def record_id_or_key(self) -> str:

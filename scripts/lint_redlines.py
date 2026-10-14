@@ -76,8 +76,29 @@ def _diff_args():
     return ('HEAD',)
 
 
+def _untracked_files():
+    """未跟踪文件列表（只看 .py）。
+
+    为什么必须单独取：`git diff HEAD` **不包含未跟踪文件**。而本仓库
+    复发次数最多的越权形态恰恰是"新写一个视图文件忘了套 visible_to"
+    —— 全新文件在本地扫描里根本不可见，要等 CI 才炸。CI 是事后信号，
+    不是本地闸；这里补上本地可见性。
+    """
+    out = _git('ls-files', '--others', '--exclude-standard')
+    return [p for p in out.splitlines() if p.endswith('.py')]
+
+
+def _all_lines(relpath):
+    """未跟踪文件视作"整文件都是新增行"。"""
+    try:
+        text = (PROJECT_DIR / relpath).read_text(encoding='utf-8')
+    except Exception:
+        return set()
+    return set(range(1, text.count('\n') + 2))
+
+
 def _changed_files(diff_args=None):
-    """返回指定 diff 范围内的 [(status, relpath)]。"""
+    """返回指定 diff 范围内的 [(status, relpath)]，并入未跟踪文件。"""
     out = _git('diff', *(diff_args or _diff_args()), '--name-status')
     result = []
     for line in out.splitlines():
@@ -87,6 +108,10 @@ def _changed_files(diff_args=None):
         status = parts[0][0]  # A / M / D / R ...
         relpath = parts[-1]
         result.append((status, relpath))
+    seen = {p for _, p in result}
+    for relpath in _untracked_files():
+        if relpath not in seen:
+            result.append(('A', relpath))
     return result
 
 
@@ -115,6 +140,8 @@ def _added_lines_by_file(diff_args=None):
             pass  # 删除行不递增 new_line
         elif not line.startswith('\\'):
             new_line += 1  # 上下文行递增（-U0 通常没有，保险起见）
+    for relpath in _untracked_files():
+        result.setdefault(relpath, set()).update(_all_lines(relpath))
     return result
 
 
