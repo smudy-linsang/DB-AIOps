@@ -36,9 +36,17 @@ SKIP_SETTINGS_FILES = {
 
 
 def _git(*args):
-    """运行 git 命令，返回 stdout（失败返回空字符串）。"""
+    """运行 git 命令，返回 stdout（失败返回空字符串）。
+
+    显式指定 utf-8：text=True 走的是系统默认编码，而本仓库的 diff 内容是中文，
+    在默认编码为 GBK 的 Windows 上会抛 UnicodeDecodeError，让整个红线扫描
+    以 AttributeError 崩掉 —— 表现为"闸门恒红"，比误报更糟。
+    errors='replace' 保证任何情况下都返回可解析的文本：我们只消费
+    `+++ b/<path>` 与行号，被替换的正文不影响判定。
+    """
     try:
-        r = subprocess.run(['git', *args], capture_output=True, text=True)
+        r = subprocess.run(['git', *args], capture_output=True,
+                           encoding='utf-8', errors='replace')
         return r.stdout if r.returncode == 0 else ''
     except Exception:
         return ''

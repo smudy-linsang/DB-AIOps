@@ -28,9 +28,16 @@ done
 PROJECT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 cd "$PROJECT_DIR" || exit 2
 
-# 虚拟环境：兼容 venv/ 与 .venv/ 两种惯例
+# 虚拟环境：兼容 venv/ 与 .venv/ 两种惯例。
+# Windows 布局是 Scripts/ 而非 bin/（Git Bash / MSYS 下同样如此）——
+# 漏掉这一支会让脚本在 Windows 上"能跑但全阶段秒挂"，表现为 gate 失效。
 for v in .venv venv; do
-  [ -f "$v/bin/activate" ] && { . "$v/bin/activate"; break; }
+  if [ -f "$v/bin/activate" ]; then
+    . "$v/bin/activate"; break
+  elif [ -f "$v/Scripts/activate" ]; then
+    # shellcheck disable=SC1091
+    . "$v/Scripts/activate"; break
+  fi
 done
 
 STAGES=()   # 形如 "阶段名|状态|耗时ms"
