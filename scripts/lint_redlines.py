@@ -365,6 +365,33 @@ def check_unscoped_config_queries(changed_py, added_lines):
     return violations
 
 
+def check_source_files_tracked():
+    """源码在盘上却不在版本库里。
+
+    这是一条**独立于 diff** 的检查，因为丢文件这件事 diff 根本看不见：
+    本地测试全绿（文件就在盘上），只有 CI 的干净检出才会炸。
+
+    真实踩过：`.gitignore` 里未锚定的 `env/` 吞掉了 monitor/oam/env/ 整个
+    可回放环境包，`fix_*.py` 吞掉了 verifier/fix_verify.py。两次都直到 CI
+    报 ModuleNotFoundError 才发现 —— 而 CI 是事后信号。
+    """
+    tracked = set(_git('ls-files', '--', 'monitor', 'dbmonitor').splitlines())
+    tracked = {t.strip() for t in tracked if t.strip()}
+    missing = []
+    for top in ('monitor', 'dbmonitor'):
+        base = PROJECT_DIR / top
+        if not base.is_dir():
+            continue
+        for path in base.rglob('*.py'):
+            rel = path.relative_to(PROJECT_DIR).as_posix()
+            parts = path.relative_to(base).parts
+            if '__pycache__' in parts or 'migrations' in parts and parts[-1] == '__init__.py':
+                continue
+            if rel not in tracked:
+                missing.append(rel)
+    return sorted(missing)
+
+
 def main() -> int:
     specs_keys = _parse_specs_keys()
     diff_args = _diff_args()
@@ -402,6 +429,13 @@ def main() -> int:
         all_violations.append(
             f'  [Copilot样例事实] {relpath}:{lineno}  '
             f'禁止在生产工具新增固定业务字面量 {literal!r}'
+        )
+
+    for relpath in check_source_files_tracked():
+        all_violations.append(
+            f'  [未入库] {relpath}  '
+            f'源码存在于工作区但未被 git 跟踪（多半是被 .gitignore 的宽规则吞掉）；'
+            f'本地测试会绿、CI 干净检出会 ModuleNotFoundError'
         )
 
     if all_violations:

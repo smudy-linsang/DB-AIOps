@@ -10,9 +10,11 @@ dist/
 build/
 
 # Virtual environments
-venv/
-env/
-.venv/
+# 必须锚定到仓库根：不加前导 / 时，`env/` 会匹配任意层级的同名目录，
+# 已经把 monitor/oam/env/（L1 可回放环境包）整包从版本库里悄悄抹掉过。
+/venv/
+/env/
+/.venv/
 
 # IDE
 .vscode/
@@ -59,28 +61,33 @@ server.log
 $null
 
 # Analysis/Fix scripts (Temporary)
-analyze_*.py
-fix_*.py
-smart_*.py
-simple_fix.py
-full_fix.py
-restore_*.py
-decode_*.py
-check_encoding.py
-check_db_passwords.py
-check_metrics.py
-check_monitor_log.py
-check_mysql_user.py
-check_oracle_metrics.py
-check_users.py
-create_test_user.py
-find_corruptions.py
-find_emojis.py
-disable_dm.py
-init_test_dbs.py
-migrate_alerts_to_es.py
-migrate_to_pg.py
-update_oracle_pass.py
+# 必须限定在 scripts/ 下。这些通配名极易撞上真源码：
+# 未限定的 `fix_*.py` 已经把 monitor/oam/verifier/fix_verify.py
+# （可执行修复校验，P0 的核心判定之一）悄悄吞出版本库，本地测试全绿、
+# CI 干净检出直接 ModuleNotFoundError。限定目录后 monitor/ 与 dbmonitor/
+# 永远不会被这批规则命中。
+scripts/analyze_*.py
+scripts/fix_*.py
+scripts/smart_*.py
+scripts/simple_fix.py
+scripts/full_fix.py
+scripts/restore_*.py
+scripts/decode_*.py
+scripts/check_encoding.py
+scripts/check_db_passwords.py
+scripts/check_metrics.py
+scripts/check_monitor_log.py
+scripts/check_mysql_user.py
+scripts/check_oracle_metrics.py
+scripts/check_users.py
+scripts/create_test_user.py
+scripts/find_corruptions.py
+scripts/find_emojis.py
+scripts/disable_dm.py
+scripts/init_test_dbs.py
+scripts/migrate_alerts_to_es.py
+scripts/migrate_to_pg.py
+scripts/update_oracle_pass.py
 
 # Test scripts (Temporary)
 test_acme_reader.py
@@ -133,7 +140,7 @@ frontend/dist/
 test_results_*.json
 
 # Debug scripts
-debug_*.py
+/debug_*.py
 query
 
 # Dev PID file
