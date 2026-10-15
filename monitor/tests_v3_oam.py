@@ -762,6 +762,47 @@ class KnowledgeBaseTests(TestCase):
         env.call('kb.search', {'query': '排序落盘导致查询变慢'})
         self.assertEqual(OamRetrievalMiss.objects.count(), 0)
 
+    def test_kb_unbound_fix_action_is_kept_not_dropped(self):
+        """R-1：修复动作绑不上工具时保留原文 + 标 advisory，而不是报错或丢弃。
+
+        论文的 KB 来自真实运维文档，而真实文档写的是"调整 sort_buffer_size 到 4M"
+        这种人话。原实现抛 `ValueError` 拦下**整份手册**，等于 DBA 手里的手册
+        一份都进不了库。
+        """
+        from monitor.oam.kb import chunk, extract
+        doc = {'doc_id': 'D-RUNBOOK', 'category': 'fault_solution',
+               'db_types': ['mysql'], 'title': 'MySQL 查询变慢处理手册', 'version': 'v1',
+               'body': ('## 症状\n查询耗时升高，Sort_merge_passes 增长。\n\n'
+                        '## 处理步骤\n1. 调整 sort_buffer_size 到 4M。\n')}
+        records = extract(doc, chunk(doc))
+        self.assertEqual(len(records), 1, '真实手册应当抽出记录，而不是整份被拒')
+        rec = records[0]
+        self.assertTrue(any('sort_buffer_size' in f for f in rec.fix_actions),
+                        '手册里的真实修法必须原样保留，丢掉等于把知识扔了')
+        self.assertTrue(rec.unbound_fix_actions, '绑不上的条目必须单独记下来')
+        self.assertTrue(rec.advisory, '必须标 advisory 待人工复核')
+        self.assertFalse(rec.needs_review,
+                         '方言已明确，不能按 needs_review 处置 —— 那会让记录'
+                         '在检索层被排除，变成"入库成功但永远查不到"的假修复')
+
+    def test_kb_instruction_noise_is_not_recorded_as_an_action(self):
+        """纯工具名的步骤不得把引导词（"先执行""然后调用"）当成动作入库。"""
+        from monitor.oam.kb import chunk, extract
+        doc = {'doc_id': 'D-NOISE', 'category': 'fault_solution',
+               'db_types': ['mysql'], 'title': 'MySQL 锁等待处理方案', 'version': 'v1',
+               'body': ('## 症状\n锁等待升高、事务阻塞。\n\n'
+                        '## 处理步骤\n1. 先执行 db.top_sql。\n'
+                        '2. 然后调用 db.lock_chain。\n')}
+        rec = extract(doc, chunk(doc))[0]
+        self.assertIn('db.top_sql', rec.fix_actions)
+        self.assertIn('db.lock_chain', rec.fix_actions)
+        self.assertEqual(rec.unbound_fix_actions, [],
+                         '整句只有工具名的步骤不应留下任何"绑不上"的残留')
+        self.assertFalse(rec.advisory, '全部动作都绑上了工具，不该标 advisory')
+        for action in rec.fix_actions:
+            self.assertNotIn('执行', action)
+            self.assertNotIn('调用', action)
+
     def test_kb_record_rejects_cross_dialect_cause(self):
         """成因必须落在该方言的标签空间内，否则会把 Oracle 方案推给 MySQL。"""
         from monitor.oam.kb import extract as kb_extract

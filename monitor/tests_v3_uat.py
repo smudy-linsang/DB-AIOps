@@ -106,29 +106,48 @@ class UatKbIngestion(TestCase):
         self.assertIn(rec.record_id_or_key, [h.record_id for h in res.hits],
                       '刚入库的知识应当能被同义查询检索到')
 
-    def test_UAT_V3_01b_free_text_runbook_is_refused_with_an_actionable_reason(self):
-        """边界情形：自然语言运维手册（处理步骤没写成工具名）。
+    def test_UAT_V3_01b_free_text_runbook_is_ingested_with_its_remediation_kept(self):
+        """自然语言运维手册（处理步骤没写成工具名）必须能入库，且修法不能丢。
 
-        设计 §4.3 要求修复动作**绑定到动作空间**，`extract` 对"写了修法却
-        绑不上工具"选择硬报错（`extract.py:531-537`，理由是悄悄丢掉修复动作
-        会产出"只诊断不给修法"的污染记录）。这是**有意的失败关闭**，
-        所以本用例的验收判据是：报错必须可执行 —— 指明是哪份文档、
-        哪一条动作、以及该方言有哪些可用工具。
+        这条用例原先断言的是"必须抛 `ValueError`"（当时记为遗留项 R-1：
+        硬报错拦下的是**整份手册**，DBA 手里的真实文档一份都进不了库，
+        而论文的 KB 本来就来自真实文档）。
 
-        > 验收记录：这也意味着 P0 交付的入库管线**只接受结构化输入**，
-        > DBA 手里的自然语言手册需要先改写成工具名，或等 P1 接 LLM 抽取。
-        > 该限制已写入报告"验收观察"节。
+        现在的判据比"报错可执行"更强，要求同时成立四件事：
+          1. 不报错，抽出记录；
+          2. 文档写的修法**原样保留**，没有被静默丢弃；
+          3. 明确标成 `advisory`（可检索但待人工复核），且**不是**
+             `needs_review` —— 后者会让记录在检索层被排除，等于假修复；
+          4. 该记录对自己的方言可检索，对别的方言仍然不可见。
         """
         from monitor.oam.kb import chunk, classify, extract
 
         doc = dict(self.RUNBOOK)
         doc['category'] = classify(doc)
-        with self.assertRaises(ValueError) as ctx:
-            extract(doc, chunk(doc))
-        msg = str(ctx.exception)
-        self.assertIn(doc['doc_id'], msg, '报错必须指明是哪份文档')
-        self.assertIn('mysql', msg, '报错必须指明是哪套方言')
-        self.assertIn('工具', msg, '报错必须告诉 DBA 该怎么改（写成工具名）')
+        records = extract(doc, chunk(doc))
+        self.assertEqual(len(records), 1, '真实手册应当能抽出记录，而不是整份被拒')
+
+        rec = records[0]
+        self.assertFalse(rec.needs_review,
+                         '方言已由 db_types 明确给出，不该按 needs_review 处置')
+        self.assertTrue(rec.advisory, '绑不上工具的修法必须留痕待复核')
+        self.assertTrue(rec.advisory_reason)
+        self.assertTrue(rec.unbound_fix_actions,
+                        '绑不上工具的修复动作必须被记录下来，不能消失')
+        joined = ' '.join(rec.fix_actions)
+        self.assertIn('sort_buffer_size', joined,
+                      '手册里的真实修法必须原样保留，否则等于把知识扔了')
+        self.assertIn('Sort_merge_passes', joined)
+
+        # 可检索：advisory 记录仍要进检索上下文
+        idx = self._index(rec)
+        res = idx.search('查询变慢 sort_buffer_size', db_type='mysql', top_k=5)
+        self.assertIn(rec.record_id_or_key, [h.record_id for h in res.hits],
+                      'advisory 记录应可检索，否则又变成"入库成功但查不到"')
+        # 方言隔离不受影响
+        res_o = idx.search('查询变慢 sort_buffer_size', db_type='oracle', top_k=5)
+        self.assertNotIn(rec.record_id_or_key, [h.record_id for h in res_o.hits],
+                         'MySQL 的手册不得进入 Oracle 的上下文（REV-10）')
 
     def test_UAT_V3_01c_other_dialect_never_sees_it(self):
         """方言隔离：Oracle 事故的检索上下文里不得出现 MySQL 的方案。"""

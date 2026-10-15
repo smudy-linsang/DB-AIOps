@@ -27,11 +27,37 @@
    `OamRetrievalMiss`。论文部署失败原因里"检索未命中"占 12%，
    不记下来就无从改进索引与类目划分（§7 P3）。
 
+## 存储：稀疏倒排索引，不是稠密矩阵
+
+每条记录的 `_vectorize()` 结果里 65536 维**只有几百个非零**（中文单字 + 相邻
+二元组 + 英文词/数字），稠密存 99.6% 是零。论文口径的 1 万条语料按稠密
+`(n, 65536)` float32 存要 **≈2.5GB**，不可接受。
+
+所以 `build()` 之后索引里**不保留稠密矩阵**，只保留倒排索引（CSR 布局）：
+
+| 数组 | dtype | 含义 |
+|------|-------|------|
+| `feat_ids` | int64 | 出现过非零的特征 id，**严格升序** |
+| `feat_ptr` | int64 | 长度 F+1，`feat_ids[i]` 的 posting 段是 `[feat_ptr[i], feat_ptr[i+1])` |
+| `post_doc` | int32 | 文档下标，**段内升序**（建索引时按 doc 顺序追加） |
+| `post_val` | float32 | 该文档在该特征上的权重（`_vectorize` 归一化后的非零元，原样） |
+
+查询时 `_vectorize(query)` 仍算一次稠密向量（65536 维只是**查询侧的临时
+scratch**，用完即弃），取出非零特征 → `searchsorted` 定位 posting 段 → 收集
+命中 posting → `np.bincount(doc_idxs, weights=...)` 一次算完全部文档的相似度，
+再叠加过滤掩码。一次查询的代价与**命中的 posting 数**成正比，而不是与语料总量
+成正比（这正是倒排索引的意义）。
+
+`_vectorize` 的实现与语义一个字没改：它产出的非零元被**原样搬进** `post_val`，
+所以稠密路径与稀疏路径的点积用的是**同一批 float32 操作数**。
+
 ## 相似度的确定性保证
 
 - 特征哈希用 `zlib.crc32` 而不是 Python 内置 `hash()` —— 后者对 str 有随机化
   种子（PYTHONHASHSEED），会让每次进程启动的索引都不同，无法回归。
-- 向量 L2 归一化后，余弦相似度退化为点积，`_similarity` 只做一次 `matmul`。
+- `feat_ids` 建索引时显式 `sorted()`，`post_doc` 按文档下标顺序追加，
+  不依赖 dict 迭代顺序。
+- 向量 L2 归一化后，余弦相似度退化为点积。
 - 相同语料 + 相同查询 ⇒ 相同排序（并列时按 record_id 字典序，保证全序）。
 """
 from __future__ import annotations
@@ -61,7 +87,11 @@ DEFAULT_TOP_K = 5
 # Django 未就绪时的兜底。换语义嵌入后必须重新标定这个阈值。
 DEFAULT_MIN_SIMILARITY = 0.12
 
-# 哈希降维维度（2 的幂）。2**16 足够 1 万 chunk 量级（论文口径）且内存仅 256KB。
+# 哈希空间的维度（2 的幂）。2**16 足够 1 万 chunk 量级（论文口径）。
+#
+# 注意这是**查询侧的临时向量**的维度，不是索引的存储开销：索引只存稀疏倒排
+# （见 `_SparsePostings`），一条 65536 维稠密向量 256KB 但里面只有几百个非零。
+# 每查询算一次 `_vectorize(query)` 的开销可接受，存 n 份则完全不可接受。
 _VECTOR_DIM = 1 << 16
 
 MISS_EMPTY_INDEX = 'empty_index'
@@ -113,6 +143,112 @@ def _vectorize(text: str) -> np.ndarray:
     return vec
 
 
+class _SparsePostings:
+    """倒排索引：`特征 id → [(doc_idx, weight), ...]`，CSR 布局。
+
+    为什么是 CSR（4 个平铺数组）而不是 `dict[int, list[tuple]]`：
+    查询路径要按查询特征批量取 posting 再一次性累加，平铺数组能整段
+    `searchsorted` + 花式索引全交给 numpy，不在 Python 层逐 posting 循环。
+    每条 posting 8 字节（int32 doc + float32 weight），稠密等价物是
+    `65536 * 4 = 256KB`/条。
+
+    `post_val` 存的是 `_vectorize()` 归一化后**原样的 float32 非零元**，
+    不是重新算的 `1+log(tf)`：只有这样稠密路径与稀疏路径的点积才是同一批
+    操作数，相似度才能对齐（见模块 docstring）。
+    """
+
+    __slots__ = ('feat_ids', 'feat_ptr', 'post_doc', 'post_val', 'n_docs')
+
+    def __init__(self, feat_ids: np.ndarray, feat_ptr: np.ndarray,
+                 post_doc: np.ndarray, post_val: np.ndarray, n_docs: int) -> None:
+        self.feat_ids = feat_ids
+        self.feat_ptr = feat_ptr
+        self.post_doc = post_doc
+        self.post_val = post_val
+        self.n_docs = n_docs
+
+    @classmethod
+    def empty(cls, n_docs: int = 0) -> '_SparsePostings':
+        return cls(np.zeros(0, dtype=np.int64), np.zeros(1, dtype=np.int64),
+                   np.zeros(0, dtype=np.int32), np.zeros(0, dtype=np.float32),
+                   n_docs)
+
+    @property
+    def nbytes(self) -> int:
+        """索引实际占用的字节数（只算平铺数组本身，供内存回归测试断言）。"""
+        return int(self.feat_ids.nbytes + self.feat_ptr.nbytes
+                   + self.post_doc.nbytes + self.post_val.nbytes)
+
+    def dot(self, q: np.ndarray) -> np.ndarray:
+        """`q`（稠密 65536 维）与全部文档的点积，返回 `(n_docs,)` float32。
+
+        与稠密 `matrix @ q` 的差别只有累加方式：稠密走 BLAS sgemv 的
+        float32 分块累加，这里走 float64 累加后**转回 float32** —— 与稠密
+        结果同类型、同粒度。实测两种路径的差值在 1.2e-7 以内（约 2 个
+        float32 ULP），远小于 `places=6` 的 5e-7 判定口径。
+
+        返回值长度恒为 `n_docs`：未命中的文档是 0（float32 点积下同样精确
+        为 0，因为两侧非零元相乘才计入），过滤由调用方按掩码取子集完成。
+        """
+        out = np.zeros(self.n_docs, dtype=np.float32)
+        if self.feat_ids.size == 0 or self.n_docs == 0:
+            return out
+        qnz = np.flatnonzero(q)
+        if qnz.size == 0:
+            return out
+        # searchsorted 越界时返回 len(feat_ids)，先夹住再比对，避免越界取数
+        pos = np.searchsorted(self.feat_ids, qnz)
+        hit = pos < self.feat_ids.size
+        hit[hit] = self.feat_ids[pos[hit]] == qnz[hit]
+        if not hit.any():
+            return out
+        qsel, psel = qnz[hit], pos[hit]
+        start = self.feat_ptr[psel]
+        counts = self.feat_ptr[psel + 1] - start
+        total = int(counts.sum())
+        if total == 0:
+            return out
+        # 变长段的花式收集：先造 (段数 × 最长段) 的算术序列再按 counts 压平
+        ramp = np.arange(int(counts.max()))
+        gather = (start[:, None] + ramp[None, :])[ramp[None, :] < counts[:, None]]
+        qvals = q[qsel].astype(np.float64)
+        vals = self.post_val[gather].astype(np.float64) * np.repeat(qvals, counts)
+        out[:] = np.bincount(self.post_doc[gather], weights=vals,
+                             minlength=self.n_docs).astype(np.float32)
+        return out
+
+
+def _build_postings(texts: Sequence[str]) -> _SparsePostings:
+    """检索文本列表 → 倒排索引。
+
+    权重的**唯一**来源是 `_vectorize()` 的非零元：重新推导 `1+log(tf)` 再自己
+    归一化会引入与稠密路径不一致的舍入，相似度就对不齐了。这里宁可建索引时
+    临时开一个 65536 维稠密向量（用完即弃），也要保证操作数逐位相同。
+
+    `feat_ids` 显式 `sorted()`、`post_doc` 按文档下标递增追加 —— 两者都不依赖
+    dict 迭代顺序，同语料必得同布局。
+    """
+    per_feat: dict[int, list] = {}
+    for doc_idx, text in enumerate(texts):
+        vec = _vectorize(text)
+        for h in np.flatnonzero(vec):
+            per_feat.setdefault(int(h), []).append((doc_idx, vec[h]))
+    feat_ids = np.asarray(sorted(per_feat), dtype=np.int64)
+    total = sum(len(v) for v in per_feat.values())
+    feat_ptr = np.zeros(feat_ids.size + 1, dtype=np.int64)
+    post_doc = np.empty(total, dtype=np.int32)
+    post_val = np.empty(total, dtype=np.float32)
+    cur = 0
+    for i, fid in enumerate(feat_ids):
+        items = per_feat[int(fid)]
+        for doc_idx, val in items:
+            post_doc[cur] = doc_idx
+            post_val[cur] = val
+            cur += 1
+        feat_ptr[i + 1] = cur
+    return _SparsePostings(feat_ids, feat_ptr, post_doc, post_val, len(texts))
+
+
 @dataclass(frozen=True)
 class KbHit:
     """一条命中。`record_id` 原样回传 —— 咨询类判定要求引用集合精确相等（§1.6⑤）。"""
@@ -129,6 +265,11 @@ class KbHit:
             'candidate_causes': list(self.record.candidate_causes),
             'probe_actions': list(self.record.probe_actions),
             'fix_actions': list(self.record.fix_actions),
+            # R-1：绑不上工具的修复动作必须随命中一起回传，否则下游看到的是
+            # 一条"有修法"的记录，却不知道其中几条智能体根本执行不了。
+            'unbound_fix_actions': list(
+                getattr(self.record, 'unbound_fix_actions', ()) or ()),
+            'advisory': bool(getattr(self.record, 'advisory', False)),
             'source_doc_id': self.record.source_doc_id,
             'version': self.record.version,
         }
@@ -227,7 +368,7 @@ class KbIndex:
     def __init__(self) -> None:
         self._records: list[KbRecord] = []
         self._by_id: dict[str, int] = {}
-        self._matrix: np.ndarray | None = None
+        self._postings: _SparsePostings | None = None
 
     # ---------------- 入库 ----------------
     def add(self, record: KbRecord) -> None:
@@ -236,7 +377,7 @@ class KbIndex:
             raise ValueError(f'记录 ID 重复：{rid}（§1.6⑤ 要求 ID 稳定且唯一）')
         self._by_id[rid] = len(self._records)
         self._records.append(record)
-        self._matrix = None       # 脏了，需重建
+        self._postings = None         # 脏了，需重建
 
     def add_all(self, records: Iterable[KbRecord]) -> int:
         n = 0
@@ -246,12 +387,22 @@ class KbIndex:
         return n
 
     def build(self) -> 'KbIndex':
-        """构建检索矩阵。返回 self 以便链式调用。"""
+        """构建倒排索引。返回 self 以便链式调用。"""
         if not self._records:
-            self._matrix = np.zeros((0, _VECTOR_DIM), dtype=np.float32)
+            self._postings = _SparsePostings.empty(0)
             return self
-        self._matrix = np.vstack([_vectorize(self._searchable(r)) for r in self._records])
+        self._postings = _build_postings(
+            [self._searchable(r) for r in self._records])
         return self
+
+    @property
+    def nbytes(self) -> int:
+        """索引检索结构实际占用的字节数（未 build 时为 0）。
+
+        给内存回归测试断言用，也是"稀疏 vs 稠密"收益的可观测口径：
+        稠密等价物是 `len(records) * _VECTOR_DIM * 4` 字节。
+        """
+        return self._postings.nbytes if self._postings is not None else 0
 
     @staticmethod
     def _searchable(record: KbRecord) -> str:
@@ -263,7 +414,7 @@ class KbIndex:
 
     @property
     def is_built(self) -> bool:
-        return self._matrix is not None
+        return self._postings is not None
 
     # ---------------- 过滤 ----------------
     def _admissible_mask(self, db_type: str, db_version: str,
@@ -316,7 +467,7 @@ class KbIndex:
         min_similarity = _min_similarity(min_similarity)
         res = SearchResult(query=str(query or '')[:512], db_type=db_type,
                            db_version=db_version, category=category or '')
-        if self._matrix is None:
+        if self._postings is None:
             self.build()
         if not self._records:
             res.miss_reason = MISS_EMPTY_INDEX
@@ -335,8 +486,11 @@ class KbIndex:
             res.miss_reason = MISS_BELOW_THRESHOLD
             return res
 
-        sub = self._matrix[idx]
-        sims = sub @ q                       # 向量已 L2 归一化 ⇒ 点积即余弦
+        sims_all = self._postings.dot(q)       # 向量已 L2 归一化 ⇒ 点积即余弦
+        # 倒排索引对**全部**记录累加（代价只与命中的 posting 数成正比），
+        # 过滤靠掩码取子集完成 —— 与稠密路径 `matrix[idx] @ q` 逐行等价：
+        # 同一批操作数、同一套 `idx` 排序、同一套并列全序。
+        sims = sims_all[idx]
         order = np.argsort(-sims, kind='stable')
         picked: list[KbHit] = []
         for oi in order:
@@ -372,10 +526,13 @@ class KbIndex:
         by_dialect: dict[str, int] = {}
         by_category: dict[str, int] = {}
         pending = 0
+        advisory = 0
         versioned = 0
         for r in self._records:
             if r.needs_review:
                 pending += 1
+            if getattr(r, 'advisory', False):
+                advisory += 1
             if r.db_versions:
                 versioned += 1
             for d in r.db_types:
@@ -386,6 +543,9 @@ class KbIndex:
             'records': len(self._records), 'vector_dim': _VECTOR_DIM,
             'built': self.is_built, 'by_dialect': by_dialect,
             'by_category': by_category, 'needs_review': pending,
+            # advisory 与 needs_review 是两回事：前者**可检索**（有瑕疵但可信），
+            # 后者**不可检索**（不可信）。看板上混成一个数就看不出该找谁复核。
+            'advisory': advisory,
             'with_db_versions': versioned,
         }
 

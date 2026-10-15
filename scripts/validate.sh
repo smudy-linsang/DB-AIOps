@@ -90,7 +90,14 @@ run_backend() {
   # （tests.py, tests_self_monitor.py, tests_phase8.py 等）。
   # tests_phase7.py 是纯函数脚本（非 TestCase），不在自动发现范围内，
   # 由 verify_phase7.py 手动运行。新增 Django 测试文件无需改脚本。
-  _run "全量测试"    python manage.py test monitor -v 1         || return 1
+  #
+  # R-4：用 settings_test_integration（真实 PostgreSQL + 外部依赖全关）。
+  # 此前用默认 settings，Windows 上每次连 localhost:9200 失败要 ~4 秒
+  # （先 ::1 再回落 IPv4），全量 443 条要 30 分钟 —— 没人会在提交前等 30 分钟，
+  # 于是"提交前跑全量"实际从不执行。关掉外部服务后回到分钟级。
+  # CI 的 test-integration 仍跑默认 settings，两道闸门覆盖不同配置面。
+  DJANGO_SETTINGS_MODULE=dbmonitor.settings_test_integration \
+    _run "全量测试"    python manage.py test monitor -v 1         || return 1
   return 0
 }
 

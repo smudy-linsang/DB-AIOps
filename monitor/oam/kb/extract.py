@@ -34,6 +34,20 @@
 - 空 `db_types` 的记录在 `index.py` 里**永远进不了任何方言的检索上下文**
   （`KbRecord.covers()` 返回 False），是"失败关闭"而不是"失败开放"。
 
+## 修复动作绑不上工具时怎么办（R-1）
+
+与上面**不同**的一类问题：方言判出来了、症状与成因都在封闭标签空间里，
+只是文档写的修法是"调整 sort_buffer_size 到 4M""重启实例"这种人话，
+绑不到 `db.session_proxy` 之类的工具名。
+
+**不报错，原样保留 + 标 `advisory`。** 原实现抛 `ValueError` 拦下整份文档，
+代价是"DBA 手里的真实手册一份都进不了库"，而论文的 KB 本来就该来自真实文档。
+
+失败关闭的原则一步没松：`fix_actions` 里被当作**可执行工具**的条目仍然全部
+来自工具目录；绑不上的部分同时记在 `unbound_fix_actions`，绝不冒充工具名。
+**没有把它归到 `needs_review`** —— 那会让记录在 `_admissible_mask` 里被排除，
+变成"入库成功但永远检索不到"，比报错更难发现。
+
 ## 已知限制
 
 1. 论文的抽取是**离线用 Qwen3-32B 做 LLM 抽取**（§6.1.1）。P0 不引入在线 LLM
@@ -123,6 +137,20 @@ class KbRecord:
     source_chunk_ids: list[str] = field(default_factory=list)
     needs_review: bool = False         # 方言/成因判定不可靠，待人工复核
     review_reason: str = ''
+    # ---- 本项目增量（R-1）----
+    # `fix_actions` 里绑不上工具的原文。它们**不是**可执行动作，只是人可读的
+    # 修复步骤；同时它们被原样保留在 `fix_actions` 里（与 `oam_kb_migrate_rules`
+    # 写入的建议文本同一形态），这个字段负责标出"哪几条是自由文本"。
+    unbound_fix_actions: list[str] = field(default_factory=list)
+    # `advisory` 与 `needs_review` 是**两件事**，别混：
+    #   needs_review=True  → 不可信，**不得进入检索上下文**（方言没判出来，
+    #                        放行就是 REV-10）；
+    #   advisory=True      → 可信但有瑕疵，**照常可检索**，建议人工复核。
+    # 曾经把"绑不上工具"归到 needs_review，那是假修复：那条记录会在
+    # `_admissible_mask` 里被直接排除，于是手册"入库成功"却永远检索不到，
+    # 比入库时报错更坏 —— 报错至少是可见的。
+    advisory: bool = False
+    advisory_reason: str = ''
 
     @property
     def key(self) -> str:
@@ -171,6 +199,8 @@ class KbRecord:
             'source_doc_id': self.source_doc_id, 'version': self.version,
             'db_versions': dict(self.db_versions), 'category': self.category,
             'needs_review': self.needs_review, 'review_reason': self.review_reason,
+            'unbound_fix_actions': list(self.unbound_fix_actions),
+            'advisory': self.advisory, 'advisory_reason': self.advisory_reason,
         }
 
 
@@ -504,42 +534,102 @@ def _split_items(lines: list[str]) -> list[str]:
     return out
 
 
-def _extract_actions(sections: dict[str, list[str]], db_type: str,
-                     doc_id: str) -> tuple[list[str], list[str]]:
-    """抽取并绑定（探查动作, 修复动作）。
+# 正文里"绑不上工具"的残留是否算一个动作：先剥掉列表符号与句读，
+# 再剥掉开头的指令性引导词（"先执行"、"然后"、"建议"…）。剥完还剩东西
+# 才算 —— 否则 "先执行 db.session_profile" 会把 "先执行" 当成一条修复动作
+# 塞进 KB，那是把噪声当知识。
+_LEAD_NOISE_RE = re.compile(
+    r'^(?:先|然后|接着|随后|再|最后|应|应当|需要|建议|可以|可|'
+    r'执行|调用|运行|使用|查看|检查|确认|进行|尝试|调整|修改|设置)+')
+# 剥完只剩标点/空白 → 没有内容
+_PUNCT_ONLY_RE = re.compile(r'^[\s，,。.、；;：:（）()【】\[\]{}<>→>—\-·|/\\]+$')
 
-    绑定规则：只从**工具目录里真实存在的名字**中认领动作，不认领的一律丢弃
-    并留痕 —— 但**修复动作例外**：文档写了修复手段却绑不上工具时报错，
-    因为悄悄丢掉修复动作会产出一条"只诊断不给修法"的记录，
-    那是比报错更坏的污染（且没有痕迹）。
+
+def _residual_text(line: str, claimed: list[str]) -> str:
+    """去掉已认领的工具名后，句子里剩下的东西。
+
+    绑不上工具不等于没有价值：真实运维手册写的是"调整 sort_buffer_size 到 4M"
+    "重启实例"，而不是 `db.session_profile`。悄悄丢掉等于把知识扔了；
+    原样留下并标记 `advisory`，由人决定要不要改写成可执行调用。
+
+    返回空串表示这句没有可留的内容（整个句子就是工具名，或只剩引导词）。
+    """
+    rest = str(line or '')
+    for name in claimed:
+        rest = re.sub(re.escape(name), ' ', rest, flags=re.IGNORECASE)
+    rest = _ITEM_SPLIT_RE.sub(' ', rest)
+    rest = re.sub(r'\s+', ' ', rest).strip()
+    prev = None
+    while prev != rest:
+        prev = rest
+        rest = _LEAD_NOISE_RE.sub('', rest).strip()
+    rest = rest.strip('，,。.、；;：:（）()【】[] ')
+    if not rest or _PUNCT_ONLY_RE.match(rest):
+        return ''
+    return rest
+
+
+def _extract_actions(sections: dict[str, list[str]], db_type: str,
+                     doc_id: str) -> tuple[list[str], list[str], list[str]]:
+    """抽取并绑定（探查动作, 修复动作, 绑不上工具的修复动作原文）。
+
+    绑定规则：只从**工具目录里真实存在的名字**中认领动作。
+
+    ## 认领不上的为什么不直接报错
+
+    论文的 KB 来自真实运维文档，而真实文档写的是"调整 sort_buffer_size 到 4M"
+    "重启实例"，不是工具名。原实现对"写了修法却绑不上工具"直接抛
+    `ValueError`，理由是"悄悄丢掉修复动作会产出只诊断不给修法的污染记录"
+    —— 这个顾虑是对的，但**处置方式选错了**：抛错拦下的是**整份手册**，
+    于是 DBA 手里的真实手册一份都进不了库，等于没有知识。论文的核心收益
+    恰恰来自"知识库来自真实文档"。
+
+    现在的处置：**绑不上的原样留下**，同时把记录标为 `advisory`
+    （可检索，但建议人工复核）。失败关闭的原则一步没松：
+
+    - `fix_actions` 里凡是被当作**可执行工具**的，仍然全部来自工具目录，
+      绑定关系不会错；
+    - 绑不上的部分单列在 `unbound_fix_actions`，绝不冒充工具名；
+    - 探查动作认领不上仍然丢弃（探查是建议性的，缺一条不影响记录成立），
+      但计数留痕。
+
+    这样"留着一条痕迹"变成了"知识还在库里 + 痕迹也在"，比整份拒绝更接近
+    可用，且没有制造任何一条"看起来能执行其实不能"的记录。
     """
     from monitor import degrade
 
     catalog = _catalog()
     probe: list[str] = []
     fix: list[str] = []
+    unbound: list[str] = []
     dropped = 0
 
     for kind, bucket in (('probe', probe), ('fix', fix)):
         for line in sections.get(kind, []):
-            bound = False
-            for cand in _candidate_actions(line, db_type):
+            claimed = _candidate_actions(line, db_type)
+            for cand in claimed:
                 spec = catalog.get_tool(cand, db_type)
                 if spec is not None and spec.name not in bucket:
                     bucket.append(spec.name)
-                    bound = True
-            if not bound:
-                if kind == 'fix':
-                    raise ValueError(
-                        f'文档 {doc_id} 的修复动作 {line!r} 绑不上方言 {db_type} 的任何工具；'
-                        f'该方言可用工具（部分）={_available_tools(db_type)[:20]}。'
-                        f'修复动作必须写成工具名，不能丢失'
-                    )
+            residual = _residual_text(line, claimed)
+            if not residual:
+                continue
+            if kind == 'fix':
+                if residual not in fix:
+                    fix.append(residual)
+                if residual not in unbound:
+                    unbound.append(residual)
+            else:
                 dropped += 1
     if dropped:
         degrade.note(_DEGRADE_SCOPE,
                      f'文档 {doc_id} 有 {dropped} 条探查动作未绑上工具名，已丢弃')
-    return probe, fix
+    if unbound:
+        degrade.note(_DEGRADE_SCOPE,
+                     f'文档 {doc_id} 有 {len(unbound)} 条修复动作绑不上工具名'
+                     f'（{unbound[:3]}），已原样保留并标记 advisory 待人工复核；'
+                     f'该方言可用工具（部分）={_available_tools(db_type)[:20]}')
+    return probe, fix, unbound
 
 
 def _doc_field(doc: Any, name: str, default: Any = '') -> Any:
@@ -674,6 +764,7 @@ def _build_record(entry: Mapping, *, doc_id: str, version: str, category: str,
     fix_in = entry.get('fix_actions')
     probe: list[str] = []
     fix: list[str] = []
+    unbound: list[str] = []
     if db_types:
         primary = db_types[0]
         if probe_in or fix_in:
@@ -681,7 +772,7 @@ def _build_record(entry: Mapping, *, doc_id: str, version: str, category: str,
             probe = _validate_actions(probe_in or (), primary, 'probe')
             fix = _validate_actions(fix_in or (), primary, 'fix')
         else:
-            probe, fix = _extract_actions(sections, primary, doc_id)
+            probe, fix, unbound = _extract_actions(sections, primary, doc_id)
     else:
         # 方言未定 → 无法校验动作归属，先留原文候选并标记待复核
         probe = [str(a).strip() for a in (probe_in or ()) if str(a).strip()]
@@ -692,6 +783,16 @@ def _build_record(entry: Mapping, *, doc_id: str, version: str, category: str,
         degrade.note(_DEGRADE_SCOPE,
                      f'文档 {doc_id} 方言未定，动作 {probe + fix} 未做工具绑定校验')
 
+    # 绑不上的修复动作：记录照常成立（可检索），但标 advisory 待人工复核。
+    # 注意这里**不动 needs_review** —— 把它设成 True 会让这条记录在
+    # `_admissible_mask` 里被排除，手册就变成"入库成功但永远查不到"。
+    advisory = bool(unbound)
+    advisory_reason = ''
+    if unbound:
+        advisory_reason = (f'{len(unbound)} 条修复动作绑不上该方言的任何工具，'
+                           f'已原样保留为自由文本：{unbound[:3]}；'
+                           f'需要人工改写成工具调用才能被智能体执行')
+
     text, chunk_ids = _record_text(symptom, causes, chunks or [], budget_tokens=2000)
     return KbRecord(
         symptom=symptom, db_types=db_types, candidate_causes=causes,
@@ -699,6 +800,8 @@ def _build_record(entry: Mapping, *, doc_id: str, version: str, category: str,
         version=version, db_versions=validate_db_versions(entry.get('db_versions')),
         category=category, text=text, source_chunk_ids=chunk_ids,
         needs_review=needs_review, review_reason=review_reason,
+        unbound_fix_actions=unbound, advisory=advisory,
+        advisory_reason=advisory_reason,
     )
 
 
