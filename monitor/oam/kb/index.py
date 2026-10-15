@@ -362,6 +362,11 @@ class KbIndex:
         return res
 
     # ---------------- 可观测性 ----------------
+    @property
+    def record_ids(self) -> list:
+        """索引里全部记录的 ID。证据审计用它判断"这条引用是不是真的存在于 KB"。"""
+        return [r.record_id_or_key for r in self._records]
+
     def stats(self) -> dict:
         """索引概览，供管理页/新鲜度看板。"""
         by_dialect: dict[str, int] = {}
@@ -396,6 +401,43 @@ def build_index(records: Sequence[KbRecord]) -> KbIndex:
     return idx.build()
 
 
+def records_from_orm(rows: Iterable) -> list:
+    """把**落库态**的 `monitor.models.KbRecord` 适配成检索层吃的 dataclass。
+
+    为什么必须有这一步：两个类同名不同形 —— ORM 模型有 `record_id` /
+    `db_types` / `candidate_causes`，而检索层要的是 `record_id_or_key` /
+    `text` / `needs_review` / `category`。没有适配时 `KbIndex.add()` 直接抛
+    `AttributeError`，`oam_kb_migrate_rules` 迁出来的 39 条规则就只是躺在
+    表里的行，永远进不了检索上下文（L3 形同未接线）。
+
+    `text` 由症状 + 成因 + 动作合成，保证检索文本与迁移前的规则语义一致。
+    """
+    out = []
+    for row in rows or []:
+        symptom = str(getattr(row, 'symptom', '') or '')
+        causes = [str(c) for c in (getattr(row, 'candidate_causes', None) or [])]
+        probes = [str(p) for p in (getattr(row, 'probe_actions', None) or [])]
+        fixes = [str(f) for f in (getattr(row, 'fix_actions', None) or [])]
+        doc = getattr(row, 'source_document', None)
+        db_types = [str(d) for d in (getattr(row, 'db_types', None) or [])]
+        out.append(KbRecord(
+            record_id=str(getattr(row, 'record_id', '') or ''),
+            symptom=symptom,
+            db_types=db_types,
+            candidate_causes=causes,
+            probe_actions=probes,
+            fix_actions=fixes,
+            source_doc_id=str(getattr(doc, 'doc_id', '') or ''),
+            version=str(getattr(row, 'version', '') or ''),
+            db_versions=dict(getattr(row, 'db_versions', None) or {}),
+            category=str(getattr(doc, 'category', '') or ''),
+            text=' '.join([symptom] + causes + probes + fixes).strip(),
+            # 方言没判定出来的记录一律不进检索上下文（失败关闭，与 covers() 同口径）
+            needs_review=not bool(db_types),
+        ))
+    return out
+
+
 def max_text_tokens(text: str) -> int:
     """检索文本的 token 度量（复用 chunk 的确定性口径，便于上层限长）。"""
     return estimate_tokens(text)
@@ -403,7 +445,7 @@ def max_text_tokens(text: str) -> int:
 
 __all__ = [
     'DEFAULT_TOP_K', 'DEFAULT_MIN_SIMILARITY', 'KbHit', 'SearchResult',
-    'KbIndex', 'build_index', 'max_text_tokens',
+    'KbIndex', 'build_index', 'records_from_orm', 'max_text_tokens',
     'MISS_EMPTY_INDEX', 'MISS_NO_DIALECT', 'MISS_NO_VERSION',
     'MISS_NO_CATEGORY', 'MISS_BELOW_THRESHOLD',
 ]

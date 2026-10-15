@@ -154,6 +154,17 @@ def _collect(fragments: Iterable[dict], max_per_group: int) -> tuple[dict, list,
     return groups, used, skipped
 
 
+def _ref_of(record_id: str) -> str:
+    """统一的引用写法：`kb:<id>`。
+
+    幂等 —— 记录 ID 本身已经带 `kb:` 前缀时（`oam_kb_migrate_rules` 用的是
+    `kb:rule:R001`）不再叠加，否则会产出 `kb:kb:rule:R001`，
+    与用例侧 `required_evidence` 的写法永远对不上（咨询类判定按集合精确相等）。
+    """
+    rid = str(record_id).strip()
+    return rid if rid.startswith(REF_PREFIX) else f'{REF_PREFIX}{rid}'
+
+
 def _assemble(groups: dict, used: list, db_type: str, skipped: list,
               max_per_group: int) -> tuple[str, list]:
     """规则拼装：分组小标题 + 要点 + 收尾。纯确定性，无 LLM。"""
@@ -171,8 +182,8 @@ def _assemble(groups: dict, used: list, db_type: str, skipped: list,
         lines.append(f'{label}：')
         for item in items:
             summary = _summarize_point(item['text'], 160)
-            ref = f'[{REF_PREFIX}{item["id"]}]'
-            points.append({'kind': kind, 'ref': f'{REF_PREFIX}{item["id"]}',
+            ref = f'[{_ref_of(item["id"])}]'
+            points.append({'kind': kind, 'ref': _ref_of(item['id']),
                            'id': item['id'], 'title': item.get('title'),
                            'score': item.get('score'), 'summary': summary})
             lines.append(f'- {summary} {ref}')

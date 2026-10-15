@@ -65,8 +65,7 @@ def summarize_tool_result(tool_name: str, data, state=None) -> Observation:
 
     # ---- KB 检索结果 ----
     if tool_name.startswith('kb.'):
-        fragments = data.get('records') if isinstance(data, dict) else data
-        return digest(fragments or [], db_type)
+        return digest(_kb_fragments(data), db_type)
 
     # ---- 时序 KPI ----
     series = _extract_series(data)
@@ -107,6 +106,41 @@ def summarize_tool_result(tool_name: str, data, state=None) -> Observation:
                                  'refs': [f'tool:{tool_name}']})
 
 
+def _kb_fragments(data) -> list:
+    """把 `kb.search` 的返回统一成 `kb_digest` 认识的片段字典列表。
+
+    `kb.search` 的返回值是 `kb.index.SearchResult`（**对象**，字段 `hits`），
+    不是可迭代的片段列表。早先这里直接把它当片段序列传给 `digest()`，
+    于是 `list(SearchResult)` 抛 `TypeError`，被 `policy/loop._summarize`
+    的兜底 except 吞成"降级透传"，观测证据里只剩 `tool:kb.search` ——
+    `kb:` 引用一条都出不来，咨询类用例（要求引用集合精确相等）必然判失败。
+
+    这里显式做形状适配：对象 / dict / 列表三种形态都能收敛。
+    """
+    hits = getattr(data, 'hits', None)
+    if hits is None and isinstance(data, dict):
+        hits = data.get('hits')
+        if hits is None:
+            hits = data.get('records')
+    if hits is None and isinstance(data, (list, tuple)):
+        hits = data
+    out = []
+    for hit in hits or []:
+        record = getattr(hit, 'record', None)
+        if record is not None:
+            out.append({
+                'id': getattr(hit, 'record_id', '') or getattr(record, 'record_id', ''),
+                'text': getattr(record, 'symptom', '') or getattr(record, 'text', ''),
+                'kind': getattr(record, 'category', ''),
+                'title': getattr(record, 'symptom', ''),
+                'score': getattr(hit, 'similarity', None),
+            })
+            continue
+        if isinstance(hit, dict):
+            out.append(hit)
+    return out
+
+
 def _extract_series(data) -> list:
     """从工具结果里抠出 `[(ts, value)]`。识别两种常见形状。"""
     if not isinstance(data, dict):
@@ -125,11 +159,25 @@ def _extract_series(data) -> list:
 
 
 def _pick_metric(data, series) -> str:
-    if isinstance(data, dict):
-        for k, v in data.items():
-            if isinstance(v, dict) and v.get('points') is series:
-                return k
-    return 'metric'
+    """认出这条序列属于哪个指标键。
+
+    `_extract_series` 会**新建**列表（`[(p[0], p[1]) for p in val]`），
+    所以用 `is` 与源数据比对恒为 False —— 早先的写法让 `evidence['metric']`
+    永远等于字面量 `'metric'`，异常观测因此丢失指标名（报告与审计都靠它定位）。
+    这里改成按值比对，并对聚合形状显式记录命中的键。
+    """
+    if not isinstance(data, dict):
+        return 'metric'
+    for key, val in data.items():
+        if isinstance(val, dict) and val.get('points') == series:
+            return key
+    # 顶层 points 形状或值相等判定不成立时，退化为"取点数最多的那条"的键
+    best_key, best_len = 'metric', 0
+    for key, val in data.items():
+        if isinstance(val, dict) and isinstance(val.get('points'), list):
+            if len(val['points']) == len(series) and len(series) > best_len:
+                best_key, best_len = key, len(series)
+    return best_key
 
 
 def _extract_plan_text(data) -> str:

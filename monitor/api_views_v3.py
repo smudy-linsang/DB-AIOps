@@ -162,19 +162,37 @@ class OamDiagnoseView(_BaseV3View):
             return self.err('DISABLED', 'OAM 未启用（配置项 OAM_ENABLED）', 409)
 
         from monitor.oam.bench.runner import run_case
+        # 线上诊断没有专家标注真值：`gt_root_cause` 只是标签空间的占位，
+        # 不参与验证器判定（设计 §9.1 —— 封闭标签空间只用于离线评测）。
         case = OamCase(case_id=f'LIVE-{cfg.id}-{timezone.now().strftime("%Y%m%d%H%M%S")}',
                        category=data.get('category') or 'inspection',
                        difficulty=data.get('difficulty') or 'easy',
                        db_type=cfg.db_type, symptom=symptom,
-                       gt_root_cause='CONFIG_DRIFT',     # 线上诊断无真值，不参与验证器判定
+                       gt_root_cause='CONFIG_DRIFT',
                        source_config=cfg, split='train')
+        # **必须先落库**：`OamTrajectory.case` 是指向 `OamCase` 的外键，
+        # 用例没保存时轨迹插入会违反外键约束 —— 生产环境立即抛错，
+        # 被 `_persist` 的兜底 except 吞成 degrade 留痕，
+        # 接口照样 200，但"发起诊断 → 查看轨迹 → 查看审计"整条链路是断的。
+        case.save()
         try:
-            traj, verdict, audit_res, _env = run_case(case, persist=True)
+            traj, verdict, audit_res, _env = run_case(case, persist=True, score=False)
         except Exception as e:
             logger.exception('[api-v3] 诊断执行失败 config_id=%s: %s', cfg.id, e)
             return self.err('DIAGNOSE_FAILED', f'诊断执行失败：{type(e).__name__}', 500)
 
-        return self.ok(report=_build_report(traj, verdict, audit_res))
+        report = _build_report(traj, verdict, audit_res)
+        # 设计 §6：接口必须回传 `traj_id`，否则调用方拿不到回查轨迹/审计的句柄。
+        traj_id = _traj_id_of(traj, case)
+        report['traj_id'] = traj_id
+        report['trajectory_url'] = f'/api/v3/oam/trajectories/{traj_id}/'
+        report['audit_url'] = f'/api/v3/oam/trajectories/{traj_id}/audit/'
+        return self.ok(report=report, traj_id=traj_id)
+
+
+def _traj_id_of(traj, case) -> str:
+    from monitor.oam.bench.runner import traj_traj_id
+    return traj_traj_id(traj, case)
 
 
 def _build_report(traj, verdict, audit_res) -> dict:
@@ -193,7 +211,16 @@ def _build_report(traj, verdict, audit_res) -> dict:
             {'kind': c.kind, 'text': c.text, 'evidence_refs': c.evidence_refs}
             for c in audit_res.unsupported]
     report['escalated'] = bool(traj.escalated or audit_res.route_to_human)
-    report['verdict'] = {'passed': bool(verdict.passed), 'reason': verdict.reason}
+    # 线上诊断不评分：`verdict=None` 时如实标注"未判定"，
+    # 不拿一个捏造的真值去判分（那会稳定回传"根因不匹配"，
+    # 把无意义的信息当成验收结论 —— 设计 §9.1）。
+    if verdict is None:
+        report['verdict'] = {
+            'passed': None, 'scored': False,
+            'reason': '线上诊断无专家标注真值，不参与验证器判定（仅供人工研判）'}
+    else:
+        report['verdict'] = {'passed': bool(verdict.passed),
+                             'scored': True, 'reason': verdict.reason}
     report['audit'] = audit_res.to_dict()
     report['recommended_fix'] = {
         'spec': report.get('fix', ''),
@@ -358,11 +385,11 @@ class OamCaseSnapshotView(_BaseV3View):
         blob, _created = OamSnapshotBlob.objects.update_or_create(
             case=case, defaults={
                 'window_start': snap.window[0], 'window_end': snap.window[1],
-                'kpi_series': {k: [list(p) for p in v]
-                               for k, v in snap.kpi_series.items()},
-                'session_samples': snap.session_samples, 'plans': snap.plans,
-                'logs': snap.logs, 'config_meta': snap.config_meta,
-                'schema_meta': snap.schema_meta})
+                # 用 `to_model_dict()` 而不是手写字典：它会显式把 datetime
+                # 转成 ISO 字符串（JSONField 存不下 datetime）。手写
+                # `[list(p) for p in v]` 会把 datetime 直接塞进 JSONField，
+                # 成功路径必然抛 TypeError → 接口 500。
+                **snap.to_model_dict()})
         return self.ok(case_id=case_id, window_hours=blob.window_hours,
                        series_lengths=snap.series_lengths())
 

@@ -2512,11 +2512,12 @@ class OamCase(models.Model):
     symptom = models.TextField(verbose_name="自然语言症状描述")
     gt_root_cause = models.CharField(max_length=128, db_index=True,
                                      verbose_name="专家标注根因（封闭标签空间）")
-    fix_spec = models.JSONField(default=dict, verbose_name="修复规格（验证用）")
+    fix_spec = models.JSONField(default=dict, blank=True,
+                                verbose_name="修复规格（验证用）")
     fix_executable = models.BooleanField(default=False,
                                          verbose_name="修复是否可在集群内直接执行校验")
     required_evidence = models.JSONField(
-        default=list,
+        default=list, blank=True,
         verbose_name="咨询类必需证据集合（KB 文档编号，判定要求集合完全相等）")
     source_ticket = models.CharField(max_length=128, blank=True, default='',
                                      verbose_name="来源工单")

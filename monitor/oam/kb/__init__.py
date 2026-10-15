@@ -63,6 +63,7 @@ from monitor.oam.kb.index import (
     KbIndex,
     SearchResult,
     build_index,
+    records_from_orm,
 )
 
 __all__ = [
@@ -72,6 +73,6 @@ __all__ = [
     'structure_aware_split', 'estimate_tokens',
     'KbRecord', 'extract', 'detect_db_types', 'normalize_symptom', 'version_in_range',
     # 检索
-    'KbIndex', 'KbHit', 'SearchResult', 'build_index',
+    'KbIndex', 'KbHit', 'SearchResult', 'build_index', 'records_from_orm',
     'DEFAULT_TOP_K', 'DEFAULT_MIN_SIMILARITY',
 ]

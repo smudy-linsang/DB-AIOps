@@ -49,20 +49,66 @@ def _make_run_id(split: str, backend: str, version: str, case_ids) -> str:
     return f'BR-{timezone.now().strftime("%Y%m%d%H%M%S")}-{digest}'
 
 
+_KB_INDEX_CACHE = {'key': None, 'index': None}
+
+
+def default_kb_index(force: bool = False):
+    """按落库的 `KbRecord` 构造检索索引（L3 接线）。
+
+    设计 §3.2 的整个立论建立在"整理后的 KB"上（消融：去掉它 84.5% → 29.2%）。
+    如果调用方不显式注入索引，`kb.search` 就恒返回 `NO_DATA`，
+    跑出来的成功率是**没有 L3 的系统**的成绩，却会被当成 V3.0 的成绩汇报 ——
+    设计 §8 明令要防的"指标看着好、实际不成立"。
+
+    这里兜住默认路径：没有可检索记录时返回空索引（检索未命中照常留痕），
+    不抛错、不伪造。
+
+    **进程内缓存**：索引是 65536 维稠密矩阵，每条记录约 256KB；
+    每次诊断都重建既慢又占内存（1 万条 ≈ 2.5GB）。KB 是离线批量入库的
+    （设计 §4.3），所以按"活跃条数 + 最新入库时间"做指纹缓存，
+    入库动作会自然让指纹失效。需要强制刷新时传 `force=True`。
+    """
+    from monitor.models import KbRecord as KbRecordRow
+    from monitor.oam.kb import build_index, records_from_orm
+    try:
+        rows = list(KbRecordRow.objects.filter(is_active=True))
+        latest = max((getattr(r, 'ingested_at', None) for r in rows), default=None)
+        fingerprint = (len(rows), str(latest))
+    except Exception as e:      # 未迁移/无 DB 的裸环境
+        from monitor import degrade
+        degrade.note('oam.kb.load', 'KbRecord 读取失败，KB 以空索引参与评测', e)
+        return build_index([])
+    if not force and _KB_INDEX_CACHE['key'] == fingerprint:
+        return _KB_INDEX_CACHE['index']
+    index = build_index(records_from_orm(rows))
+    _KB_INDEX_CACHE['key'] = fingerprint
+    _KB_INDEX_CACHE['index'] = index
+    return index
+
+
 def run_case(case, policy_backend: str = 'prompted', kb_index=None,
-             persist: bool = True):
-    """跑单个用例并给出轨迹与判定。返回 (traj, verdict, audit_result)。"""
+             persist: bool = True, score: bool = True):
+    """跑单个用例，返回 (traj, verdict, audit_result, env)。
+
+    `score=False` 用于**线上诊断**：线上没有专家标注真值，拿一个造出来的
+    `gt_root_cause` 去 `verify()` 只会稳定回传"根因不匹配"，
+    把无意义的信息当成验收结论（设计 §9.1：封闭标签空间只用于离线评测）。
+    此时 `verdict` 返回 None，报告侧如实标注"未评分"。
+    """
     from monitor.oam.env.snapshot import OamSnapshot
     snapshot = OamSnapshot.from_case(case)
+    if kb_index is None:
+        kb_index = default_kb_index()
     env = ReplayEnv(snapshot, kb_index=kb_index)
     policy = build_policy(policy_backend, db_type=case.db_type,
                           incident_id=case.case_id)
     traj = diagnose(case, policy, env)
 
-    verdict = verify(case, traj.report)
+    verdict = verify(case, traj.report) if score else None
     audit_res = audit(traj, traj.report, kb_refs=getattr(kb_index, 'record_ids', None))
-    traj.passed = verdict.passed
-    traj.verdict_reason = verdict.reason
+    if verdict is not None:
+        traj.passed = verdict.passed
+        traj.verdict_reason = verdict.reason
     traj.hallucinated = (not audit_res.passed) if not traj.escalated else None
 
     if persist:
@@ -71,14 +117,21 @@ def run_case(case, policy_backend: str = 'prompted', kb_index=None,
 
 
 def _persist(case, traj, verdict, audit_res):
-    """落库：OamTrajectory + OamStep。失败要留痕，不能静默丢评测记录。"""
+    """落库：OamTrajectory + OamStep。失败要留痕，不能静默丢评测记录。
+
+    `verdict` 允许为 None（线上诊断不评分），此时 `passed`/`verdict_reason`
+    如实落库为"未判定"，而不是伪造一个 False。
+    """
     from monitor.models import OamStep, OamTrajectory
     try:
         row = OamTrajectory.objects.create(
             traj_id=traj_traj_id(traj, case),
             case=case, config=case.source_config,
             policy_backend=traj.policy_backend, policy_version=traj.policy_version,
-            report=traj.report, passed=traj.passed, verdict_reason=traj.verdict_reason,
+            report=traj.report,
+            passed=(verdict.passed if verdict is not None else None),
+            verdict_reason=(verdict.reason if verdict is not None
+                            else '线上诊断无专家标注真值，不参与验证器判定'),
             escalated=traj.escalated, hallucinated=traj.hallucinated,
             turns=len(traj.steps),
             started_at=traj.started_at or timezone.now(),
@@ -88,7 +141,7 @@ def _persist(case, traj, verdict, audit_res):
                 trajectory=row, turn=s.turn, thought=s.thought[:4000],
                 tool_name=(s.action.tool if s.action else '')[:64],
                 tool_params=(s.action.params if s.action else {}) or {},
-                tool_error_code=s.tool_error_code[:32],
+                tool_error_code=(s.tool_error_code or '')[:32],
                 observation=(s.observation.text[:4000] if s.observation else ''),
                 observation_evidence=(s.observation.evidence if s.observation else {}),
                 belief_entropy=s.belief_entropy)
@@ -146,10 +199,15 @@ def run_bench(cases, policy_backend: str = 'prompted', split: str = 'test',
         verdicts.append(verdict)
         audits.append(audit_res)
         per_category_verdicts.setdefault(case.category, []).append(verdict)
-        if verdict.passed:
-            covered_causes.add(case.gt_root_cause)
+        # 逐用例上报的必须是**该用例自己**的覆盖度。
+        # 若把累积集合传下去，第 1 条用例的"缺失根因"里会包含后面用例
+        # 已经覆盖的根因，合并后 covered 与 missing 互相重叠、无法按用例下钻。
+        case_covered = {case.gt_root_cause} if verdict.passed else set()
+        covered_causes |= case_covered
         db_types.add(case.db_type)
-        coverage_rows.append(env.coverage_report(covered_root_causes=covered_causes))
+        if kb_index is None:
+            kb_index = env.kb_index
+        coverage_rows.append(env.coverage_report(covered_root_causes=case_covered))
         turn_sum += len(traj.steps)
         call_sum += len(traj.executed_calls())
 
@@ -179,21 +237,28 @@ def run_bench(cases, policy_backend: str = 'prompted', split: str = 'test',
 
 
 def _merge_coverage(rows, db_types) -> dict:
-    """合并各用例的覆盖度报告。缺口累加，不允许被后续用例的覆盖掩盖。"""
+    """合并各用例的覆盖度报告。
+
+    **缺口不能用"逐用例缺口的并集"**：用例 A 缺 X、用例 B 缺 Y 时，并集是
+    {X, Y}，但 X 已被 B 覆盖 —— 合出来的报告会把已覆盖的根因列为"未覆盖"，
+    同时出现在 `root_causes_covered` 与 `root_causes_missing` 里，自相矛盾。
+    正确口径是：先取各用例涉及到的标签空间之并，缺口 = 该空间 − 整体已覆盖。
+    """
     if not rows:
         return _empty_coverage()
-    missing = set()
     covered = set()
+    space = set()
     buckets = {}
     for row in rows:
-        missing |= set(row.get('root_causes_missing') or [])
         covered |= set(row.get('root_causes_covered') or [])
+        space |= set(row.get('root_causes_covered') or [])
+        space |= set(row.get('root_causes_missing') or [])
         for k, v in (row.get('plan_operator_buckets') or {}).items():
             buckets[k] = buckets.get(k, 0) + int(v or 0)
     return {
         'db_types': sorted(db_types),
         'root_causes_covered': sorted(covered),
-        'root_causes_missing': sorted(missing),
+        'root_causes_missing': sorted(space - covered),
         'plan_operator_buckets': buckets,
         'noise_injection': rows[0].get('noise_injection', {}),
         'capability_boundary': rows[0].get('capability_boundary', ''),
@@ -235,4 +300,5 @@ def assert_split_instance_disjoint(train_cases, test_cases) -> dict:
     return ok, detail
 
 
-__all__ = ['run_bench', 'run_case', 'assert_split_instance_disjoint']
+__all__ = ['run_bench', 'run_case', 'assert_split_instance_disjoint',
+           'default_kb_index']

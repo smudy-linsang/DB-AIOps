@@ -249,8 +249,15 @@ def _build_handlers(env: ReplayEnv) -> dict:
 
     def lock_chain(ctx, params):
         rows = _bucket(ctx.snapshot, 'session_samples') or []
+        if not rows:
+            # 快照里根本没有会话样本 ⇒ 证据不足，必须走 NO_DATA。
+            # 早先写成 `{...} or None`：字典恒为真值，`or None` 从不生效，
+            # 于是"没采到样本"被报成"查过了，没有阻塞链"这种**看起来成功**的结果。
+            # 后果不只是显示问题 —— 证据审计会把 `tool:db.lock_chain` 记为
+            # "有工具观测支撑"，策略可以据此为任意根因主张背书（R25-02 同型）。
+            return None
         chains = [r for r in rows if r.get('blocking')]
-        return {'blocking_chains': chains[:50], 'total': len(chains)} or None
+        return {'blocking_chains': chains[:50], 'total': len(chains)}
 
     def top_sql(ctx, params):
         rows = [r for r in (_bucket(ctx.snapshot, 'session_samples') or [])

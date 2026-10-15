@@ -88,22 +88,39 @@ class OamSnapshot:
         """返回问题列表；空列表表示通过。`strict=True` 时超限即抛异常。
 
         校验项：
-          · 窗口必须显式给出，且 end > start；
+          · 窗口必须显式给出、两个时间戳都能解析、时区一致，且 end > start；
           · 每条指标序列 ≤ `OAM_MAX_SERIES_POINTS` 点；
           · 时序点必须按时间递增（回放要可复现，乱序会让检测结果依赖字典序）。
+
+        **所有异常路径都必须收敛成 `SnapshotRangeError`**：HTTP 层只捕获这一个
+        异常类型，`None`/字符串/蒙昧时区的时间戳若在比较时抛 `TypeError`，
+        接口就会变成 500 而不是 400 —— 调用方拿到的是"服务器炸了"，
+        而不是"你的 window 写错了"。
         """
+        _dt = datetime          # 模块级已导入，这里只是本方法内的短别名
+
         problems = []
+        since = until = None
         if not self.window or len(self.window) != 2:
             problems.append('window 必填，格式 (since, until)')
         else:
             since, until = self.window
-            if until <= since:
-                problems.append(f'window 终点({until})必须晚于起点({since})')
-            hours = (until - since).total_seconds() / 3600
-            if hours > 24:
+            if not isinstance(since, _dt) or not isinstance(until, _dt):
                 problems.append(
-                    f'窗口 {hours:.1f} 小时超出论文部署口径(2-10 小时)；'
-                    f'长序列会让 KPI 检测 F1 崩塌（500 点时仅 3.2%）')
+                    f'window 的时间戳无法解析为时间：{self.window!r}'
+                    f'（应为 ISO 8601 字符串或 datetime）')
+            elif (since.tzinfo is None) != (until.tzinfo is None):
+                problems.append(
+                    f'window 的两个时间戳时区不一致（{since!r} / {until!r}）：'
+                    f'一个带时区、一个不带，无法比较')
+            elif until <= since:
+                problems.append(f'window 终点({until})必须晚于起点({since})')
+            else:
+                hours = (until - since).total_seconds() / 3600
+                if hours > 24:
+                    problems.append(
+                        f'窗口 {hours:.1f} 小时超出论文部署口径(2-10 小时)；'
+                        f'长序列会让 KPI 检测 F1 崩塌（500 点时仅 3.2%）')
 
         max_pts = appconf.get('OAM_MAX_SERIES_POINTS')
         for metric, series in (self.kpi_series or {}).items():
@@ -111,10 +128,14 @@ class OamSnapshot:
                 problems.append(
                     f'指标 {metric} 有 {len(series)} 点，超过上限 {max_pts}')
             stamps = [p[0] for p in series]
+            if any(not isinstance(t, _dt) for t in stamps):
+                problems.append(f'指标 {metric} 的时序点存在无法解析的时间戳')
+                continue
             if stamps != sorted(stamps):
                 problems.append(f'指标 {metric} 的时序点未按时间递增')
-            if self.window and len(self.window) == 2:
-                since, until = self.window
+            if since is not None and until is not None and \
+                    isinstance(since, _dt) and isinstance(until, _dt) and \
+                    (stamps[0].tzinfo is None) == (since.tzinfo is None):
                 out = [t for t in stamps if t < since or t > until]
                 if out:
                     problems.append(

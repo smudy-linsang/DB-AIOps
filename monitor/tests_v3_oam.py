@@ -67,8 +67,16 @@ class ScriptedPolicy:
 
 
 def _script(tool_name, params=None):
-    return json.dumps({'tool': tool_name, 'params': params or {}},
-                      ensure_ascii=False)
+    """构造一轮**协议合法**的工具调用输出。
+
+    必须带 `<think>` / `<tool_call>` 标签：`policy.action_space.parse_action`
+    只认标签内的内容，裸 JSON 一律判 `BAD_PROTOCOL`。少了标签，脚本策略就
+    永远走不到"调用工具 → 得到观测"这一步，用例会**跑通但没跑到**
+    （断言恰好因为循环兜底升级而成立），这正是本仓库反复出现的假绿形态。
+    """
+    payload = json.dumps({'tool': tool_name, 'params': params or {}},
+                         ensure_ascii=False)
+    return f'<think>计划调用 {tool_name}</think><tool_call>{payload}</tool_call>'
 
 
 def _answer(root_cause, fix='', refs=None, status=''):
@@ -77,12 +85,14 @@ def _answer(root_cause, fix='', refs=None, status=''):
         payload['fix'] = fix
     if status:
         payload['status'] = status
-    return json.dumps(payload, ensure_ascii=False)
+    return f'<think>汇总结论</think><answer>{json.dumps(payload, ensure_ascii=False)}</answer>'
 
 
-ANSWER_INSUFFICIENT = json.dumps(
-    {'status': STATUS_EVIDENCE_INSUFFICIENT, 'reason': '快照没有可支撑判断的信号'},
-    ensure_ascii=False)
+ANSWER_INSUFFICIENT = (
+    '<think>快照里没有可支撑判断的信号</think><answer>'
+    + json.dumps({'status': STATUS_EVIDENCE_INSUFFICIENT,
+                  'reason': '快照没有可支撑判断的信号'}, ensure_ascii=False)
+    + '</answer>')
 
 
 def _make_case(db_type='mysql', gt='MISSING_INDEX', split='test', **kw):

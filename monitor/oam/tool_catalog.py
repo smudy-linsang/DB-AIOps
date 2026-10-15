@@ -128,7 +128,8 @@ _DIALECT_NOTES = {
         'oracle': '由 V$SESSION 的 blocking_session 关系构建阻塞链，'
                   '典型为 enq: TX 行锁竞争；RAC 下需区分节点间（gc buffer busy）。',
         'mysql': '由 information_schema.INNODB_TRX 与 innodb_lock_waits 构建；'
-                 '以事务与锁对象标识，不使用 enq: TX 命名。',
+                 '等待以事务与锁对象（表/行/间隙锁）标识，'
+                 '不得套用其他方言的等待事件名。',
         'pgsql': '由 pg_locks 与 pg_stat_activity 构建；'
                  '区分 heavyweight lock 与 tuple lock，长事务是常见根因。',
         'dm': '达梦锁机制与 Oracle 接近但视图不同，取不到时应返回不支持。',
