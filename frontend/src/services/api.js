@@ -645,4 +645,40 @@ export const systemAPI = {
   degradations: () => api.get('/system/degradations'),
 }
 
+// ==========================================
+// DB-AIOps v3.0 OAM API（设计 §6）
+// ==========================================
+// 响应信封统一是 {code, message, timestamp, data}；上面 createApiClient 的
+// 响应拦截器已经 `return response.data`，所以调用方拿到的就是信封本身，
+// **要取 res.data 才是业务体**。
+//
+// 三条接口语义必须原样透传给页面，不得在 API 层"美化"：
+//   · /oam/diagnose/ 只产出报告、不执行任何变更（变更走 v2 playbooks 审批链）；
+//   · /oam/bench/report/<run_id>/ 缺 coverage 时返回 500 COVERAGE_MISSING
+//     ——那是业务语义（按设计视为未完成评测），不是服务器错误；
+//   · /oam/kb/rebuild/ 恒返回 501 NOT_IMPLEMENTED（后端刻意不从 HTTP 暴露）。
+const v3Api = createApiClient('/api/v3')
+
+export const oamAPI = {
+  // 诊断：只给建议，绝不执行变更
+  diagnose: (data) => v3Api.post('/oam/diagnose/', data),
+  // 轨迹与证据审计（越权与不存在统一 404，前端文案不得区分）
+  getTrajectory: (trajId) => v3Api.get(`/oam/trajectories/${encodeURIComponent(trajId)}/`),
+  getTrajectoryAudit: (trajId) => v3Api.get(`/oam/trajectories/${encodeURIComponent(trajId)}/audit/`),
+  // 基准用例（后端当前只有 POST 登记，没有 GET 列表）
+  createCase: (data) => v3Api.post('/oam/cases/', data),
+  uploadCaseSnapshot: (caseId, data) =>
+    v3Api.post(`/oam/cases/${encodeURIComponent(caseId)}/snapshot/`, data),
+  // 评测：成绩与覆盖度同屏
+  benchRun: (data) => v3Api.post('/oam/bench/run/', data),
+  benchReport: (runId) => v3Api.get(`/oam/bench/report/${encodeURIComponent(runId)}/`),
+  // 知识库（rebuild 恒 501，走管理命令）
+  kbStaleness: () => v3Api.get('/oam/kb/staleness/'),
+  kbDocuments: () => v3Api.get('/oam/kb/documents/'),
+  createKbDocument: (data) => v3Api.post('/oam/kb/documents/', data),
+  kbRebuild: () => v3Api.post('/oam/kb/rebuild/'),
+  // 工具目录（?db_type= 不传则只回方言列表）
+  tools: (params = {}) => v3Api.get('/oam/tools/', { params }),
+}
+
 export default api

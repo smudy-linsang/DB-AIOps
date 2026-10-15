@@ -30,6 +30,10 @@ import SlaReport from './pages/SlaReport';
 import AiOpsCenter from './pages/AiOpsCenter';
 import IncidentWarRoom from './pages/IncidentWarRoom';
 import LLMConfigSettings from './pages/LLMConfigSettings';
+import OamDiagnose from './pages/OamDiagnose';
+import OamTrajectory from './pages/OamTrajectory';
+import OamBench from './pages/OamBench';
+import OamKb from './pages/OamKb';
 import { canAccessRoute, getUserRole } from './utils/permission';
 import { authAPI, setUser as saveUserToStorage } from './services/api';
 
@@ -126,6 +130,11 @@ function LayoutRoutes() {
           <Route path="/reports" element={<PermissionRoute path="/reports"><ReportList /></PermissionRoute>} />
           <Route path="/system/health" element={<PermissionRoute path="/system/health"><SystemHealth /></PermissionRoute>} />
           <Route path="/user-management" element={<PermissionRoute path="/user-management"><UserManagement /></PermissionRoute>} />
+          {/* V3.0 OAM：权限码与后端逐个对齐（/oam/diagnose 是 tickets.execute，不是 metrics.view） */}
+          <Route path="/oam/diagnose" element={<PermissionRoute path="/oam/diagnose"><OamDiagnose /></PermissionRoute>} />
+          <Route path="/oam/trajectories/:trajId" element={<PermissionRoute path="/oam/trajectories/:trajId"><OamTrajectory /></PermissionRoute>} />
+          <Route path="/oam/bench" element={<PermissionRoute path="/oam/bench"><OamBench /></PermissionRoute>} />
+          <Route path="/oam/kb" element={<PermissionRoute path="/oam/kb"><OamKb /></PermissionRoute>} />
           <Route path="/403" element={<ForbiddenPage />} />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>

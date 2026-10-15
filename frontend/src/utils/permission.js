@@ -95,6 +95,11 @@ export const MENU_PERMISSION_MAP = {
   '/business-systems': Perm.BUSINESS_TOPOLOGY_VIEW,
   '/reports': Perm.REPORTS_VIEW,
   '/user-management': Perm.USERS_VIEW,
+  // V3.0 OAM：诊断页用 tickets.execute（不是 metrics.view），
+  // 与后端 OamDiagnoseView 的 require_permission 一致，别当笔误改掉
+  '/oam/diagnose': Perm.TICKETS_EXECUTE,
+  '/oam/bench': Perm.METRICS_VIEW,
+  '/oam/kb': Perm.ALERT_CONFIG_VIEW,
 };
 
 // 路由与权限的映射（用于路由守卫）
@@ -114,6 +119,15 @@ export const ROUTE_PERMISSION_MAP = {
   '/reports': Perm.REPORTS_VIEW,
   '/system/health': Perm.DASHBOARD_VIEW,
   '/user-management': Perm.USERS_VIEW,
+  // V3.0 OAM：权限码与后端逐个对齐
+  //   /oam/diagnose          -> OamDiagnoseView          tickets.execute
+  //   /oam/trajectories/:id  -> OamTrajectory{,Audit}View alerts.view
+  //   /oam/bench             -> OamBenchReportView       metrics.view
+  //   /oam/kb                -> OamKbStaleness/Documents alert_config.view
+  '/oam/diagnose': Perm.TICKETS_EXECUTE,
+  '/oam/trajectories/:trajId': Perm.ALERTS_VIEW,
+  '/oam/bench': Perm.METRICS_VIEW,
+  '/oam/kb': Perm.ALERT_CONFIG_VIEW,
 };
 
 // ==========================================

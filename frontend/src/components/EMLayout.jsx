@@ -128,6 +128,20 @@ const EMLayout = ({ children }) => {
       crumbs.push({ title: '业务拓扑', path: '/business-systems' });
     } else if (path.includes('/inspection')) {
       crumbs.push({ title: '智能巡检', path: '/inspection' });
+    } else if (path.startsWith('/oam')) {
+      // V3.0 OAM：轨迹页（/oam/trajectories/:trajId）没有菜单入口，
+      // 由诊断页的 traj_id 链接带进来，所以面包屑要给它一个可点回的一级页
+      crumbs.push({ title: 'OAM 智能体', path: '/oam/diagnose' });
+      const oamCrumbs = [
+        ['/oam/diagnose', '智能诊断'],
+        ['/oam/trajectories', '轨迹与证据审计'],
+        ['/oam/bench', '评测成绩单'],
+        ['/oam/kb', '知识库新鲜度'],
+      ];
+      const hit = oamCrumbs.find(([p]) => path.startsWith(p));
+      if (hit && hit[0] !== '/oam/diagnose') {
+        crumbs.push({ title: hit[1], path: hit[0] });
+      }
     } else if (path.includes('/reports')) {
       crumbs.push({ title: '报表中心', path: '/reports' });
     }
@@ -172,6 +186,9 @@ const EMLayout = ({ children }) => {
       { key: '/ai-ops', icon: <RobotOutlined />, label: 'AI 运营中心', perm: Perm.METRICS_VIEW },
       { key: '/llm-config', icon: <KeyOutlined style={{ color: '#8b5cf6' }} />, label: '大模型配置', perm: Perm.ALERT_CONFIG_VIEW },
       { key: '/inspection', icon: <CheckCircleOutlined />, label: '智能巡检', perm: Perm.DATABASES_VIEW },
+      { key: '/oam/diagnose', icon: <RobotOutlined />, label: 'OAM 智能诊断', perm: Perm.TICKETS_EXECUTE },
+      { key: '/oam/bench', icon: <DashboardOutlined />, label: 'OAM 评测成绩单', perm: Perm.METRICS_VIEW },
+      { key: '/oam/kb', icon: <FileTextOutlined />, label: 'OAM 知识库', perm: Perm.ALERT_CONFIG_VIEW },
       { type: 'divider' },
       { key: '/notification-settings', icon: <BellFilled />, label: '通知设置', perm: Perm.NOTIFICATION_VIEW },
       { key: '/business-systems', icon: <ApartmentOutlined />, label: '业务拓扑', perm: Perm.BUSINESS_TOPOLOGY_VIEW },

@@ -81,18 +81,38 @@ def _mysql_blocking_edges(cur, rows, sql) -> bool:
 def _ash_mysql_family(cur, db_type='mysql'):
     """MySQL/TDSQL/GBase: processlist(∪空闲中事务) + digest + 阻塞边 + 锁明细。"""
     # ① 会话主体 (排除采样连接自身, 避免 AAS 恒 +1); 空闲中事务归 application
-    cur.execute(
+    #
+    # 「空闲中的事务」这一段依赖 `information_schema.innodb_trx` —— **GBase 8a
+    # 没有这张表**。原实现直接整段 execute，于是 GBase/TDSQL 的会话采样整体
+    # 抛异常，`sample_sessions` 无返回、ASH 采样静默中断。该路径此前无任何
+    # 方言用例覆盖（见 `V3.0_DIALECT_MATRIX.md` §四.6.3），所以一直没人发现。
+    #
+    # 处置沿用本文件既有的降级口径（见 `_mysql_blocking_edges`：SQL 不被支持
+    # 返回 False 而非抛出）：**先试完整的，失败则退回只有 processlist 的版本**。
+    # 代价是丢掉「空闲事务」的补充信息，收益是 GBase 至少能采到会话主体 ——
+    # 丢一部分远好过一条都没有。
+    _SQL_BODY = (
         "SELECT p.id AS session_id, p.user AS user_name, p.host AS client_host, "
         "p.db AS db_name, p.command, p.state, p.time AS active_secs, "
         "LEFT(COALESCE(p.info,''),500) AS sql_text "
         "FROM information_schema.processlist p "
-        "WHERE p.command NOT IN ('Sleep','Daemon') AND p.id <> CONNECTION_ID() "
+        "WHERE p.command NOT IN ('Sleep','Daemon') AND p.id <> CONNECTION_ID()")
+    _SQL_PLUS_IDLE_TRX = (
+        _SQL_BODY + " "
         "UNION ALL "
         "SELECT p.id, p.user, p.host, p.db, p.command, 'idle_in_trx', "
         "TIMESTAMPDIFF(SECOND, t.trx_started, NOW()), LEFT(COALESCE(t.trx_query,''),500) "
         "FROM information_schema.innodb_trx t "
         "JOIN information_schema.processlist p ON p.id = t.trx_mysql_thread_id "
         "WHERE p.command = 'Sleep'")
+    try:
+        cur.execute(_SQL_PLUS_IDLE_TRX)
+    except Exception as e:
+        from monitor import degrade
+        degrade.note('sentinel.ash_mysql_family',
+                     f'{db_type} 不支持 information_schema.innodb_trx，'
+                     f'退回只采 processlist（缺「空闲中事务」补充信息）', e)
+        cur.execute(_SQL_BODY)
     rows = {}
     for r in cur.fetchall():
         sid = str(r['session_id'])
