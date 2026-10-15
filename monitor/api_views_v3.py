@@ -162,11 +162,24 @@ class OamDiagnoseView(_BaseV3View):
             return self.err('DISABLED', 'OAM 未启用（配置项 OAM_ENABLED）', 409)
 
         from monitor.oam.bench.runner import run_case
+        # 入参先过枚举闸：category/difficulty 有 CheckConstraint 兜底，
+        # 但让它撞 DB 约束会变成未捕获的 IntegrityError（HTTP 500），
+        # 调用方看到的是"服务器炸了"而不是"你的 category 写错了"。
+        valid_categories = {c for c, _ in OamCase.CATEGORY}
+        valid_difficulties = {d for d, _ in OamCase.DIFFICULTY}
+        category = data.get('category') or 'inspection'
+        difficulty = data.get('difficulty') or 'easy'
+        if category not in valid_categories:
+            return self.err('BAD_REQUEST',
+                            f'category 非法，合法取值={sorted(valid_categories)}', 400)
+        if difficulty not in valid_difficulties:
+            return self.err('BAD_REQUEST',
+                            f'difficulty 非法，合法取值={sorted(valid_difficulties)}', 400)
+
         # 线上诊断没有专家标注真值：`gt_root_cause` 只是标签空间的占位，
         # 不参与验证器判定（设计 §9.1 —— 封闭标签空间只用于离线评测）。
         case = OamCase(case_id=f'LIVE-{cfg.id}-{timezone.now().strftime("%Y%m%d%H%M%S")}',
-                       category=data.get('category') or 'inspection',
-                       difficulty=data.get('difficulty') or 'easy',
+                       category=category, difficulty=difficulty,
                        db_type=cfg.db_type, symptom=symptom,
                        gt_root_cause='CONFIG_DRIFT',
                        source_config=cfg, split='train')

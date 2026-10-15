@@ -240,6 +240,17 @@ class DiagnoseApiSIT(TransactionTestCase):
                          '设计 §9.1 明确封闭标签空间只用于离线评测'
                          % verdict.get('reason'))
 
+    def test_SIT_V3_05b_invalid_category_is_a_4xx_not_an_integrity_error(self):
+        """`category`/`difficulty` 非法时必须 400，不能撞 DB 约束变成 500。
+
+        `OamCase` 上有 CheckConstraint 兜底，但那会抛未捕获的
+        `IntegrityError` —— 调用方看到"服务器内部错误"，而不是"参数写错了"。
+        """
+        for body in ({'category': 'not-a-category'}, {'difficulty': 'extreme'}):
+            r = self._diagnose([_answer(status=STATUS_EVIDENCE_INSUFFICIENT)], **body)
+            self.assertEqual(r.status_code, 400, r.content[:300])
+            self.assertEqual(r.json()['code'], 'BAD_REQUEST')
+
 
 # =============================================================================
 # SIT-V3-06~09 L3 知识库接线：设计 §3.2 / §7 P0 / §1.6⑤
