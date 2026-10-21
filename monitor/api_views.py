@@ -3095,14 +3095,20 @@ class DatabaseSlowQueriesView(JSONResponseMixin, View):
                 slow_queries.sort(key=lambda x: x.get('exec_count', 0), reverse=True)
             elif sort_by == 'rows':
                 slow_queries.sort(key=lambda x: x.get('rows_examined', 0), reverse=True)
-            else:  # elapsed
-                slow_queries.sort(key=lambda x: x.get('total_time_sec', 0) * x.get('exec_count', 1), reverse=True)
+            elif sort_by == 'avg':
+                slow_queries.sort(key=lambda x: x.get('avg_time_sec', 0) or 0, reverse=True)
+            else:  # elapsed —— T-02：按窗口内总耗时；原实现 total×count 把执行次数乘了两遍
+                slow_queries.sort(key=lambda x: x.get('total_time_sec', 0) or 0, reverse=True)
+            meta = getattr(engine, 'last_meta', {}) or {}
 
             return self.success_response({
                 'slow_queries': slow_queries[:limit],
                 'total_count': len(slow_queries),
+                'slow_count': sum(1 for q in slow_queries if q.get('is_slow')),
                 'db_type': config.db_type,
                 'time_range': time_range,
+                'basis': meta.get('basis'),
+                'warning': meta.get('warning'),
             })
         except Exception as e:
             degrade.note('api.slow_query.collect', reason=f'{request.path}: {e}', exc=e)
@@ -3130,11 +3136,14 @@ class DatabaseSlowQueryAnalysisView(JSONResponseMixin, View):
             engine = SlowQueryEngine(config)
             slow_queries = engine.collect_slow_queries_from_db(time_range=time_range, limit=limit)
             analysis = engine.analyze_query_pattern(slow_queries)
+            meta = getattr(engine, 'last_meta', {}) or {}
 
             return self.success_response({
                 'analysis': analysis,
                 'db_type': config.db_type,
                 'time_range': time_range,
+                'basis': meta.get('basis'),
+                'warning': meta.get('warning'),
             })
         except Exception as e:
             degrade.note('api.slow_query.analyze', reason=f'{request.path}: {e}', exc=e)

@@ -635,6 +635,11 @@ export const perfAPI = {
   sqlPlan: (id, digest, planHash) => api.get(`/databases/${id}/perf/sql/${digest}/plan/${planHash}/`),
   explain: (id, digest, sqlText) => api.post(`/databases/${id}/perf/sql/${digest}/explain/`, sqlText ? { sql_text: sqlText } : {}),
   compare: (id, params) => api.get(`/databases/${id}/perf/compare/`, { params }),
+  // TDSQL_SLOWSQL_DESIGN.md §5.3：会在目标库真实执行查询（默认关闭，需 tickets.execute）
+  explainAnalyze: (id, digest, body = {}) => api.post(`/databases/${id}/perf/sql/${digest}/explain-analyze/`, body),
+  // §7：环比退化（自动基线）与周期 SQL
+  sqlRegression: (id, params = {}) => api.get(`/databases/${id}/perf/sql-regression/`, { params }),
+  sqlPeriodic: (id, params = {}) => api.get(`/databases/${id}/perf/sql-periodic/`, { params }),
   killSession: (id, sessionId, reason) => api.post(`/databases/${id}/perf/sessions/${sessionId}/kill/`, { reason }),
 }
 

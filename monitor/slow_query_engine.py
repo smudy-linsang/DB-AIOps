@@ -69,46 +69,65 @@ class SlowQueryRecord:
 # ==========================================
 
 class MySQLSlowQueryParser:
-    """MySQL 慢查询日志解析器"""
-    
-    # MySQL 慢查询日志格式正则
-    SLOW_QUERY_PATTERN = re.compile(
-        r'# Time: (\d{6}\s+\d{1,2}:\d{2}:\d{2})\n'
-        r'# User@Host: ([^\[]+)\[@([^\]]+)\]\s+Id:\s+(\d+)\n'
-        r'# Query_time: (\d+\.\d+)\s+Lock_time: (\d+\.\d+)\s+'
-        r'Rows_sent: (\d+)\s+Rows_examined: (\d+)\n'
-        r'(.*?)(?=\n# Time:|\Z)',
-        re.DOTALL | re.MULTILINE
-    )
-    
+    """MySQL 慢查询日志解析器（5.6 / 5.7 / 8.0 / TXSQL 格式）。
+
+    T-11：原实现的正则只认 5.6 的 ``# Time: 260101 12:00:00`` 与 ``user[@host]`` 写法，
+    对 MySQL 8 日志（ISO 时间 + ``user[user] @ host [ip]  Id: n``）一条都解析不出来。
+    现按 ``# Query_time:`` 行切分条目，时间行与 User@Host 行都可缺省；
+    ``use db;`` 与 ``SET timestamp=...;`` 是日志写入器附加的，不算 SQL 本体。
+    """
+
+    _QT_RE = re.compile(
+        r'#\s*Query_time:\s*([\d.]+)\s+Lock_time:\s*([\d.]+)\s+'
+        r'Rows_sent:\s*(\d+)\s+Rows_examined:\s*(\d+)')
+    _USER_RE = re.compile(r'#\s*User@Host:\s*([^\[\s]+)')
+    _USE_RE = re.compile(r'^use\s+`?([\w$]+)`?\s*;\s*$', re.I)
+    _SET_TS_RE = re.compile(r'^SET\s+timestamp\s*=\s*\d+\s*;\s*$', re.I)
+
     def __init__(self, slow_query_log_content: str):
-        self.content = slow_query_log_content
-    
+        self.content = slow_query_log_content or ''
+
     def parse(self) -> List[SlowQueryRecord]:
-        """解析慢查询日志"""
         records = []
-        
-        matches = self.SLOW_QUERY_PATTERN.finditer(self.content)
-        for match in matches:
-            query_time = float(match.group(5))
-            lock_time = float(match.group(6))
-            rows_sent = int(match.group(7))
-            rows_examined = int(match.group(8))
-            query_text = match.group(9).strip()
-            
-            if query_text.upper().startswith('USE '):
-                # 跳过 USE 语句
+        current, sql_lines, db = None, [], ''
+
+        def flush():
+            if current is None:
+                return
+            text = '\n'.join(sql_lines).strip()
+            if text and not text.upper().startswith('USE '):
+                rec = SlowQueryRecord(
+                    query_text=text,
+                    execution_time_ms=current[0] * 1000,
+                    lock_time_ms=current[1] * 1000,
+                    rows_sent=current[2], rows_examined=current[3], db_name=db)
+                records.append(rec)
+
+        for line in self.content.splitlines():
+            m = self._QT_RE.match(line)
+            if m:
+                flush()
+                current = (float(m.group(1)), float(m.group(2)), int(m.group(3)), int(m.group(4)))
+                sql_lines = []
                 continue
-                
-            record = SlowQueryRecord(
-                query_text=query_text,
-                execution_time_ms=query_time * 1000,  # 转换为毫秒
-                lock_time_ms=lock_time * 1000,
-                rows_sent=rows_sent,
-                rows_examined=rows_examined,
-            )
-            records.append(record)
-        
+            if line.startswith('#'):
+                if line.startswith('# Time:') or line.startswith('# User@Host:'):
+                    flush()
+                    current, sql_lines = None, []
+                continue
+            if current is None:
+                continue
+            um = self._USE_RE.match(line.strip())
+            if um:
+                db = um.group(1)
+                continue
+            if self._SET_TS_RE.match(line.strip()):
+                continue
+            # 服务端启动横幅（Version / Tcp port / Time Id Command Argument）不属于任何条目
+            if line.startswith(('/usr/', 'Tcp port:', 'Time ')) and not sql_lines:
+                continue
+            sql_lines.append(line)
+        flush()
         return records
 
 
@@ -351,117 +370,170 @@ class SlowQueryEngine:
         else:
             return []
 
-    def collect_slow_queries_from_db(self, time_range: str = '1h', limit: int = 100) -> List[Dict]:
-        """
-        通过现有数据库连接采集慢查询（API 友好入口）
-        
-        自动获取连接 → 采集 → 关闭连接。连接失败时回退到 MonitorLog 缓存数据。
-        
-        参数:
-            time_range: 时间范围 (1h/6h/24h)
-            limit: 返回条数上限
-        
-        返回:
-            慢查询记录列表
-        """
-        from .db_connector import DbConnector
+    _WINDOWS = {'30m': 1800, '1h': 3600, '6h': 21600, '24h': 86400, '7d': 604800}
+    _MYSQL_FAMILY = ('mysql', 'tdsql', 'gbase')
 
+    def collect_slow_queries_from_db(self, time_range: str = '1h', limit: int = 100) -> List[Dict]:
+        """慢 SQL 列表（API / 告警 / AI 诊断共用入口）。见 TDSQL_SLOWSQL_DESIGN.md §4。
+
+        主路径：sql_stat 时间窗聚合（采集侧已按 set 差分，这里跨 set 求和），``basis='window'``。
+        回退：时序库不可用或窗口内无数据 → 直连取 digest **累计值**，``basis='cumulative'``，
+        并在 ``self.last_meta`` 说明它不是所选时间窗的数据。
+
+        T-01：原实现在 DictCursor 下按下标取列必抛 KeyError，异常被吞后回落去读一个
+        不存在的 ``MonitorLog.detail`` 字段，于是对 MySQL 系**恒返回空**。
+        T-02：原实现把皮秒 ÷1e9（毫秒）当秒，并按 total×count 排序把最快的 SQL 排第一。
+        """
+        from monitor import appconf
+        self.last_meta = {'basis': None, 'warning': None, 'time_range': time_range}
+        sec = self._WINDOWS.get(time_range, 3600)
+        td = timezone.now()
+        fd = td - timedelta(seconds=sec)
+        slow_ms = appconf.get('SLOW_SQL_AVG_MS')
+        rows = self._from_sqlstat(fd, td, limit, slow_ms)
+        if rows:
+            return rows
+        return self._live_cumulative(limit, sec, slow_ms)
+
+    def _from_sqlstat(self, fd, td, limit, slow_ms):
+        from monitor import degrade
+        from monitor.sqlstat_query import (basis_warning, texts_for, window_by_digest,
+                                           window_by_set)
+        from monitor.timeseries import get_timeseries_storage
+        cfg = self.config
+        try:
+            with get_timeseries_storage().cursor() as cur:
+                if cur is None:
+                    return None
+                aggs = window_by_digest(cur, cfg.id, fd, td, limit=limit)
+                if not aggs:
+                    return []
+                digests = list(aggs)
+                texts = texts_for(cur, cfg.id, digests, fd - timedelta(days=7))
+                by_set = (window_by_set(cur, cfg.id, fd, td, digests)
+                          if cfg.db_type == 'tdsql' else {})
+        except Exception as e:
+            degrade.note('slow_query.sqlstat', 'sql_stat 窗口聚合失败，回退直连', e)
+            return None
+        set_names = {s for d in by_set.values() for s in d}
+        self.last_meta.update(basis='window', warning=basis_warning(cfg, set_names))
+        out = []
+        for digest, agg in aggs.items():
+            text, example = texts.get(digest, (None, None))
+            out.append(self._row(digest, agg, text, example, by_set.get(digest), 'window', slow_ms))
+        return out
+
+    def _live_cumulative(self, limit, window_sec, slow_ms):
+        """时序库不可用时的回退：直连取累计值。MySQL 系按 set 取（TDSQL 透传）后跨 set 求和。"""
+        from monitor import appconf, degrade
+        from .db_connector import DbConnector
+        cfg = self.config
+        self.last_meta.update(
+            basis='cumulative',
+            warning='时序库无该时间窗数据，以下为自计数器清零（实例重启或 TRUNCATE）以来的累计值，'
+                    '不代表所选时间窗')
         conn = None
         try:
-            conn = DbConnector.get_connection(self.config)
+            conn = DbConnector.get_connection(
+                cfg, statement_timeout_ms=appconf.get('TARGET_DB_STATEMENT_TIMEOUT_MS'),
+                readonly=True)
+            if cfg.db_type in self._MYSQL_FAMILY:
+                return self._mysql_family_cumulative(conn, limit, window_sec, slow_ms)
             return self.collect_slow_queries(conn)[:limit]
         except Exception as e:
-            # 连接失败时尝试从 MonitorLog 读取历史慢查询缓存
-            return self._fallback_collect_from_logs(time_range, limit)
+            degrade.note('slow_query.live', f'{cfg.db_type} 直连取慢 SQL 失败', e)
+            self.last_meta['warning'] = f'时序库无数据，且直连目标库失败：{type(e).__name__}'
+            return []
         finally:
             if conn:
                 DbConnector.close_connection(conn)
 
-    def _fallback_collect_from_logs(self, time_range: str, limit: int) -> List[Dict]:
-        """从 MonitorLog 缓存获取慢查询数据（兜底策略）"""
+    def _mysql_family_cumulative(self, conn, limit, window_sec, slow_ms):
+        from monitor import sqlstat_collect
+        from monitor.sqlstat_query import latest_collect_data
+        cfg = self.config
+        data = latest_collect_data(cfg) if cfg.db_type == 'tdsql' else {}
+        sets = [s.get('set_name') for s in (data.get('tdsql_sets') or []) if isinstance(s, dict)]
+        cur = conn.cursor()
         try:
-            hours_map = {'1h': 1, '6h': 6, '24h': 24}
-            hours = hours_map.get(time_range, 24)
-            since = timezone.now() - timedelta(hours=hours)
+            raw, meta = sqlstat_collect.fetch_digest_rows(
+                cur, cfg, tdsql_sets=sets, tdsql_mode=data.get('tdsql_mode'),
+                window_sec=max(int(window_sec), 60), limit=max(int(limit), 1) * 2)
+        finally:
+            cur.close()
+        if meta.get('warning'):
+            self.last_meta['warning'] = meta['warning']
+        merged, by_set, texts = {}, {}, {}
+        for r in raw:
+            c = r['counters']
+            agg = {'exec': c['exec'], 'elapsed_ms': c['elapsed_ps'] / 1e9,
+                   'lock_ms': c['lock_ps'] / 1e9, 'cpu_ms': c['cpu_ps'] / 1e9,
+                   'rows_sent': c['rows_sent'], 'rows_examined': c['rows_examined'],
+                   'tmp_tables': c['tmp_tables'], 'tmp_disk': c['tmp_disk'],
+                   'sort_merge': c['sort_merge'], 'sort_rows': c['sort_rows'],
+                   'scan': c['scan'], 'full_join': c['full_join'],
+                   'no_index': c['no_index'], 'errors': c['errors']}
+            d = r['digest'][:32]
+            m = merged.setdefault(d, {k: 0 for k in agg})
+            for k, v in agg.items():
+                m[k] += v
+            m['db_name'] = r.get('schema_name')
+            by_set.setdefault(d, {})[r['set_name']] = agg
+            texts[d] = (r.get('digest_text'), r.get('sample_text'))
+        ordered = sorted(merged.items(), key=lambda kv: kv[1]['elapsed_ms'], reverse=True)[:limit]
+        return [self._row(d, agg, *texts.get(d, (None, None)),
+                          by_set.get(d) if cfg.db_type == 'tdsql' else None,
+                          'cumulative', slow_ms)
+                for d, agg in ordered]
 
-            logs = MonitorLog.objects.filter(
-                db_config=self.config,
-                status='UP',
-                create_time__gte=since,
-            ).order_by('-create_time')[:limit]
+    def _row(self, digest, agg, text, example, by_set, basis, slow_ms):
+        """统一输出行。*_sec 字段**真的是秒**（前端契约），另给 avg_ms 便于展示。"""
+        from monitor.sql_profile import profile, set_distribution
+        family = self.config.db_type in self._MYSQL_FAMILY
+        p = profile(agg, slow_avg_ms=slow_ms, mysql_family=family)
+        exec_n = agg.get('exec', 0)
+        dist = set_distribution(by_set) if by_set else None
+        return {
+            'db_type': self.config.db_type,
+            'digest': digest,
+            'query': text or example or '',
+            'sql_example': example,
+            'db_name': agg.get('db_name'),
+            'exec_count': exec_n,
+            'total_time_sec': round(agg.get('elapsed_ms', 0) / 1000.0, 6),
+            'avg_time_sec': round(agg.get('elapsed_ms', 0) / 1000.0 / exec_n, 6) if exec_n else 0,
+            'avg_ms': p.get('avg_ms'),
+            # 增量统计拿不到单次最大 / 最小值；不估算（原 Oracle 路径用 avg×2 冒充 max）
+            'max_time_sec': None,
+            'min_time_sec': None,
+            'lock_time_sec': round(agg.get('lock_ms', 0) / 1000.0, 6) if family else None,
+            'rows_examined': agg.get('rows_examined', 0) if family else None,
+            'rows_sent': agg.get('rows_sent', 0),
+            'sort_rows': agg.get('sort_rows', 0) if family else None,
+            'no_index_used': agg.get('no_index', 0) if family else None,
+            'tmp_disk_tables': agg.get('tmp_disk', 0) if family else None,
+            'sort_merge_passes': agg.get('sort_merge', 0) if family else None,
+            'full_scan_count': agg.get('scan', 0) if family else None,
+            'is_slow': p.get('is_slow', False),
+            'findings': p.get('findings', []),
+            'set_count': dist['set_count'] if dist else None,
+            'hottest_set': dist['hottest_set'] if dist else None,
+            'set_skew': dist['skew'] if dist else None,
+            'basis': basis,
+        }
 
-            results = []
-            for log in logs:
-                data = log.detail or {}
-                if isinstance(data, str):
-                    try:
-                        data = json.loads(data)
-                    except Exception:
-                        data = {}
+    def _fallback_collect_from_logs(self, time_range: str, limit: int) -> List[Dict]:
+        """已废弃：原实现读不存在的 MonitorLog.detail 字段，恒返回空（T-01）。保留签名仅为兼容。"""
+        return []
 
-                slow_queries = data.get('slow_queries', [])
-                if isinstance(slow_queries, list):
-                    for sq in slow_queries:
-                        sq['collected_at'] = str(log.create_time)
-                    results.extend(slow_queries)
-
-            return results[:limit]
-        except Exception:
-            return []
-    
     def _collect_mysql_slow_queries(self, conn) -> List[Dict]:
-        """采集 MySQL 慢查询（通过 performance_schema）"""
-        cursor = conn.cursor()
-        
-        # 从 performance_schema.events_statements_summary_by_digest 采集
-        sql = """
-        SELECT 
-            DIGEST_TEXT as query,
-            COUNT_STAR as exec_count,
-            SUM_TIMER_WAIT / 1000000000 as total_time_sec,
-            MIN_TIMER_WAIT / 1000000000 as min_time_sec,
-            MAX_TIMER_WAIT / 1000000000 as max_time_sec,
-            AVG_TIMER_WAIT / 1000000000 as avg_time_sec,
-            SUM_ROWS_EXAMINED as rows_examined,
-            SUM_ROWS_SENT as rows_sent,
-            SUM_SORT_ROWS as sort_rows,
-            SUM_NO_INDEX_USED as no_index_used,
-            SUM_NO_GOOD_INDEX_USED as no_good_index_used,
-            FIRST_SEEN as first_seen,
-            LAST_SEEN as last_seen
-        FROM performance_schema.events_statements_summary_by_digest
-        WHERE DIGEST_TEXT IS NOT NULL
-          AND COUNT_STAR > 0
-          AND SUM_TIMER_WAIT / 1000000000 > %s  -- 超过阈值（秒）
-        ORDER BY SUM_TIMER_WAIT DESC
-        LIMIT 100
-        """
-        
-        threshold_sec = self.DEFAULT_THRESHOLD_MS / 1000.0
-        cursor.execute(sql, (threshold_sec,))
-        
-        results = []
-        for row in cursor.fetchall():
-            results.append({
-                'db_type': 'mysql',
-                'query': row[0],
-                'exec_count': row[1],
-                'total_time_sec': row[2],
-                'min_time_sec': row[3],
-                'max_time_sec': row[4],
-                'avg_time_sec': row[5],
-                'rows_examined': row[6] or 0,
-                'rows_sent': row[7] or 0,
-                'sort_rows': row[8] or 0,
-                'no_index_used': row[9] or 0,
-                'no_good_index_used': row[10] or 0,
-                'first_seen': str(row[11]) if row[11] else None,
-                'last_seen': str(row[12]) if row[12] else None,
-            })
-        
-        cursor.close()
-        return results
-    
+        """MySQL 系直连取 digest 累计值（单位与排序已修正，见 T-01 / T-02）。"""
+        from monitor import appconf
+        if not hasattr(self, 'last_meta'):
+            self.last_meta = {'basis': 'cumulative', 'warning': None}
+        return self._mysql_family_cumulative(conn, 100, 86400 * 365,
+                                             appconf.get('SLOW_SQL_AVG_MS'))
+
     def _collect_pgsql_slow_queries(self, conn) -> List[Dict]:
         """采集 PostgreSQL 慢查询（pg_stat_statements）"""
         collector = PostgreSQLSlowQueryCollector(conn)
@@ -510,7 +582,7 @@ class SlowQueryEngine:
                 'exec_count': row['executions'],
                 'total_time_sec': row['elapsed_sec_total'],
                 'min_time_sec': 0,  # AWR 不提供
-                'max_time_sec': row['elapsed_sec_per_exec'] * 2,  # 估算
+                'max_time_sec': None,  # AWR 不提供单次最大值；不估算
                 'avg_time_sec': row['elapsed_sec_per_exec'],
                 'buffer_gets_per_exec': row['buffer_gets_per_exec'],
                 'disk_reads_per_exec': row['disk_reads_per_exec'],
@@ -542,16 +614,21 @@ class SlowQueryEngine:
                 'optimization_suggestions': ['当前无慢查询数据'],
             }
         
-        total_time = sum(q.get('total_time_sec', 0) for q in slow_queries)
+        total_time = sum(q.get('total_time_sec', 0) or 0 for q in slow_queries)
         total_executions = sum(q.get('exec_count', 1) for q in slow_queries)
-        
-        patterns = self._identify_patterns(slow_queries)
-        suggestions = self._generate_suggestions(slow_queries, patterns)
-        
-        # Top 10 慢查询
+
+        if any('findings' in q for q in slow_queries):
+            # 有实测画像（MySQL 系，见 sql_profile）：按结论代码归并，不再做关键字猜测
+            patterns = self._patterns_from_findings(slow_queries)
+            suggestions = self._suggestions_from_findings(patterns)
+        else:
+            patterns = self._identify_patterns(slow_queries)
+            suggestions = self._generate_suggestions(slow_queries, patterns)
+
+        # T-02：按总耗时排序（原实现 total×count 把执行次数乘了两遍）
         top_queries = sorted(
-            slow_queries, 
-            key=lambda x: x.get('total_time_sec', 0) * x.get('exec_count', 1), 
+            slow_queries,
+            key=lambda x: x.get('total_time_sec', 0) or 0,
             reverse=True
         )[:10]
         
@@ -566,6 +643,53 @@ class SlowQueryEngine:
             'timestamp': datetime.now().isoformat(),
         }
     
+    _FINDING_ADVICE = {
+        'SCAN_INEFFICIENT': ('index_optimization', 'high', '扫描行远多于返回行',
+                             '在 SQL 详情页查看具体索引建议；核对 WHERE / JOIN 列是否有可用索引'),
+        'FULL_SCAN': ('index_optimization', 'high', '存在全表扫描',
+                      '在 SQL 详情页查看具体索引建议，必要时用 EXPLAIN ANALYZE 确认扫描算子'),
+        'FULL_JOIN': ('index_optimization', 'high', '存在无索引 JOIN',
+                      '为被驱动表的关联列建立索引'),
+        'TMP_DISK': ('sql_optimization', 'medium', '内部临时表落盘',
+                     '为 GROUP BY / ORDER BY 列建立索引避免临时表，或评估 tmp_table_size / max_heap_table_size'),
+        'SORT_MERGE': ('sql_optimization', 'medium', '排序发生多轮归并',
+                       '为 ORDER BY 列建立索引，或减少排序行数；评估 sort_buffer_size'),
+        'LOCK_WAIT': ('concurrency', 'high', '锁等待占比高',
+                      '在阻塞分析中定位持锁会话；缩短事务、避免热点行更新'),
+        'ERRORS': ('application_optimization', 'medium', '执行报错',
+                   '检查应用日志中的对应错误'),
+    }
+
+    def _patterns_from_findings(self, slow_queries: List[Dict]) -> List[Dict]:
+        grouped = defaultdict(list)
+        for q in slow_queries:
+            for f in q.get('findings') or []:
+                grouped[f['code']].append({'query': (q.get('query') or '')[:200],
+                                           'digest': q.get('digest'),
+                                           'exec_count': q.get('exec_count'),
+                                           'detail': f.get('text')})
+        out = []
+        for code, examples in grouped.items():
+            cat, sev, title, _ = self._FINDING_ADVICE.get(code, ('general', 'info', code, ''))
+            out.append({'type': code.lower(), 'count': len(examples), 'description': title,
+                        'severity': {'high': 'critical', 'medium': 'warning'}.get(sev, 'info'),
+                        'examples': examples[:3]})
+        out.sort(key=lambda p: (p['severity'] != 'critical', -p['count']))
+        return out
+
+    def _suggestions_from_findings(self, patterns: List[Dict]) -> List[Dict]:
+        out = []
+        for p in patterns:
+            cat, sev, title, action = self._FINDING_ADVICE.get(
+                p['type'].upper(), ('general', 'info', p['description'], ''))
+            out.append({'category': cat, 'priority': sev,
+                        'suggestion': f"{title}（{p['count']} 条 SQL）", 'action': action})
+        if not out:
+            out.append({'category': 'general', 'priority': 'info',
+                        'suggestion': '窗口内 SQL 未发现扫描、排序、临时表、锁等待方面的异常',
+                        'action': '继续保持监控，关注环比退化'})
+        return out
+
     def _identify_patterns(self, slow_queries: List[Dict]) -> List[Dict]:
         """识别异常模式"""
         patterns = []

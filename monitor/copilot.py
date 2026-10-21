@@ -195,16 +195,13 @@ def explain_sql(config: DatabaseConfig, sql_text: str) -> Dict[str, Any]:
 
     suggestions = []
     try:
-        import dataclasses
-        from monitor.index_advisor import IndexAdvisor
-        from monitor.sqlfingerprint import normalize
-        normalized = normalize(sql_text).replace('`', '').replace('[', '').replace(']', '')
-        for candidate in (IndexAdvisor().analyze_queries(
-                [{'query': normalized, 'exec_count': 1}]) or [])[:3]:
-            suggestions.append(
-                dataclasses.asdict(candidate) if dataclasses.is_dataclass(candidate) else str(candidate))
+        # T-05：原 IndexAdvisor 不认表别名、对前导通配 LIKE 推 B-tree；改用 sql_advisor
+        from monitor.sql_advisor import advise
+        res = advise(sql_text, db_type=config.db_type, sample_sql=sql_text)
+        suggestions = [a for a in res['advice'] if a['category'] == 'index' and a.get('ddl')][:3]
     except Exception as exc:
-        logger.debug("Copilot 索引建议生成失败: %s", exc)
+        from monitor import degrade
+        degrade.note('copilot.index_advice', '索引建议生成失败', exc)
     return {
         'available': True,
         'reason': '',

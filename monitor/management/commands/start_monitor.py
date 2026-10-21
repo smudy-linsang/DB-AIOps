@@ -381,7 +381,7 @@ class Command(BaseCommand):
         # --- 3.3 Phase 7A: sql_stat 快照增量 + cpu_cores + 计划采集 ---
         if current_status == 'UP':
             try:
-                self._collect_perf_extras(config)
+                self._collect_perf_extras(config, data)
             except Exception as e7:
                 print(f"  [7A] 性能采集失败: {e7}")
 
@@ -514,10 +514,23 @@ class Command(BaseCommand):
 
         slow_queries/innodb_deadlocks 是累计计数器, 绝对值无法判"突增";
         增量进 MonitorLog 后供 L3 检测与验证回路使用。计数器回绕(重启)跳过一轮。
+
+        T-15：qps / tps 原为"自启动以来累计 / uptime"，实例跑一个月后几乎是直线；
+        现按真实间隔秒数算当前速率 qps_current / tps_current。
+        T-03：TDSQL groupshard 的计数器若不是按 set 求和的（透传不可用），两轮可能来自
+        不同 set，差分没有意义 —— 不产出增量，避免把垃圾喂给检测与验证回路。
         """
+        import time as _time
         if not hasattr(self, '_counter_prev'):
             self._counter_prev = {}
+        if data.get('tdsql_mode') == 'groupshard' and data.get('tdsql_counter_basis') != 'per_set_sum':
+            from monitor import degrade
+            degrade.note('monitor.counter_deltas_unrouted',
+                         f'{config.name}: groupshard 计数器未按 set 求和，跳过增量计算')
+            self._counter_prev.pop(config.id, None)
+            return
         prev = self._counter_prev.setdefault(config.id, {})
+        now = _time.time()
         for key, out_key in (('slow_queries', 'slow_queries_delta'),
                              ('innodb_deadlocks', '_deadlock_delta_5min')):
             cur = data.get(key)
@@ -526,21 +539,40 @@ class Command(BaseCommand):
                 if p is not None and cur >= p:
                     data[out_key] = cur - p
                 prev[key] = cur
+        q = data.get('questions_total')
+        t = (data.get('com_commit_total'), data.get('com_rollback_total'))
+        last = prev.get('_rate')
+        if isinstance(q, (int, float)) and all(isinstance(x, (int, float)) for x in t):
+            tx = t[0] + t[1]
+            if last is not None:
+                dt = now - last[0]
+                if dt > 0 and q >= last[1] and tx >= last[2]:
+                    data['qps_current'] = round((q - last[1]) / dt, 2)
+                    data['tps_current'] = round((tx - last[2]) / dt, 2)
+            prev['_rate'] = (now, q, tx)
 
     # ================= Phase 7A-07/08: SQL 统计快照 + 计划采集 =================
     _SQLSTAT_TOPN = 100
 
-    def _collect_perf_extras(self, config):
-        """sql_stat 快照增量 + cpu_cores 回填 + 每小时 Top SQL 计划采集 (phase7/10 §8/§9)。"""
+    def _collect_perf_extras(self, config, data=None):
+        """sql_stat 快照增量 + cpu_cores 回填 + 每小时 Top SQL 计划采集 (phase7/10 §8/§9)。
+
+        data: 本轮采集结果。TDSQL 需要其中的 tdsql_mode / tdsql_sets 来按 set 取数
+        （TDSQL_SLOWSQL_DESIGN.md §2.2）。
+        """
         if config.db_type not in ('mysql', 'tdsql', 'gbase', 'pgsql', 'oracle', 'dm'):
             return
+        from monitor import appconf
         from monitor.db_connector import DbConnector
         conn = None
         try:
-            conn = DbConnector.get_connection(config)
+            # BUG-109/110：采集连接一律带语句超时与只读（T-16）
+            conn = DbConnector.get_connection(
+                config, statement_timeout_ms=appconf.get('TARGET_DB_STATEMENT_TIMEOUT_MS'),
+                readonly=True)
             cur = conn.cursor()
             try:
-                rows = self._snapshot_sqlstat(config, cur)
+                rows = self._snapshot_sqlstat(config, cur, data)
                 if rows:
                     from monitor.timeseries import get_timeseries_storage
                     get_timeseries_storage().write_sql_stats(config.id, rows)
@@ -555,23 +587,21 @@ class Command(BaseCommand):
                 except Exception:
                     pass
 
-    def _snapshot_sqlstat(self, config, cur):
-        """逐库拉 TopN digest 累计值 → 与上轮差分 → 返回增量行。回绕(重启)跳过该轮。"""
+    def _snapshot_sqlstat(self, config, cur, data=None):
+        """逐库拉 digest 累计值 → 与上轮差分 → 返回增量行。回绕(重启)跳过该轮。
+
+        MySQL 系走 monitor.sqlstat_collect：按 (set, digest) 差分、按活跃窗口取数、
+        按本轮增量取 Top N（修 T-03 / T-12）。PG / Oracle / 达梦沿用原逻辑。
+        """
+        if config.db_type in ('mysql', 'tdsql', 'gbase'):
+            from monitor import sqlstat_collect
+            rows, meta = sqlstat_collect.collect(cur, config, data)
+            if meta.get('warning'):
+                print(f"  [7A] {config.name}: {meta['warning']}")
+            return rows
         from monitor.sqlfingerprint import unified_digest
         snap = {}  # digest -> (exec, elapsed_ms, rows, reads, text, db_name)
-        if config.db_type in ('mysql', 'tdsql', 'gbase'):
-            cur.execute(
-                "SELECT DIGEST, SCHEMA_NAME, COUNT_STAR, SUM_TIMER_WAIT, "
-                "SUM_ROWS_SENT, SUM_ROWS_EXAMINED, LEFT(DIGEST_TEXT,500) AS txt "
-                "FROM performance_schema.events_statements_summary_by_digest "
-                "WHERE DIGEST IS NOT NULL "
-                f"ORDER BY SUM_TIMER_WAIT DESC LIMIT {self._SQLSTAT_TOPN}")
-            for r in cur.fetchall():
-                d = unified_digest(config.db_type, r['DIGEST'], None)
-                snap[d] = (int(r['COUNT_STAR']), int(r['SUM_TIMER_WAIT']) // 10**9,
-                           int(r['SUM_ROWS_SENT']), int(r['SUM_ROWS_EXAMINED']),
-                           r['txt'], r['SCHEMA_NAME'])
-        elif config.db_type in ('pgsql', 'postgresql'):
+        if config.db_type in ('pgsql', 'postgresql'):
             try:
                 cur.execute(
                     "SELECT queryid, calls, total_exec_time, rows, "
@@ -959,14 +989,19 @@ class Command(BaseCommand):
             if cache.get(slow_query_cache_key) is None:
                 from monitor.slow_query_engine import SlowQueryEngine
                 sq_engine = SlowQueryEngine(config)
-                slow_queries = sq_engine.collect_slow_queries_from_db(time_range='1h', limit=10)
+                recent = sq_engine.collect_slow_queries_from_db(time_range='30m', limit=50)
+                # 只对"平均单次耗时达到阈值"的 SQL 告警（T-01/T-02：原实现对 MySQL 系恒为空，
+                # 修好后若不过滤，会把高频快 SQL 也当慢 SQL 报出来）。累计值回退数据不告警。
+                slow_queries = [q for q in recent if q.get('is_slow')
+                                and q.get('basis') == 'window']
                 if slow_queries:
-                    top_slow = slow_queries[0]
+                    top_slow = max(slow_queries, key=lambda q: q.get('avg_time_sec') or 0)
                     body = (
-                        f"检测到 {len(slow_queries)} 条慢查询\n"
-                        f"最慢查询耗时：{top_slow.get('total_time_sec', 0):.2f}s\n"
-                        f"执行次数：{top_slow.get('exec_count', 0)}\n"
-                        f"SQL摘要：{top_slow.get('query', '')[:200]}"
+                        f"近 30 分钟检测到 {len(slow_queries)} 条慢 SQL\n"
+                        f"最慢 SQL 平均耗时：{(top_slow.get('avg_time_sec') or 0) * 1000:.1f}ms"
+                        f"（执行 {top_slow.get('exec_count', 0)} 次）\n"
+                        + (f"热点 set：{top_slow['hottest_set']}\n" if top_slow.get('hottest_set') else '')
+                        + f"SQL摘要：{top_slow.get('query', '')[:200]}"
                     )
                     am.fire(
                         alert_type='slow_query', metric_key='slow_queries',

@@ -112,8 +112,9 @@ _DIALECT_NOTES = {
               '取不到专有等待事件时应如实返回不支持，不得套用 Oracle 事件名。',
         'gbase': 'GBase 8a 取自 information_schema 与集群节点指标；'
                  '分片间会话需按分片(shard)维度聚合。',
-        'tdsql': 'TDSQL 取自各分片的 performance_schema/慢日志并归集到协调节点；'
-                 '会话需带 shard_id 才能定位到具体分片。',
+        'tdsql': 'TDSQL（proxy + set 架构）经 /*sets:allsets*/ 透传按 set 取 processlist / innodb_trx，'
+                 '结果带 info 列标明 set；不带透传时 proxy 只路由到某一个 set，看到的会话不完整。'
+                 '网关层会话用 /*proxy*/show processlist（小写）。',
     },
     'db.top_sql': {
         'oracle': '基于 V$SQL / DBA_HIST_SQLSTAT，按 elapsed_time 排序并带 plan_hash_value。',
@@ -122,7 +123,9 @@ _DIALECT_NOTES = {
         'pgsql': '基于 pg_stat_statements，按 total_exec_time 排序并带 queryid。',
         'dm': '达梦取 V$SQL 系列；digest 体系与 Oracle 不完全一致，跨库对比时需注明。',
         'gbase': 'GBase 取采集器上报的 SQL 摘要；分片间需合并后排序。',
-        'tdsql': 'TDSQL 需按分片分别取 Top SQL 后归并；单看某分片会低估全局热点。',
+        'tdsql': 'TDSQL 经 /*sets:allsets*/ 透传按 set 取 events_statements_summary_by_digest，'
+                 '先按 set 差分再跨 set 求和（平台 sql_stat 已按 set_name 分行存储）；'
+                 '透传不可用时数据只来自一个 set，必须标注不可信。',
     },
     'db.lock_chain': {
         'oracle': '由 V$SESSION 的 blocking_session 关系构建阻塞链，'
@@ -134,7 +137,8 @@ _DIALECT_NOTES = {
                  '区分 heavyweight lock 与 tuple lock，长事务是常见根因。',
         'dm': '达梦锁机制与 Oracle 接近但视图不同，取不到时应返回不支持。',
         'gbase': 'GBase 分布式下的行锁需跨节点归集，链可能不完整，结论置信度须下调。',
-        'tdsql': 'TDSQL 跨分片事务的锁链需要协调节点信息，缺失时如实标注。',
+        'tdsql': 'TDSQL 的行锁在各 set 内部，经透传按 set 取 data_lock_waits；'
+                 '跨 set 的分布式事务锁关系在 SQL 层不可见，缺失时如实标注。',
     },
     'db.io_wait': {
         'oracle': '基于 V$SYSSTAT 的 redo/log file sync、physical read 等待，'
@@ -143,7 +147,7 @@ _DIALECT_NOTES = {
         'pgsql': '基于 pg_stat_database 的 blks_read/blks_hit 与 pg_stat_bgwriter。',
         'dm': '达梦取 V$ 视图的 IO 统计，口径与 Oracle 有差异，跨库对比须注明。',
         'gbase': 'GBase 取存储层与节点 IO 指标。',
-        'tdsql': 'TDSQL 需汇总各分片与底层存储的 IO 指标。',
+        'tdsql': 'TDSQL 的 IO 指标按 set 主节点分别取（透传 SHOW GLOBAL STATUS 的 Innodb_data_*），不得只看一个 set。',
     },
     'db.replication_status': {
         'oracle': 'DataGuard：V$DATAGUARD_STATS 的 apply lag / transport lag，'
@@ -153,7 +157,8 @@ _DIALECT_NOTES = {
         'pgsql': 'pg_stat_replication 的 write_lag/flush_lag/replay_lag 与 pg_stat_wal_receiver。',
         'dm': '达梦备库状态取其自有的守护进程视图。',
         'gbase': 'GBase 主从以复制延迟指标为准。',
-        'tdsql': 'TDSQL 以代理层/分片主备状态为准，须区分代理层与分片层延迟。',
+        'tdsql': 'TDSQL 以 /*proxy*/show routes 的各 set 主备与状态为准；'
+                 '区分 proxy 网关层与 set 内主备复制两层。',
     },
     'db.capacity_trend': {
         'oracle': '基于 DBA_DATA_FILES / DBA_SEGMENTS 与历史增长外推，含表空间与数据文件。',
@@ -161,7 +166,8 @@ _DIALECT_NOTES = {
         'pgsql': '基于 pg_database_size 与 pg_total_relation_size。',
         'dm': '达梦取表空间与数据文件使用率。',
         'gbase': 'GBase 取表空间使用率（分片库需按分片归集）。',
-        'tdsql': 'TDSQL 的容量要分"协调节点"与"分片数据节点"两层看，缺一不可。',
+        'tdsql': 'TDSQL 的容量按 set 看：分表数据按 shardkey 哈希分布到各 set，单表只在第一个 set，'
+                 '广播表每个 set 全量；任一 set 写满即影响全局。',
     },
     'meta.guc_config': {
         'oracle': '查 V$PARAMETER / SPFILE 的参数当前值，'
@@ -171,7 +177,7 @@ _DIALECT_NOTES = {
         'pgsql': '查 pg_settings，命名为 work_mem、shared_buffers、max_connections。',
         'dm': '达梦参数命名对齐 Oracle 的子集，但部分参数不生效，须以实际值为准。',
         'gbase': 'GBase 参数体系接近 MySQL 系。',
-        'tdsql': 'TDSQL 的参数分协调节点与分片两层，必须标明是哪一层。',
+        'tdsql': 'TDSQL 的参数分 proxy 网关（/*proxy*/show config）与 set 内 MySQL（SHOW VARIABLES）两层，必须标明是哪一层。',
     },
     'meta.statistics': {
         'oracle': '查 DBA_TAB_STATISTICS / DBA_TAB_COL_STATISTICS 的 last_analyzed 与 stale 标记；'
@@ -182,7 +188,7 @@ _DIALECT_NOTES = {
                  '以及 pg_stats.last_analyzed 与 autovacuum 配置。',
         'dm': '达梦取其统计信息管理视图。',
         'gbase': 'GBase 取统计信息收集状态。',
-        'tdsql': 'TDSQL 统计信息按分片独立收集，采样率差异会影响基数估计。',
+        'tdsql': 'TDSQL 统计信息在各 set 内独立收集，set 间数据量不同会导致估算差异。',
     },
     'meta.schema_fields': {
         'oracle': '查 ALL_TAB_COLUMNS / ALL_INDEXES / ALL_IND_COLUMNS。',
@@ -190,18 +196,18 @@ _DIALECT_NOTES = {
         'pgsql': '查 information_schema.columns 与 pg_indexes。',
         'dm': '达梦取 ALL_TAB_COLUMNS 等兼容视图。',
         'gbase': 'GBase 取 information_schema。',
-        'tdsql': 'TDSQL 取分片 schema，分片键决定数据分布，检索时应带分片键。',
+        'tdsql': 'TDSQL 分布式实例用 /*proxy*/show shardkey 取各表 shardkey（noshardkey_allset 为广播表）；'
+                 'SQL 不带 shardkey 会路由到全部 set。',
     },
     'meta.resource_policy': {
         'oracle': '查资源计划（DBA_RESOURCE_PLANS / WLM），'
                   '注意 RESOURCE_PLAN 与 RESOURCE_PLAN_CPU 可能是 NULL。',
         'mysql': '查资源组与线程池（information_schema.USER_RESOURCES 等）。',
-        'pgsql': '查 pg_cgroup / 扩展的 WLM 配置（TDSQL 系有 PGXC_WLM_SESSION_INFO）。',
+        'pgsql': '查 pg_cgroup / 扩展的 WLM 配置；PGXC_WLM_SESSION_INFO 只存在于 DWS / GaussDB 等 PG-XC 系产品。',
         'dm': '达梦取其资源管理配置。',
         'gbase': 'GBase 取资源与线程池配置。',
-        'tdsql': 'TDSQL/DWS 的 PGXC_WLM_SESSION_INFO 提供 session_id、resource_pool、'
-                 'spill_info；spill_info 取 All 或区间形式，指示内存压力或倾斜，'
-                 '需与计划缓冲区、工作内存交叉核对。',
+        'tdsql': 'TDSQL MySQL 版没有 PGXC_* 视图；资源限制看各 set 的 max_connections、'
+                 'thread pool 配置与 proxy 的连接限制（/*proxy*/show config）。',
     },
     'os.metrics': {
         'oracle': 'Oracle 主机侧指标，与数据库实例指标配对解读'
@@ -210,7 +216,7 @@ _DIALECT_NOTES = {
         'pgsql': '同左，PG 主机指标；需结合 shared_buffers 与主机内存判断。',
         'dm': '同左，达梦主机指标。',
         'gbase': '同左，GBase 主机指标，分片部署下按节点归集。',
-        'tdsql': '同左，TDSQL 主机指标；须区分协调节点与数据节点两组。',
+        'tdsql': 'TDSQL 主机指标须区分 proxy 网关主机与各 set 的 DB 主机两组。',
     },
     'kb.search': {
         'oracle': '检索知识库时按 Oracle 方言过滤，避免召回 MySQL/PG 的方案。',
@@ -218,7 +224,7 @@ _DIALECT_NOTES = {
         'pgsql': '检索知识库时按 PostgreSQL/DWS 方言过滤。',
         'dm': '检索知识库时按达梦方言过滤；达梦兼容 Oracle 但参数名与等待事件不同。',
         'gbase': '检索知识库时按 GBase 方言过滤。',
-        'tdsql': '检索知识库时按 TDSQL 方言过滤；分布式专属根因（分片倾斜）仅在此适用。',
+        'tdsql': '检索知识库时按 TDSQL 方言过滤；分布式专属根因（广播查询、跨 set JOIN、set 倾斜）仅在此适用。',
     },
     'db.slow_query': {
         'oracle': '基于 DBA_HIST_SQLSTAT 的 elapsed_time 与执行次数。',
@@ -226,7 +232,8 @@ _DIALECT_NOTES = {
         'pgsql': '基于 pg_stat_statements 与 auto_explain。',
         'dm': '达梦取慢 SQL 视图。',
         'gbase': 'GBase 取慢 SQL 采集结果。',
-        'tdsql': 'TDSQL 需按分片归并慢查询。',
+        'tdsql': 'TDSQL 慢 SQL 来自按 set 采集的 digest 增量（sql_stat，含热点 set 与倾斜度）；'
+                 '分布式实例同时检查是否带 shardkey。',
     },
     'db.log_surge': {
         'oracle': '基于 V$LOGHIST 的 redo 生成速率与归档切换频次。',
@@ -234,7 +241,7 @@ _DIALECT_NOTES = {
         'pgsql': '基于 pg_stat_database 的 wal_bytes 与 WAL 段切换。',
         'dm': '达梦取归档与日志切换视图。',
         'gbase': 'GBase 取日志增长指标。',
-        'tdsql': 'TDSQL 区分 binlog（协调节点）与分片 redo。',
+        'tdsql': 'TDSQL 的 binlog 与 redo 都在各 set 内部，按 set 分别看；proxy 不产生日志量。',
     },
 }
 

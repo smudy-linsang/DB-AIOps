@@ -105,6 +105,25 @@ SPECS = {
                                     '单条时序指标在快照中的最大采样点数；超出的分析请求返回确定性错误而非静默截断'),
     'OAM_EVIDENCE_MIN_REFS':   Spec('OAM_EVIDENCE_MIN_REFS', 1, int, lambda v: v >= 0,
                                     '报告根因主张至少需要多少个证据引用才通过证据审计'),
+    # ===== 慢 SQL / SQL 统计（见 TDSQL_SLOWSQL_DESIGN.md）=====
+    'SQLSTAT_TOPN':            Spec('SQLSTAT_TOPN', 200, int, lambda v: 10 <= v <= 5000,
+                                    '每个 set 每轮写入 sql_stat 的 digest 上限（按本轮耗时增量排序）'),
+    'SQLSTAT_FETCH_LIMIT':     Spec('SQLSTAT_FETCH_LIMIT', 500, int, lambda v: 10 <= v <= 10000,
+                                    '每个 set 每轮从 performance_schema 拉取的活跃 digest 上限'),
+    'SQLSTAT_ACTIVE_WINDOW_SEC': Spec('SQLSTAT_ACTIVE_WINDOW_SEC', 900, int,
+                                      lambda v: 60 <= v <= 86400,
+                                      '只拉取 LAST_SEEN 落在该窗口内的 digest；应 >= 2 倍采集间隔'),
+    'SLOW_SQL_AVG_MS':         Spec('SLOW_SQL_AVG_MS', 1000, int, lambda v: 1 <= v <= 3600000,
+                                    '平均单次耗时达到该毫秒数即判为慢 SQL（慢 SQL 列表 is_slow 与 D5 告警共用）'),
+    'PERF_EXPLAIN_ANALYZE_ENABLED': Spec('PERF_EXPLAIN_ANALYZE_ENABLED', False, bool,
+                                         hint='EXPLAIN ANALYZE 会在目标库真实执行查询；默认关闭，按需开启'),
+    'PERF_EXPLAIN_ANALYZE_TIMEOUT_MS': Spec('PERF_EXPLAIN_ANALYZE_TIMEOUT_MS', 5000, int,
+                                            lambda v: 100 <= v <= 60000,
+                                            'EXPLAIN ANALYZE 的语句超时上限；超时时计划会被截断并标注'),
+    'SQL_REGRESSION_AVG_RATIO': Spec('SQL_REGRESSION_AVG_RATIO', 1.5, float, lambda v: v > 1.0,
+                                     '环比退化判定：平均耗时达到基线的该倍数'),
+    'SQL_REGRESSION_MIN_DELTA_MS': Spec('SQL_REGRESSION_MIN_DELTA_MS', 5.0, float, lambda v: v >= 0,
+                                        '环比退化判定：平均耗时的最小绝对差值（毫秒），防止亚毫秒抖动误报'),
 }
 
 

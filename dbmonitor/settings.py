@@ -460,6 +460,14 @@ ASH_RETENTION_DAYS = int(os.environ.get('ASH_RETENTION_DAYS', 7))
 # Phase 7D-02: 长事务阈值
 LONG_TRX_WARN_SEC = int(os.environ.get('LONG_TRX_WARN_SEC', 300))
 LONG_TRX_CRIT_SEC = int(os.environ.get('LONG_TRX_CRIT_SEC', 1800))
+# SQL 统计 / 慢 SQL / EXPLAIN ANALYZE / 环比（TDSQL_SLOWSQL_DESIGN.md §9；默认值以 appconf.SPECS 为准）
+for _name in ('SQLSTAT_TOPN', 'SQLSTAT_FETCH_LIMIT', 'SQLSTAT_ACTIVE_WINDOW_SEC', 'SLOW_SQL_AVG_MS',
+              'PERF_EXPLAIN_ANALYZE_ENABLED', 'PERF_EXPLAIN_ANALYZE_TIMEOUT_MS',
+              'SQL_REGRESSION_AVG_RATIO', 'SQL_REGRESSION_MIN_DELTA_MS'):
+    if _name in os.environ:
+        globals()[_name] = (_envbool(_name, False) if _name == 'PERF_EXPLAIN_ANALYZE_ENABLED'
+                            else os.environ[_name])
+del _name
 # 支柱二/三: 管道 + 事故
 PIPELINE_ENABLED = _envbool('PIPELINE_ENABLED', True)
 PIPELINE_STREAM_MAXLEN = int(os.environ.get('PIPELINE_STREAM_MAXLEN', 100000))

@@ -4,13 +4,14 @@ import { ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
 import SqlDetailPanel from '../SqlDetailPanel';
+import SqlInsightsCard from '../SqlInsightsCard';
 import KillModal from '../KillModal';
 import { withAlive, fmtPerfError } from '../useSafeAsync';
 
 const { Text } = Typography;
 
-/** Tab4 SQL 监控 (phase7/30 §5): 运行中语句(进度) + SQL 详情 */
-export default function SqlTab({ configId, selectedDigest, onOpenSql, refreshKey }) {
+/** Tab4 SQL 监控 (phase7/30 §5): 运行中语句(进度) + SQL 洞察(排行/环比/周期) + SQL 详情 */
+export default function SqlTab({ configId, selectedDigest, onOpenSql, refreshKey, range }) {
   const [rows, setRows] = useState([]);
   const [degraded, setDegraded] = useState(false);
   const [loading, setLoading] = useState(false);
@@ -64,6 +65,7 @@ export default function SqlTab({ configId, selectedDigest, onOpenSql, refreshKey
                         onClick={() => setKillTarget(r)}>终止</Button>) },
           ]} />
       </Card>
+      <SqlInsightsCard configId={configId} range={range} refreshKey={refreshKey} onOpenSql={onOpenSql} />
       <Card size="small" style={{ marginTop: 8 }}
             title={selectedDigest ? `SQL 详情: ${selectedDigest.slice(0, 16)}…` : 'SQL 详情'}>
         {selectedDigest

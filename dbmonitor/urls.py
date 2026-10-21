@@ -64,8 +64,8 @@ from monitor.api_views_incident import (
 )
 from monitor.api_views_perf import (
     AasView, TopActivityView, AshFacetsView, SessionsLiveView, BlockingTreeView,
-    RunningSqlView, SqlDetailView, SqlPlanDetailView, SqlExplainView,
-    CompareView, SessionKillView,
+    RunningSqlView, SqlDetailView, SqlPlanDetailView, SqlExplainView, SqlExplainAnalyzeView,
+    CompareView, SessionKillView, SqlRegressionView, SqlPeriodicView,
 )
 from monitor.sse_views import SSEView
 from monitor.api_views_phase8 import (
@@ -280,7 +280,10 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/', SqlDetailView.as_view()),
     path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/plan/<str:plan_hash>/', SqlPlanDetailView.as_view()),
     path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/explain/', SqlExplainView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql/<str:digest>/explain-analyze/', SqlExplainAnalyzeView.as_view()),
     path('api/v1/databases/<int:config_id>/perf/compare/', CompareView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql-regression/', SqlRegressionView.as_view()),
+    path('api/v1/databases/<int:config_id>/perf/sql-periodic/', SqlPeriodicView.as_view()),
     path('api/v1/databases/<int:config_id>/perf/sessions/<str:session_id>/kill/', SessionKillView.as_view()),
 
     path('api/v1/incidents/', IncidentListView.as_view()),
