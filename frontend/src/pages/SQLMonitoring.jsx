@@ -25,6 +25,7 @@ import {
 } from '@ant-design/icons';
 import { useSearchParams } from 'react-router-dom';
 import { databaseAPI, sqlMonitoringAPI } from '../services/api';
+import { basisNotice } from '../utils/sqlPerf';
 import useAppStore from '../stores/useAppStore';
 
 const { Title, Text, Paragraph } = Typography;
@@ -92,6 +93,8 @@ const SQLMonitoring = () => {
   const [totalCount, setTotalCount] = useState(0);
   const [dbType, setDbType] = useState('');
   const [analysis, setAnalysis] = useState(null);
+  // 数据口径提示：累计值回退 / TDSQL 分布式未按 set 采集（utils/sqlPerf.js 语义 2、3）
+  const [basis, setBasis] = useState(null);
   const [selectedQuery, setSelectedQuery] = useState(null);
   const [drawerOpen, setDrawerOpen] = useState(false);
   const [drawerTab, setDrawerTab] = useState('overview');
@@ -129,9 +132,11 @@ const SQLMonitoring = () => {
       setSlowQueries(data.slow_queries || []);
       setTotalCount(data.total_count || 0);
       setDbType(data.db_type || '');
+      setBasis(basisNotice(data));
     } catch (e) {
       message.error('加载慢查询失败');
       setSlowQueries([]);
+      setBasis(null);
     } finally {
       setLoading(false);
     }
@@ -503,6 +508,7 @@ const SQLMonitoring = () => {
           }
         >
           <Spin spinning={loading}>
+            {basis && <Alert type={basis.type} showIcon message={basis.text} style={{ marginBottom: 8 }} />}
             {slowQueries.length === 0 && !loading ? (
               <Empty description="当前时间范围内无慢查询记录" />
             ) : (
