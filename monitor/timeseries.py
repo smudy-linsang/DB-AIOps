@@ -379,6 +379,12 @@ class TimeseriesStorage:
             except Exception as e:
                 logger.info(f"[Timeseries] sql_stat 超表可能已存在: {e}")
             cur.execute("CREATE INDEX IF NOT EXISTS idx_sqlstat_config_digest_time ON sql_stat (db_config_id, sql_digest, time DESC);")
+            # TDSQL 慢 SQL 改造（TDSQL_SLOWSQL_DESIGN.md §3）：按 set 分行存储 + 耗时构成所需的增量字段。
+            # 全部 ADD COLUMN IF NOT EXISTS + 默认值 —— 存量行无需清洗，新列读作 0/空串，
+            # 读取侧把"全 0"解释为"未采集"，不当作真实的 0。
+            for ddl in self._SQLSTAT_EXT_DDL:
+                cur.execute(f"ALTER TABLE sql_stat ADD COLUMN IF NOT EXISTS {ddl};")
+            cur.execute("CREATE INDEX IF NOT EXISTS idx_sqlstat_config_time ON sql_stat (db_config_id, time DESC);")
             try:
                 cur.execute("SELECT add_retention_policy('sql_stat', INTERVAL '90 days', if_not_exists => TRUE);")
             except Exception as e:
@@ -488,7 +494,29 @@ class TimeseriesStorage:
 
     # ---- Phase 7A-07: SQL digest 级增量统计 ----
     _SQLSTAT_COLS = ('sql_digest', 'db_name', 'exec_delta', 'elapsed_ms_delta',
-                     'rows_delta', 'reads_delta', 'sql_text_sample')
+                     'rows_delta', 'reads_delta', 'sql_text_sample',
+                     'set_name', 'lock_ms_delta', 'cpu_ms_delta', 'tmp_tables_delta',
+                     'tmp_disk_delta', 'sort_merge_delta', 'sort_rows_delta', 'scan_delta',
+                     'full_join_delta', 'no_index_delta', 'errors_delta', 'sql_example')
+    _SQLSTAT_EXT_DDL = (
+        "set_name VARCHAR(64) DEFAULT ''",
+        "lock_ms_delta BIGINT DEFAULT 0",
+        "cpu_ms_delta BIGINT DEFAULT 0",
+        "tmp_tables_delta BIGINT DEFAULT 0",
+        "tmp_disk_delta BIGINT DEFAULT 0",
+        "sort_merge_delta BIGINT DEFAULT 0",
+        "sort_rows_delta BIGINT DEFAULT 0",
+        "scan_delta BIGINT DEFAULT 0",
+        "full_join_delta BIGINT DEFAULT 0",
+        "no_index_delta BIGINT DEFAULT 0",
+        "errors_delta BIGINT DEFAULT 0",
+        "sql_example TEXT",
+    )
+    # 新增列在旧采集路径（PG/Oracle/达梦）上没有来源：写默认值，避免 NULL 与 0 语义混杂
+    _SQLSTAT_DEFAULTS = {'set_name': '', 'lock_ms_delta': 0, 'cpu_ms_delta': 0,
+                         'tmp_tables_delta': 0, 'tmp_disk_delta': 0, 'sort_merge_delta': 0,
+                         'sort_rows_delta': 0, 'scan_delta': 0, 'full_join_delta': 0,
+                         'no_index_delta': 0, 'errors_delta': 0}
 
     def write_sql_stats(self, db_config_id: int, rows: list) -> bool:
         """批量写 sql_stat 增量行。rows: list[dict], 键为 _SQLSTAT_COLS 子集。"""
@@ -501,7 +529,8 @@ class TimeseriesStorage:
                     return False
                 now = timezone.now()
                 cols = "time, db_config_id, " + ", ".join(self._SQLSTAT_COLS)
-                payload = [[now, db_config_id] + [r.get(c) for c in self._SQLSTAT_COLS]
+                payload = [[now, db_config_id]
+                           + [r.get(c, self._SQLSTAT_DEFAULTS.get(c)) for c in self._SQLSTAT_COLS]
                            for r in rows]
                 execute_values(cur, f"INSERT INTO sql_stat ({cols}) VALUES %s",
                                payload, page_size=500)

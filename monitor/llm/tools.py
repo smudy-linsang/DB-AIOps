@@ -89,18 +89,31 @@ def _t_recent_changes(config, params):
 
 
 def _t_slow_queries(config, params):
-    """近期慢查询 Top (limit<=20)。"""
+    """近 1 小时慢 SQL Top (limit<=20)。
+
+    T-09：原实现读一个不存在的 SlowQueryLog 模型，ImportError 被吞掉，AI 诊断永远看不到慢 SQL。
+    现与慢 SQL 列表接口共用 SlowQueryEngine（sql_stat 时间窗聚合，TDSQL 已按 set 归并）。
+    """
     limit = min(int(params.get('limit', 10) or 10), 20)
+    from monitor import degrade
+    from monitor.slow_query_engine import SlowQueryEngine
     try:
-        from monitor.models import SlowQueryLog
-        rows = SlowQueryLog.objects.filter(config=config)\
-            .order_by('-create_time')[:limit]
-        return {'slow_queries': [{
-            'sql': (getattr(r, 'sql_text', '') or '')[:300],
-            'elapsed': getattr(r, 'query_time', None),
-            'time': r.create_time.isoformat()} for r in rows]}
-    except Exception:
-        return {'slow_queries': [], 'note': '慢查询表不可用'}
+        eng = SlowQueryEngine(config)
+        rows = eng.collect_slow_queries_from_db(time_range='1h', limit=limit)
+    except Exception as e:
+        degrade.note('llm.tool.slow_queries', '慢 SQL 取数失败', e)
+        return {'slow_queries': [], 'note': f'慢 SQL 取数失败：{type(e).__name__}'}
+    meta = getattr(eng, 'last_meta', {}) or {}
+    return {'slow_queries': [{
+        'digest': r.get('digest'),
+        'sql': (r.get('query') or '')[:300],
+        'exec_count': r.get('exec_count'),
+        'avg_ms': r.get('avg_ms'),
+        'total_sec': r.get('total_time_sec'),
+        'is_slow': r.get('is_slow'),
+        'findings': [f.get('text') for f in (r.get('findings') or [])][:3],
+        'hottest_set': r.get('hottest_set')} for r in rows[:limit]],
+        'basis': meta.get('basis'), 'note': meta.get('warning')}
 
 
 def _t_similar_cases(config, params):
