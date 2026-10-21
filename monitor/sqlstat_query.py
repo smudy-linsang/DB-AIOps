@@ -128,3 +128,14 @@ def basis_warning(config, set_names, data=None):
                 '路由到的某一个 set，执行次数、耗时与环比结论都不可信。请按 TDSQL_SLOWSQL_DESIGN.md '
                 '§8 的 V-1 ~ V-5 检查透传配置。')
     return None
+
+
+def digests_present(cur, config_id, fd, td, digests):
+    """这些 digest 中，哪些在窗口内出现过（用于"新增 / 消失"判定，避免只看 Top N 的误判）。"""
+    if not digests:
+        return set()
+    cur.execute(
+        "SELECT DISTINCT sql_digest FROM sql_stat WHERE db_config_id=%s AND time >= %s "
+        "AND time < %s AND exec_delta > 0 AND sql_digest = ANY(%s)",
+        (config_id, fd, td, list(digests)))
+    return {r[0] for r in cur.fetchall()}

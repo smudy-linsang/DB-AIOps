@@ -1119,16 +1119,163 @@ class CompareView(PerfBaseView):
                 return self.err('TSDB_DOWN', '时序库不可用', 502)
             a = _window_block(cfg, a_fd, a_td, cur)
             b = _window_block(cfg, b_fd, b_td, cur)
-        a_map = {r['key']: r['active_sec'] for r in a['top_sql']}
-        b_map = {r['key']: r['active_sec'] for r in b['top_sql']}
+            a_map = {r['key']: r['active_sec'] for r in a['top_sql']}
+            b_map = {r['key']: r['active_sec'] for r in b['top_sql']}
+            # T-08：原实现以"不在对方 Top 10"判定新增 / 消失 —— A 窗排第 11 的 SQL 在 B 窗冲到
+            # 第 1 会被标成"新出现"。改为查对方窗口里是否真的出现过，并补上真实活跃秒
+            a_miss = [k for k in b_map if k not in a_map]
+            b_miss = [k for k in a_map if k not in b_map]
+            a_map.update(self._active_sec(cur, cfg, a_fd, a_td, a_miss))
+            b_map.update(self._active_sec(cur, cfg, b_fd, b_td, b_miss))
         diff = []
         for k in set(a_map) | set(b_map):
             av, bv = a_map.get(k, 0), b_map.get(k, 0)
             diff.append({'key': k, 'a_active_sec': av, 'b_active_sec': bv,
                          'ratio': round(bv / av, 1) if av else None,
-                         'new': k not in a_map, 'gone': k not in b_map})
+                         'new': not av, 'gone': not bv})
         diff.sort(key=lambda d: -(d['ratio'] if d['ratio'] is not None else 9999))
         return self.ok({'a': a, 'b': b, 'diff': {'top_sql': diff}})
+
+    @staticmethod
+    def _active_sec(cur, cfg, fd, td, keys):
+        keys = [k for k in keys if k and k != '(null)']
+        if not keys:
+            return {}
+        cur.execute(
+            "SELECT sql_digest, SUM(active_sec) FROM session_ash_1m WHERE db_config_id=%s "
+            "AND bucket >= %s AND bucket < %s AND sql_digest = ANY(%s) GROUP BY 1",
+            (cfg.id, fd, td, keys))
+        return {k: round(v or 0, 1) for k, v in cur.fetchall()}
+
+
+# ============================================================
+# 环比退化 / 周期 SQL（TDSQL_SLOWSQL_DESIGN.md §7）
+# ============================================================
+_REGRESSION_SCAN_LIMIT = 5000
+
+
+class SqlRegressionView(PerfBaseView):
+    """GET /perf/sql-regression/?window=1h&baseline=day|week|prev（或 from/to + base_from/base_to）
+
+    数据源是 sql_stat（执行次数、平均耗时、每次扫描行、每次锁时间），对**全量** digest 分类。
+    """
+    required_perm = Perm.SQL_MONITORING_VIEW
+
+    @tsdb_guard
+    def get(self, request, config_id):
+        from monitor import appconf
+        from monitor.sql_compare import baseline_window, classify, summarize_counts
+        from monitor.sqlstat_query import (basis_warning, digests_present, texts_for,
+                                           window_by_digest)
+        cfg = self.get_config(config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', '实例不存在', 404)
+        fd, td = _parse_range(request)
+        kind = request.GET.get('baseline', 'day')
+        bf, bt = parse_datetime(request.GET.get('base_from') or ''), \
+            parse_datetime(request.GET.get('base_to') or '')
+        if bf and bt:
+            if not bf < bt:
+                return self.err('BAD_PARAM', '基线区间起点必须早于终点')
+            kind = 'custom'
+        else:
+            try:
+                bf, bt = baseline_window(fd, td, kind)
+            except ValueError:
+                return self.err('BAD_PARAM', 'baseline 只能是 prev / day / week')
+        limit = min(int(request.GET.get('limit', 200) or 200), 1000)
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
+            cur_aggs = window_by_digest(cur, cfg.id, fd, td, limit=_REGRESSION_SCAN_LIMIT)
+            base_aggs = window_by_digest(cur, cfg.id, bf, bt, limit=_REGRESSION_SCAN_LIMIT)
+            # 超过扫描上限时，补查当前窗口里有、基线里没取到的 digest 是否真的没出现过
+            missing = [d for d in cur_aggs if d not in base_aggs]
+            if missing and len(base_aggs) >= _REGRESSION_SCAN_LIMIT:
+                present = digests_present(cur, cfg.id, bf, bt, missing)
+                if present:
+                    base_aggs.update(window_by_digest(cur, cfg.id, bf, bt, limit=len(present),
+                                                      digests=present))
+            items = classify(cur_aggs, base_aggs,
+                             avg_ratio=appconf.get('SQL_REGRESSION_AVG_RATIO'),
+                             min_delta_ms=appconf.get('SQL_REGRESSION_MIN_DELTA_MS'))
+            shown = [i for i in items if i['status'] != 'stable'][:limit]
+            texts = texts_for(cur, cfg.id, [i['digest'] for i in shown], bf - timedelta(days=7))
+            sets = set()
+            if cfg.db_type == 'tdsql':
+                cur.execute("SELECT DISTINCT COALESCE(set_name, '') FROM sql_stat "
+                            "WHERE db_config_id=%s AND time >= %s AND time < %s",
+                            (cfg.id, fd, td))
+                sets = {r[0] for r in cur.fetchall()}
+        changed = self._plan_changes(cfg, [i['digest'] for i in shown], bf, td)
+        for i in shown:
+            text, example = texts.get(i['digest'], (None, None))
+            i['sql_text'] = text or example
+            i['plan_changed_at'] = changed.get(i['digest'])
+        return self.ok({
+            'window': {'from': fd, 'to': td},
+            'baseline': {'kind': kind, 'from': bf, 'to': bt},
+            'counts': summarize_counts(items),
+            'items': shown,
+            'thresholds': {'avg_ratio': appconf.get('SQL_REGRESSION_AVG_RATIO'),
+                           'min_delta_ms': appconf.get('SQL_REGRESSION_MIN_DELTA_MS')},
+            'basis_warning': basis_warning(cfg, sets) if cfg.db_type == 'tdsql' else None,
+        })
+
+    @staticmethod
+    def _plan_changes(cfg, digests, since, until):
+        """退化与计划变更自动关联：窗口内 plan_hash 发生过变化的时间点。"""
+        out = {}
+        if not digests:
+            return out
+        plans = (SqlPlan.objects.filter(config=cfg, sql_digest__in=digests,
+                                        captured_at__gte=since - timedelta(days=7),
+                                        captured_at__lte=until)
+                 .order_by('sql_digest', 'captured_at').values('sql_digest', 'plan_hash', 'captured_at'))
+        prev = {}
+        for p in plans:
+            last = prev.get(p['sql_digest'])
+            if last is not None and last != p['plan_hash'] and p['captured_at'] >= since:
+                out[p['sql_digest']] = p['captured_at']
+            prev[p['sql_digest']] = p['plan_hash']
+        return out
+
+
+class SqlPeriodicView(PerfBaseView):
+    """GET /perf/sql-periodic/?days=7 —— 日周期 SQL 识别与逐次运行比较。"""
+    required_perm = Perm.SQL_MONITORING_VIEW
+
+    @tsdb_guard
+    def get(self, request, config_id):
+        from monitor.sql_compare import detect_daily
+        from monitor.sqlstat_query import hourly_series, texts_for, window_by_digest
+        cfg = self.get_config(config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', '实例不存在', 404)
+        try:
+            days = max(3, min(int(request.GET.get('days', 7) or 7), 30))
+        except ValueError:
+            return self.err('BAD_PARAM', 'days 必须是 3~30 的整数')
+        td = timezone.now()
+        fd = td - timedelta(days=days)
+        with _ts_cursor() as cur:
+            if cur is None:
+                return self.err('TSDB_DOWN', '时序库不可用', 502)
+            cands = list(window_by_digest(cur, cfg.id, fd, td, limit=200))
+            series = hourly_series(cur, cfg.id, fd, td, cands)
+            texts = texts_for(cur, cfg.id, cands, fd)
+        tz = timezone.get_current_timezone()
+        out = []
+        for d in cands:
+            r = detect_daily(series.get(d, []), days, tz)
+            if r is None:
+                continue
+            text, example = texts.get(d, (None, None))
+            r.update({'digest': d, 'sql_text': text or example})
+            out.append(r)
+        out.sort(key=lambda r: -(r['latest_vs_median'] or 0))
+        return self.ok({'days': days, 'items': out,
+                        'rule': {'hour_share': 0.8, 'max_hours': 6, 'day_share': 0.7}})
 
 
 # ============================================================
