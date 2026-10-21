@@ -69,46 +69,65 @@ class SlowQueryRecord:
 # ==========================================
 
 class MySQLSlowQueryParser:
-    """MySQL 慢查询日志解析器"""
-    
-    # MySQL 慢查询日志格式正则
-    SLOW_QUERY_PATTERN = re.compile(
-        r'# Time: (\d{6}\s+\d{1,2}:\d{2}:\d{2})\n'
-        r'# User@Host: ([^\[]+)\[@([^\]]+)\]\s+Id:\s+(\d+)\n'
-        r'# Query_time: (\d+\.\d+)\s+Lock_time: (\d+\.\d+)\s+'
-        r'Rows_sent: (\d+)\s+Rows_examined: (\d+)\n'
-        r'(.*?)(?=\n# Time:|\Z)',
-        re.DOTALL | re.MULTILINE
-    )
-    
+    """MySQL 慢查询日志解析器（5.6 / 5.7 / 8.0 / TXSQL 格式）。
+
+    T-11：原实现的正则只认 5.6 的 ``# Time: 260101 12:00:00`` 与 ``user[@host]`` 写法，
+    对 MySQL 8 日志（ISO 时间 + ``user[user] @ host [ip]  Id: n``）一条都解析不出来。
+    现按 ``# Query_time:`` 行切分条目，时间行与 User@Host 行都可缺省；
+    ``use db;`` 与 ``SET timestamp=...;`` 是日志写入器附加的，不算 SQL 本体。
+    """
+
+    _QT_RE = re.compile(
+        r'#\s*Query_time:\s*([\d.]+)\s+Lock_time:\s*([\d.]+)\s+'
+        r'Rows_sent:\s*(\d+)\s+Rows_examined:\s*(\d+)')
+    _USER_RE = re.compile(r'#\s*User@Host:\s*([^\[\s]+)')
+    _USE_RE = re.compile(r'^use\s+`?([\w$]+)`?\s*;\s*$', re.I)
+    _SET_TS_RE = re.compile(r'^SET\s+timestamp\s*=\s*\d+\s*;\s*$', re.I)
+
     def __init__(self, slow_query_log_content: str):
-        self.content = slow_query_log_content
-    
+        self.content = slow_query_log_content or ''
+
     def parse(self) -> List[SlowQueryRecord]:
-        """解析慢查询日志"""
         records = []
-        
-        matches = self.SLOW_QUERY_PATTERN.finditer(self.content)
-        for match in matches:
-            query_time = float(match.group(5))
-            lock_time = float(match.group(6))
-            rows_sent = int(match.group(7))
-            rows_examined = int(match.group(8))
-            query_text = match.group(9).strip()
-            
-            if query_text.upper().startswith('USE '):
-                # 跳过 USE 语句
+        current, sql_lines, db = None, [], ''
+
+        def flush():
+            if current is None:
+                return
+            text = '\n'.join(sql_lines).strip()
+            if text and not text.upper().startswith('USE '):
+                rec = SlowQueryRecord(
+                    query_text=text,
+                    execution_time_ms=current[0] * 1000,
+                    lock_time_ms=current[1] * 1000,
+                    rows_sent=current[2], rows_examined=current[3], db_name=db)
+                records.append(rec)
+
+        for line in self.content.splitlines():
+            m = self._QT_RE.match(line)
+            if m:
+                flush()
+                current = (float(m.group(1)), float(m.group(2)), int(m.group(3)), int(m.group(4)))
+                sql_lines = []
                 continue
-                
-            record = SlowQueryRecord(
-                query_text=query_text,
-                execution_time_ms=query_time * 1000,  # 转换为毫秒
-                lock_time_ms=lock_time * 1000,
-                rows_sent=rows_sent,
-                rows_examined=rows_examined,
-            )
-            records.append(record)
-        
+            if line.startswith('#'):
+                if line.startswith('# Time:') or line.startswith('# User@Host:'):
+                    flush()
+                    current, sql_lines = None, []
+                continue
+            if current is None:
+                continue
+            um = self._USE_RE.match(line.strip())
+            if um:
+                db = um.group(1)
+                continue
+            if self._SET_TS_RE.match(line.strip()):
+                continue
+            # 服务端启动横幅（Version / Tcp port / Time Id Command Argument）不属于任何条目
+            if line.startswith(('/usr/', 'Tcp port:', 'Time ')) and not sql_lines:
+                continue
+            sql_lines.append(line)
+        flush()
         return records
 
 

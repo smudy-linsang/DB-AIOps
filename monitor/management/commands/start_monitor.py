@@ -514,10 +514,23 @@ class Command(BaseCommand):
 
         slow_queries/innodb_deadlocks 是累计计数器, 绝对值无法判"突增";
         增量进 MonitorLog 后供 L3 检测与验证回路使用。计数器回绕(重启)跳过一轮。
+
+        T-15：qps / tps 原为"自启动以来累计 / uptime"，实例跑一个月后几乎是直线；
+        现按真实间隔秒数算当前速率 qps_current / tps_current。
+        T-03：TDSQL groupshard 的计数器若不是按 set 求和的（透传不可用），两轮可能来自
+        不同 set，差分没有意义 —— 不产出增量，避免把垃圾喂给检测与验证回路。
         """
+        import time as _time
         if not hasattr(self, '_counter_prev'):
             self._counter_prev = {}
+        if data.get('tdsql_mode') == 'groupshard' and data.get('tdsql_counter_basis') != 'per_set_sum':
+            from monitor import degrade
+            degrade.note('monitor.counter_deltas_unrouted',
+                         f'{config.name}: groupshard 计数器未按 set 求和，跳过增量计算')
+            self._counter_prev.pop(config.id, None)
+            return
         prev = self._counter_prev.setdefault(config.id, {})
+        now = _time.time()
         for key, out_key in (('slow_queries', 'slow_queries_delta'),
                              ('innodb_deadlocks', '_deadlock_delta_5min')):
             cur = data.get(key)
@@ -526,6 +539,17 @@ class Command(BaseCommand):
                 if p is not None and cur >= p:
                     data[out_key] = cur - p
                 prev[key] = cur
+        q = data.get('questions_total')
+        t = (data.get('com_commit_total'), data.get('com_rollback_total'))
+        last = prev.get('_rate')
+        if isinstance(q, (int, float)) and all(isinstance(x, (int, float)) for x in t):
+            tx = t[0] + t[1]
+            if last is not None:
+                dt = now - last[0]
+                if dt > 0 and q >= last[1] and tx >= last[2]:
+                    data['qps_current'] = round((q - last[1]) / dt, 2)
+                    data['tps_current'] = round((tx - last[2]) / dt, 2)
+            prev['_rate'] = (now, q, tx)
 
     # ================= Phase 7A-07/08: SQL 统计快照 + 计划采集 =================
     _SQLSTAT_TOPN = 100

@@ -23,7 +23,9 @@ TDSQL 检查器（2026-07 基于真实环境验证全面重写）
   避免逐个 LIKE 查询造成几十次往返
 - groupshard 模式下 SHOW GLOBAL STATUS 等语句由 proxy 路由到某一个后端 set,
   返回的是单 set 的值而非全集群聚合, 不同轮次可能落在不同 set 上
-  (实测同一实例两轮 slow_queries 分别为 10 和 0)。跨 set 聚合是后续增强点。
+  (实测同一实例两轮 slow_queries 分别为 10 和 0)。
+  → 已改为 /*sets:allsets*/ 透传按 set 取计数器后求和（TDSQL_SLOWSQL_DESIGN.md §2.4，
+    需内网验证 V-4）；透传不可用时 tdsql_counter_basis='single_set' 并留痕。
 """
 
 import re
@@ -31,6 +33,7 @@ import time
 
 import pymysql
 
+from monitor import degrade
 from monitor.checkers.base import BaseDBChecker
 
 # ── 连接参数 ──────────────────────────────────────────────
@@ -41,6 +44,17 @@ READ_TIMEOUT_SEC = 30
 RETRY_BACKOFF_SEC = 2
 
 # 节点描述解析: "10.206.0.4:4002@100@0[@0]" → (ip, port, 其余)
+# groupshard 下需要按 set 求和的累计计数器 / 瞬时量
+_SUM_VARS = (
+    'Questions', 'Com_commit', 'Com_rollback', 'Slow_queries',
+    'Innodb_rows_read', 'Innodb_rows_inserted', 'Innodb_rows_updated', 'Innodb_rows_deleted',
+    'Innodb_data_reads', 'Innodb_data_writes', 'Innodb_data_fsyncs', 'Innodb_os_log_written',
+    'Innodb_log_waits', 'Innodb_deadlocks', 'Created_tmp_tables', 'Created_tmp_disk_tables',
+    'Bytes_received', 'Bytes_sent',
+)
+# 只按 set 展示、不求和：连接数要和"单个 set 的 max_connections"比，求和后再比会虚高
+_PER_SET_ONLY_VARS = ('Uptime', 'Threads_connected', 'Threads_running')
+
 _NODE_RE = re.compile(r'^(?P<ip>[\d.]+):(?P<port>\d+)')
 _IDC_RE = re.compile(r'@(IDC[^@;,\s"]+)')
 
@@ -108,6 +122,25 @@ class TDSQLChecker(BaseDBChecker):
         gstatus = self._fetch_kv(conn, "SHOW GLOBAL STATUS")
         gvars = self._fetch_kv(conn, "SHOW GLOBAL VARIABLES")
 
+        # ── proxy 网关拓扑 (独立连接, 隔离断连风险) ──
+        # 提前到计数器计算之前：groupshard 下 SHOW GLOBAL STATUS 只落在 proxy 随机路由到的
+        # 一个 set（文件头已记录实测现象），计数器必须改为按 set 透传后求和（TDSQL_SLOWSQL_DESIGN.md §2.4）
+        topo = self._collect_proxy_topology(config)
+        counter_basis = 'single'
+        per_set_counters = {}
+        set_rates = None
+        if topo['mode'] == 'groupshard':
+            per_set_counters = self._allsets_status(conn)
+            if per_set_counters:
+                counter_basis = 'per_set_sum'
+                set_rates = self._sum_set_rates(per_set_counters)
+                for var in _SUM_VARS:
+                    gstatus[var] = sum(_i(c, var) for c in per_set_counters.values())
+            else:
+                counter_basis = 'single_set'
+                degrade.note('tdsql.counter_basis',
+                             'groupshard 实例透传 SHOW GLOBAL STATUS 不可用，计数器只来自某一个 set')
+
         # ── 基础信息 ─────────────────────────────
         version = gvars.get('version', '')
         uptime = _i(gstatus, 'Uptime')
@@ -126,16 +159,20 @@ class TDSQLChecker(BaseDBChecker):
                 row = cur.fetchone()
                 if row:
                     ssl_cipher = row.get('Value', '')
-        except Exception:
-            pass
+        except Exception as e:
+            degrade.note('tdsql.ssl_cipher', 'Ssl_cipher 读取失败', e)
         have_ssl = gvars.get('have_ssl', 'DISABLED')
 
         # ── 性能指标 (累计值 / uptime, 与平台其他 checker 口径一致) ──
         questions = _i(gstatus, 'Questions')
-        qps = round(questions / uptime, 2) if uptime > 0 else 0
-        tps = round(
-            (_i(gstatus, 'Com_commit') + _i(gstatus, 'Com_rollback')) / uptime, 2
-        ) if uptime > 0 else 0
+        if set_rates is not None:
+            # 各 set 的 uptime 不同：先按 set 求"累计 / uptime"，再求和
+            qps, tps = set_rates
+        else:
+            qps = round(questions / uptime, 2) if uptime > 0 else 0
+            tps = round(
+                (_i(gstatus, 'Com_commit') + _i(gstatus, 'Com_rollback')) / uptime, 2
+            ) if uptime > 0 else 0
 
         # ── InnoDB 缓冲池 ─────────────────────────
         bp_size_mb = round(_i(gvars, 'innodb_buffer_pool_size') / 1024 / 1024, 2)
@@ -209,16 +246,16 @@ class TDSQLChecker(BaseDBChecker):
 
         # ── 表格型指标 (每项独立容错) ───────────────
         database_sizes = self._database_sizes(conn)
-        session_list = self._session_list(conn)
-        locks = self._locks(conn)
+        # groupshard 下会话、锁、Top SQL 同样只落在 proxy 路由到的一个 set：
+        # 透传可用时（counter_basis 已证实）改为按 set 取，结果带 set_name
+        pt = '/*sets:allsets*/' if counter_basis == 'per_set_sum' else ''
+        session_list = self._session_list(conn, pt)
+        locks = self._locks(conn, pt)
         slow_queries = _i(gstatus, 'Slow_queries')
         long_query_time = _f(gvars, 'long_query_time')
-        top_sql_by_latency = self._top_sql(conn)
+        top_sql_by_latency = self._top_sql(conn, pt)
         unused_indexes = self._unused_indexes(conn)
         table_size_top20, object_summary = self._object_stats(conn)
-
-        # ── proxy 网关拓扑 (独立连接, 隔离断连风险) ──
-        topo = self._collect_proxy_topology(config)
 
         cluster_health = topo['cluster_health']
         cluster_issues = topo['cluster_issues']
@@ -282,6 +319,17 @@ class TDSQLChecker(BaseDBChecker):
 
             # 会话详情
             "session_list": session_list,
+
+            # 计数器口径（T-03 / T-15）：qps / tps 为自启动以来的均值；当前速率由
+            # start_monitor 用 *_total 的增量计算（qps_current / tps_current）
+            "tdsql_counter_basis": counter_basis,
+            "tdsql_set_counters": {
+                s: {k: _i(c, k) for k in ('Questions', 'Slow_queries', 'Threads_connected',
+                                          'Threads_running')}
+                for s, c in per_set_counters.items()},
+            "questions_total": questions,
+            "com_commit_total": _i(gstatus, 'Com_commit'),
+            "com_rollback_total": _i(gstatus, 'Com_rollback'),
 
             # SQL 统计
             "slow_queries_total": slow_queries,
@@ -400,6 +448,37 @@ class TDSQLChecker(BaseDBChecker):
         }
 
     # ==================================================
+    # groupshard：按 set 透传取计数器
+    # ==================================================
+    def _allsets_status(self, conn):
+        """/*sets:allsets*/ SHOW GLOBAL STATUS → {set_name: {var: value}}；不可用返回 {}。"""
+        names = ', '.join(f"'{v}'" for v in _SUM_VARS + _PER_SET_ONLY_VARS)
+        try:
+            with conn.cursor() as cur:
+                cur.execute(f"/*sets:allsets*/SHOW GLOBAL STATUS WHERE Variable_name IN ({names})")
+                rows = cur.fetchall() or []
+        except Exception as e:
+            degrade.note('tdsql.allsets_status', '透传 SHOW GLOBAL STATUS 失败', e)
+            return {}
+        out = {}
+        for r in rows:
+            set_name = r.get('info') or r.get('INFO')
+            if not set_name:
+                return {}   # 没有 info 列：透传未生效
+            out.setdefault(str(set_name), {})[r.get('Variable_name')] = r.get('Value')
+        return out
+
+    @staticmethod
+    def _sum_set_rates(per_set):
+        qps = tps = 0.0
+        for c in per_set.values():
+            up = _i(c, 'Uptime')
+            if up > 0:
+                qps += _i(c, 'Questions') / up
+                tps += (_i(c, 'Com_commit') + _i(c, 'Com_rollback')) / up
+        return round(qps, 2), round(tps, 2)
+
+    # ==================================================
     # 标准 MySQL 接口辅助
     # ==================================================
     def _fetch_kv(self, conn, sql):
@@ -414,7 +493,8 @@ class TDSQLChecker(BaseDBChecker):
                 cur.execute(sql)
                 row = cur.fetchone()
                 return list(row.values())[0] if row else None
-        except Exception:
+        except Exception as e:
+            degrade.note('tdsql.scalar', sql[:60], e)
             return None
 
     def _master_status(self, conn):
@@ -424,8 +504,8 @@ class TDSQLChecker(BaseDBChecker):
                 row = cur.fetchone()
                 if row:
                     return row.get('File', 'N/A'), row.get('Position', 0)
-        except Exception:
-            pass
+        except Exception as e:
+            degrade.note('tdsql.master_status', 'SHOW MASTER STATUS 失败（权限或 proxy 不支持）', e)
         return 'N/A', 0
 
     def _database_sizes(self, conn):
@@ -447,14 +527,16 @@ class TDSQLChecker(BaseDBChecker):
                     "size_mb": float(r['size_mb'] or 0),
                     "table_count": int(r['table_count'] or 0),
                 } for r in cur.fetchall()]
-        except Exception:
+        except Exception as e:
+            # 返回空列表会在界面上显示为"无数据"，必须留痕区分"采集不可用"与"确实没有"
+            degrade.note('tdsql.database_sizes', '采集失败，界面将显示为空', e)
             return []
 
-    def _session_list(self, conn):
+    def _session_list(self, conn, prefix=''):
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT id, user, host, db, command, time, state, info
+                cur.execute(prefix + """
+                    SELECT id, user, host, db, command, time, state, info AS sql_info
                     FROM information_schema.processlist
                     WHERE command != 'Daemon'
                     ORDER BY time DESC
@@ -469,19 +551,24 @@ class TDSQLChecker(BaseDBChecker):
                     "time": int(r['time']) if r['time'] else 0,
                     "time_seconds": int(r['time']) if r['time'] else 0,
                     "state": r['state'] or 'N/A',
-                    "info": (r['info'] or 'N/A')[:200],
+                    "info": (r['sql_info'] or 'N/A')[:200],
+                    # 透传结果的 info 列是 set 名（官方文档），SQL 原文已改名为 sql_info 避免冲突
+                    "set_name": r.get('info') if prefix else None,
                 } for r in cur.fetchall()]
-        except Exception:
+        except Exception as e:
+            # 返回空列表会在界面上显示为"无数据"，必须留痕区分"采集不可用"与"确实没有"
+            degrade.note('tdsql.session_list', '采集失败，界面将显示为空', e)
             return []
 
-    def _locks(self, conn):
+    def _locks(self, conn, prefix=''):
         try:
             with conn.cursor() as cur:
-                cur.execute("""
+                cur.execute(prefix + """
                     SELECT
                         b.trx_mysql_thread_id AS blocker_thread,
                         r.trx_mysql_thread_id AS blocked_thread,
-                        TIMESTAMPDIFF(SECOND, r.trx_started, NOW()) AS wait_sec
+                        TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS wait_sec,
+                        TIMESTAMPDIFF(SECOND, r.trx_started, NOW()) AS trx_age_sec
                     FROM performance_schema.data_lock_waits w
                     INNER JOIN information_schema.innodb_trx b
                         ON w.BLOCKING_ENGINE_TRANSACTION_ID = b.trx_id
@@ -491,17 +578,25 @@ class TDSQLChecker(BaseDBChecker):
                 return [{
                     "blocker_id": str(r['blocker_thread']),
                     "waiter_id": str(r['blocked_thread']),
+                    # T-14：等待秒取 trx_wait_started（与哨兵侧 BUG-123 同口径），事务年龄单列
                     "seconds": int(r['wait_sec'] or 0),
+                    "trx_age_seconds": int(r.get('trx_age_sec') or 0),
+                    "set_name": r.get('info') if prefix else None,
                 } for r in cur.fetchall()]
-        except Exception:
+        except Exception as e:
+            # 返回空列表会在界面上显示为"无数据"，必须留痕区分"采集不可用"与"确实没有"
+            degrade.note('tdsql.locks', '采集失败，界面将显示为空', e)
             return []
 
-    def _top_sql(self, conn):
-        """Top SQL by latency; 集中式实例 digest 可能为空 → 返回 []"""
+    def _top_sql(self, conn, prefix=''):
+        """Top SQL by latency; 集中式实例 digest 可能为空 → 返回 []。
+
+        prefix='/*sets:allsets*/' 时各 set 分别返回 Top 20，这里按 DIGEST 跨 set 合并后再取 Top 20。
+        """
         try:
             with conn.cursor() as cur:
-                cur.execute("""
-                    SELECT DIGEST_TEXT AS sql_text, SCHEMA_NAME AS schema_name,
+                cur.execute(prefix + """
+                    SELECT DIGEST AS digest, DIGEST_TEXT AS sql_text, SCHEMA_NAME AS schema_name,
                            COUNT_STAR AS exec_count,
                            ROUND(SUM_TIMER_WAIT/1000000000000, 4) AS total_latency_sec,
                            ROUND(AVG_TIMER_WAIT/1000000000000, 6) AS avg_latency_sec,
@@ -514,6 +609,9 @@ class TDSQLChecker(BaseDBChecker):
                     WHERE SCHEMA_NAME IS NOT NULL AND COUNT_STAR > 0
                     ORDER BY SUM_TIMER_WAIT DESC LIMIT 20
                 """)
+                rows = cur.fetchall()
+                if prefix:
+                    rows = self._merge_digest_rows(rows)
                 return [{
                     "sql_text": (r['sql_text'] or 'N/A')[:200],
                     "schema_name": r['schema_name'] or 'N/A',
@@ -525,9 +623,39 @@ class TDSQLChecker(BaseDBChecker):
                     "rows_sent": int(r['rows_sent'] or 0),
                     "errors": int(r['errors'] or 0),
                     "no_index_used": int(r['no_index_used'] or 0),
-                } for r in cur.fetchall()]
-        except Exception:
+                    "set_count": r.get('_set_count'),
+                } for r in rows]
+        except Exception as e:
+            # 返回空列表会在界面上显示为"无数据"，必须留痕区分"采集不可用"与"确实没有"
+            degrade.note('tdsql.top_sql', '采集失败，界面将显示为空', e)
             return []
+
+    @staticmethod
+    def _merge_digest_rows(rows):
+        merged = {}
+        for r in rows:
+            key = (r.get('digest') or r.get('sql_text'), r.get('schema_name'))
+            m = merged.get(key)
+            if m is None:
+                m = merged[key] = dict(r)
+                m['_sets'] = set()
+                for k in ('exec_count', 'total_latency_sec', 'rows_examined', 'rows_sent',
+                          'errors', 'no_index_used'):
+                    m[k] = 0
+                m['max_latency_sec'] = 0
+            for k in ('exec_count', 'total_latency_sec', 'rows_examined', 'rows_sent',
+                      'errors', 'no_index_used'):
+                m[k] += float(r.get(k) or 0)
+            m['max_latency_sec'] = max(float(m['max_latency_sec'] or 0), float(r.get('max_latency_sec') or 0))
+            if r.get('info'):
+                m['_sets'].add(r['info'])
+        out = []
+        for m in merged.values():
+            m['avg_latency_sec'] = m['total_latency_sec'] / m['exec_count'] if m['exec_count'] else 0
+            m['_set_count'] = len(m.pop('_sets'))
+            out.append(m)
+        out.sort(key=lambda m: m['total_latency_sec'], reverse=True)
+        return out[:20]
 
     def _unused_indexes(self, conn):
         try:
@@ -550,7 +678,9 @@ class TDSQLChecker(BaseDBChecker):
                     "table_name": r['table_name'],
                     "index_name": r['index_name'],
                 } for r in cur.fetchall()]
-        except Exception:
+        except Exception as e:
+            # 返回空列表会在界面上显示为"无数据"，必须留痕区分"采集不可用"与"确实没有"
+            degrade.note('tdsql.unused_indexes', '采集失败，界面将显示为空', e)
             return []
 
     def _object_stats(self, conn):
@@ -578,8 +708,8 @@ class TDSQLChecker(BaseDBChecker):
                 "size_mb": float(r['size_mb'] or 0),
                 "rows": int(r['table_rows'] or 0),
             } for r in rows[:20]]
-        except Exception:
-            pass
+        except Exception as e:
+            degrade.note('tdsql.object_stats', '对象统计采集失败', e)
         return table_size_top20, object_summary
 
     # ==================================================
@@ -628,10 +758,12 @@ class TDSQLChecker(BaseDBChecker):
                     if state['conn'] is not None:
                         try:
                             state['conn'].close()
-                        except Exception:
-                            pass
+                        except Exception as ce:
+                            degrade.note('tdsql.proxy_conn_close', '网关连接关闭失败', ce)
                     state['conn'] = None
-                except Exception:
+                except Exception as e:
+                    # 694 等"网关不支持该命令"属预期，留痕但不中断拓扑采集
+                    degrade.note('tdsql.proxy_cmd', cmd, e)
                     return None
             return None
 
@@ -794,7 +926,7 @@ class TDSQLChecker(BaseDBChecker):
             if state['conn'] is not None:
                 try:
                     state['conn'].close()
-                except Exception:
-                    pass
+                except Exception as e:
+                    degrade.note('tdsql.proxy_conn_close', '网关连接关闭失败', e)
 
         return result
