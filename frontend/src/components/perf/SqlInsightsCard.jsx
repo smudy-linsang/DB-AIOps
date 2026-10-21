@@ -47,7 +47,8 @@ export default function SqlInsightsCard({ configId, range, refreshKey, onOpenSql
   }, [configId, mode, baseline, days, windowKey, refreshKey]);
 
   const topNotice = top && basisNotice(top);
-  const regNotice = reg && basisNotice({ basis_warning: reg.basis_warning });
+  const regNotice = reg && (basisNotice({ basis_warning: reg.basis_warning })
+    || (reg.baseline_note ? { type: 'warning', text: reg.baseline_note } : null));
 
   return (
     <Card size="small" style={{ marginTop: 8 }}

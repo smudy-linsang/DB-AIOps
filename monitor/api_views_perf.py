@@ -1220,6 +1220,9 @@ class SqlRegressionView(PerfBaseView):
             'thresholds': {'avg_ratio': appconf.get('SQL_REGRESSION_AVG_RATIO'),
                            'min_delta_ms': appconf.get('SQL_REGRESSION_MIN_DELTA_MS')},
             'basis_warning': basis_warning(cfg, sets) if cfg.db_type == 'tdsql' else None,
+            # 基线窗口整段没有数据（采集尚未覆盖、时序库保留期外）时，"新增"判定没有意义
+            'baseline_note': ('基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），'
+                              '「新增」判定不可信' if cur_aggs and not base_aggs else None),
         })
 
     @staticmethod

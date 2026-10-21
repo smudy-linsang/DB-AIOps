@@ -10,6 +10,7 @@ BUG-124（Oracle 未采 sql_text）都属于"语法没错但语义错"，只有�
 跳过策略：未提供对应 DSN 环境变量时 skip，本地开发不受影响。
 """
 import os
+import re
 import unittest
 from urllib.parse import urlparse
 
@@ -224,6 +225,100 @@ class MySQLDialectTests(TransactionTestCase):
             drop.commit()
         finally:
             drop.close()
+
+
+@tag('dialect')
+@unittest.skipUnless(MYSQL_DSN, 'DIALECT_MYSQL_DSN 未设置')
+class MySQLSlowSqlDialectTests(TransactionTestCase):
+    """慢 SQL 链路在真实 MySQL 8 上（TDSQL_SLOWSQL_DESIGN.md §10 dialect 层）：
+    digest 采集与差分、直连回退的真实秒数与排序、EXPLAIN ANALYZE 的守卫与 TREE 解析。"""
+
+    def setUp(self):
+        self.cfg = _cfg_from_dsn(MYSQL_DSN, 'mysql', 'dialect-mysql-slowsql')
+        w = self._conn(readonly=False)
+        try:
+            c = w.cursor()
+            c.execute("DROP TABLE IF EXISTS sqlstat_probe")
+            c.execute("CREATE TABLE sqlstat_probe (id INT PRIMARY KEY, v INT, pad VARCHAR(64))")
+            c.execute("SET SESSION cte_max_recursion_depth = 100000")
+            c.execute("INSERT INTO sqlstat_probe "
+                      "WITH RECURSIVE s(n) AS (SELECT 1 UNION ALL SELECT n + 1 FROM s WHERE n < 20000) "
+                      "SELECT n, n % 97, REPEAT('x', 60) FROM s")
+            w.commit()
+        finally:
+            w.close()
+
+    def tearDown(self):
+        w = self._conn(readonly=False)
+        try:
+            w.cursor().execute("DROP TABLE IF EXISTS sqlstat_probe")
+            w.commit()
+        finally:
+            w.close()
+
+    def _conn(self, readonly=True):
+        from monitor.db_connector import DbConnector
+        return DbConnector.get_connection(self.cfg, statement_timeout_ms=10000, readonly=readonly)
+
+    def _run(self, sql, times):
+        conn = self._conn()
+        try:
+            c = conn.cursor()
+            for i in range(times):
+                c.execute(sql % (i + 1))
+                c.fetchall()
+        finally:
+            conn.close()
+
+    def test_digest_collect_delta_matches_executions(self):
+        from monitor import sqlstat_collect
+        tracker = sqlstat_collect.DeltaTracker()
+        conn = self._conn()
+        try:
+            self._run('SELECT id FROM sqlstat_probe WHERE v = %d', 2)
+            sqlstat_collect.collect(conn.cursor(), self.cfg, {}, tracker)   # 建立基线
+            self._run('SELECT id FROM sqlstat_probe WHERE v = %d', 7)
+            rows, meta = sqlstat_collect.collect(conn.cursor(), self.cfg, {}, tracker)
+        finally:
+            conn.close()
+        mine = [r for r in rows if 'sqlstat_probe' in (r.get('sql_text_sample') or '')
+                and 'WHERE' in (r.get('sql_text_sample') or '').upper()]
+        self.assertEqual(len(mine), 1, rows)
+        self.assertEqual(mine[0]['exec_delta'], 7, '增量 = 两轮之间的真实执行次数')
+        self.assertGreater(mine[0]['reads_delta'], 7 * 19000, '每次全表扫描约 2 万行')
+        self.assertEqual(meta['basis'], sqlstat_collect.BASIS_SINGLE)
+
+    def test_live_fallback_reports_real_seconds_and_sorts_by_total(self):
+        from unittest import mock
+        from monitor.slow_query_engine import SlowQueryEngine
+        self._run('SELECT COUNT(*) FROM sqlstat_probe WHERE pad LIKE CONCAT(%d, "%%")', 4)
+        self._run('SELECT id FROM sqlstat_probe WHERE id = %d', 50)
+        eng = SlowQueryEngine(self.cfg)
+        with mock.patch.object(SlowQueryEngine, '_from_sqlstat', return_value=None):
+            rows = eng.collect_slow_queries_from_db(time_range='1h', limit=100)
+        self.assertEqual(eng.last_meta['basis'], 'cumulative')
+        probe = [r for r in rows if 'sqlstat_probe' in (r.get('query') or '')]
+        self.assertGreaterEqual(len(probe), 2, rows)
+        scan = next(r for r in probe if 'LIKE' in r['query'].upper())
+        pk = next(r for r in probe if 'COUNT' not in r['query'].upper()
+                  and re.search(r'`?id`?\s*=', r['query'], re.I))
+        self.assertGreater(scan['total_time_sec'], pk['total_time_sec'],
+                           '全表扫描 4 次的总耗时应大于主键点查 50 次')
+        self.assertLess(rows.index(scan), rows.index(pk), '按总耗时排序')
+        self.assertLess(scan['avg_ms'] / 1000, 5, '单位是真实秒 / 毫秒，不是放大 1000 倍')
+
+    def test_explain_analyze_tree_and_guard(self):
+        from monitor import sql_explain
+        out = sql_explain.run(self.cfg, 'SELECT COUNT(*) FROM sqlstat_probe WHERE v = 3', timeout_ms=5000)
+        self.assertTrue(out['summary']['parsed'], out.get('plan_text'))
+        self.assertIn('sqlstat_probe', out['plan_text'])
+        self.assertTrue(out['tree']['op'])
+        self.assertGreater(out['summary']['total_ms'], 0)
+        self.assertFalse(out['summary']['truncated'])
+        for bad in ('UPDATE sqlstat_probe SET v = 1', 'SELECT * FROM sqlstat_probe FOR UPDATE',
+                    'SELECT 1; DROP TABLE sqlstat_probe'):
+            with self.assertRaises(sql_explain.ExplainRefused, msg=bad):
+                sql_explain.run(self.cfg, bad, timeout_ms=1000)
 
 
 @tag('dialect')

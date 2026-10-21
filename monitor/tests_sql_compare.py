@@ -157,6 +157,14 @@ class RegressionAndPeriodicApiTests(TestCase):
         self.assertNotIn('steady', by, '稳定项不返回')
         self.assertEqual(data['counts']['stable'], 1)
         self.assertEqual(data['baseline']['kind'], 'day')
+        self.assertIsNone(data['baseline_note'])
+
+    def test_regression_empty_baseline_is_flagged(self):
+        self._ins(timezone.now() - timedelta(minutes=10), 'only_now', 3, 30)
+        r = self.client.get(f'/api/v1/databases/{self.cfg.id}/perf/sql-regression/?window=1h&baseline=week')
+        data = r.json()['data']
+        self.assertEqual(data['counts']['new'], 1)
+        self.assertIn('新增', data['baseline_note'])
 
     def test_regression_scope(self):
         r = self.client.get(f'/api/v1/databases/{self.other.id}/perf/sql-regression/')
