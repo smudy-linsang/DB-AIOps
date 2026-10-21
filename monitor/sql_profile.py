@@ -96,7 +96,8 @@ def profile(agg, slow_avg_ms=None, mysql_family=True):
         p['breakdown']['cpu_hint'] = (
             'CPU 时间未采集：需在目标库开启 performance_schema 的 events_statements_cpu consumer '
             "（UPDATE performance_schema.setup_consumers SET ENABLED='YES' "
-            "WHERE NAME='events_statements_cpu'），开启后才能拆分 CPU 与 IO/等待")
+            "WHERE NAME='events_statements_cpu'）；该设置重启后失效，持久化需在 my.cnf 配置 "
+            'performance-schema-consumer-events-statements-cpu=ON。开启后才能拆分 CPU 与 IO/等待')
     p['findings'] = findings(p)
     return p
 

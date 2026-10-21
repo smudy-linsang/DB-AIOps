@@ -747,9 +747,17 @@ def _raw_sql_text(config_id, digest):
                 "SELECT sql_text, db_name FROM session_sample WHERE db_config_id=%s AND sql_digest=%s "
                 "AND sql_text IS NOT NULL AND sql_text <> '' ORDER BY time DESC LIMIT 1",
                 (config_id, digest))
-            row = cur.fetchone()
-            if row:
-                return row[0], row[1]
+            ash = cur.fetchone()
+            # sql_example = performance_schema 的 QUERY_SAMPLE_TEXT（带字面量，最长 2000 字符）；
+            # ASH 原文在采集时截到 500 字符，长 SQL 截断后无法 EXPLAIN —— 取两者中更长的那条
+            cur.execute(
+                "SELECT sql_example, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
+                "AND sql_example IS NOT NULL AND sql_example <> '' ORDER BY time DESC LIMIT 1",
+                (config_id, digest))
+            ex = cur.fetchone()
+            literal = max([r for r in (ash, ex) if r and r[0]], key=lambda r: len(r[0]), default=None)
+            if literal:
+                return literal[0], literal[1]
             cur.execute(
                 "SELECT sql_text_sample, db_name FROM sql_stat WHERE db_config_id=%s AND sql_digest=%s "
                 "AND sql_text_sample IS NOT NULL ORDER BY time DESC LIMIT 1", (config_id, digest))
@@ -807,6 +815,10 @@ class SqlDetailView(PerfBaseView):
             wc_rows = cur.fetchall()
             wc_total = sum(a for _, a in wc_rows) or 1
             breakdown = {w: round(a / wc_total, 3) for w, a in wc_rows}
+            # 耗时构成（TDSQL_SLOWSQL_DESIGN.md §5.1/§5.2）：窗口内增量 → 每次执行平均花在哪 + 按 set 分布
+            from monitor.sqlstat_query import window_by_digest, window_by_set
+            agg = window_by_digest(cur, cfg.id, fd, td, limit=1, digests=[digest]).get(digest)
+            by_set = window_by_set(cur, cfg.id, fd, td, [digest]).get(digest, {})
         sql_text, _dbn = _raw_sql_text(cfg.id, digest)
         plans_qs = list(SqlPlan.objects.filter(config=cfg, sql_digest=digest)
                         .order_by('-captured_at')[:10])
@@ -821,25 +833,36 @@ class SqlDetailView(PerfBaseView):
             if newer.plan_hash != older.plan_hash:
                 plan_changed_at = newer.captured_at
                 break
-        # 优化建议 (规则式, 失败静默)
-        suggestions = []
+        from monitor import appconf
+        from monitor.sql_profile import profile as _profile, set_distribution
+        family = cfg.db_type in ('mysql', 'tdsql', 'gbase')
+        prof = _profile(agg or {}, slow_avg_ms=appconf.get('SLOW_SQL_AVG_MS'), mysql_family=family)
+        dist = set_distribution(by_set) if (cfg.db_type == 'tdsql' and by_set) else None
+        collect = {}
+        basis_warn = None
+        if cfg.db_type == 'tdsql':
+            from monitor.sqlstat_query import basis_warning, latest_collect_data
+            collect = latest_collect_data(cfg)
+            basis_warn = basis_warning(cfg, set(by_set), collect)
+        # 优化建议（T-05/T-06：sql_advisor 替代原 IndexAdvisor；带实测画像与 TDSQL 分片元数据）
+        advice, suggestions = [], []
         if sql_text:
             try:
-                from monitor.index_advisor import IndexAdvisor
-                from monitor.sqlfingerprint import normalize
-                import dataclasses
-                adv = IndexAdvisor()
-                # advisor 契约: query 需参数化 (col = ?); 归一化把字面量转 ?,
-                # 并去掉反引号/方括号 (digest 文本形如 `uid` = ?, \w+ 匹配不到)
-                norm = normalize(sql_text).replace('`', '').replace('[', '').replace(']', '')
-                for c in (adv.analyze_queries([{'query': norm, 'exec_count': 10}]) or [])[:5]:
-                    d = dataclasses.asdict(c) if dataclasses.is_dataclass(c) else None
-                    if d:
-                        d['columns'] = [col.get('name') if isinstance(col, dict) else col
-                                        for col in d.get('columns', [])]
-                    suggestions.append(d or str(c))
+                from monitor.sql_advisor import advise, parse, shard_meta_from_collect
+                existing = self._existing_indexes(cfg, parse(sql_text), _dbn)
+                res = advise(sql_text, db_type=cfg.db_type, sample_sql=sql_text, profile=prof,
+                             existing_indexes=existing, tdsql_mode=collect.get('tdsql_mode'),
+                             shard_meta=shard_meta_from_collect(collect),
+                             set_count=collect.get('tdsql_set_count'), distribution=dist)
+                advice = res['advice']
+                # 兼容旧前端字段：index_suggestions 只放可执行的索引 DDL
+                suggestions = [{'table': a['evidence'].get('table') or a['title'],
+                                'columns': a['evidence'].get('columns', []),
+                                'create_sql': a['ddl'], 'reason': a['detail']}
+                               for a in advice if a['category'] == 'index' and a.get('ddl')]
             except Exception as e:
-                logger.debug("[perf] index advisor 失败: %s", e)
+                from monitor import degrade
+                degrade.note('perf.sql_advice', '优化建议生成失败', e)
         related = []
         for inc in Incident.objects.filter(
                 config=cfg, category__in=('performance', 'lock'),
@@ -856,8 +879,56 @@ class SqlDetailView(PerfBaseView):
             'plan_changed_at': plan_changed_at,
             'plan_hash_count': len({p.plan_hash for p in plans_qs}),
             'advisor': {'index_suggestions': suggestions},
+            'advice': advice,
+            'profile': prof,
+            'set_distribution': dist,
+            'basis_warning': basis_warn,
+            'explain_analyze': {
+                'enabled': bool(appconf.get('PERF_EXPLAIN_ANALYZE_ENABLED')) and family,
+                'timeout_ms': appconf.get('PERF_EXPLAIN_ANALYZE_TIMEOUT_MS'),
+                'target_set': (dist or {}).get('hottest_set'),
+                'has_literal_sample': bool(sql_text and '?' not in sql_text),
+            },
             'related_incidents': related[:5],
         })
+
+    def _existing_indexes(self, cfg, parsed, db_name=None):
+        """从 information_schema.statistics 取涉及表的现有索引（尽力而为，3 秒预算）。"""
+        if cfg.db_type not in ('mysql', 'tdsql', 'gbase'):
+            return {}
+        tables = sorted({t['name'] for t in parsed.tables if t.get('name')})[:5]
+        if not tables:
+            return {}
+        conn = self.live_conn(cfg, timeout_ms=3000)
+        if conn is None:
+            return {}
+        out = {}
+        try:
+            cur = conn.cursor()
+            try:
+                ph = ', '.join(['%s'] * len(tables))
+                cur.execute(
+                    "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM information_schema.statistics "
+                    f"WHERE TABLE_SCHEMA = COALESCE(%s, DATABASE()) AND TABLE_NAME IN ({ph}) "
+                    "ORDER BY TABLE_NAME, INDEX_NAME, SEQ_IN_INDEX", [db_name] + tables)
+                idx = {}
+                for r in cur.fetchall():
+                    t, i, c = ((r.get('TABLE_NAME'), r.get('INDEX_NAME'), r.get('COLUMN_NAME'))
+                               if isinstance(r, dict) else r)
+                    idx.setdefault((str(t).lower(), i), []).append(c)
+                for (t, i), cols in idx.items():
+                    out.setdefault(t, []).append({'name': i, 'columns': cols})
+            finally:
+                cur.close()
+        except Exception as e:
+            from monitor import degrade
+            degrade.note('perf.existing_indexes', '读取现有索引失败，索引建议未核对已有索引', e)
+        finally:
+            try:
+                conn.close()
+            except Exception as e:
+                logger.debug("[perf] 关闭连接失败: %s", e)
+        return out
 
 
 class SqlPlanDetailView(PerfBaseView):
@@ -911,6 +982,83 @@ class SqlExplainView(PerfBaseView):
         return self.ok({'plan_hash': plan.plan_hash, 'plan_text': plan.plan_text,
                         'cost_total': plan.cost_total, 'is_current': plan.is_current,
                         'captured_at': plan.captured_at})
+
+
+class SqlExplainAnalyzeView(PerfBaseView):
+    """EXPLAIN ANALYZE：算子层耗时分解（TDSQL_SLOWSQL_DESIGN.md §5.3）。
+
+    会在目标库真实执行查询，所以：全局开关默认关闭；权限提到 tickets.execute
+    （比"查看"高一级）；语句守卫只放行单条 SELECT；只读事务 + 双重超时；
+    TDSQL 只透传到一个 set；每次执行写审计日志。
+    """
+    required_perm = Perm.TICKETS_EXECUTE
+
+    def post(self, request, config_id, digest):
+        from monitor import appconf
+        from monitor import sql_explain
+        cfg = self.get_config(config_id)
+        if not cfg:
+            return self.err('NOT_FOUND', '实例不存在', 404)
+        if not appconf.get('PERF_EXPLAIN_ANALYZE_ENABLED'):
+            return self.err('DISABLED', 'EXPLAIN ANALYZE 未开启（配置项 PERF_EXPLAIN_ANALYZE_ENABLED）', 403)
+        try:
+            body = json.loads(request.body or '{}')
+        except Exception:
+            body = {}
+        user_sql = (body.get('sql_text') or '').strip()
+        if user_sql:
+            # 与 SqlExplainView 同口径（BUG-122）：只能分析"这条" SQL
+            from monitor.sqlfingerprint import unified_digest
+            if unified_digest(cfg.db_type, None, user_sql) != digest:
+                return self.err('BAD_PARAM', '提供的 SQL 与该指纹不匹配', 400)
+        sql_text = user_sql or _raw_sql_text(cfg.id, digest)[0]
+        set_name = (body.get('set_name') or '').strip() or None
+        if cfg.db_type == 'tdsql' and set_name is None:
+            set_name = self._hottest_set(cfg, digest)
+        timeout_ms = min(int(body.get('timeout_ms') or appconf.get('PERF_EXPLAIN_ANALYZE_TIMEOUT_MS')),
+                         appconf.get('PERF_EXPLAIN_ANALYZE_TIMEOUT_MS'))
+        from monitor.models import AuditLog
+        audit = AuditLog.objects.create(
+            config=cfg, action_type='EXECUTE_SQL', risk_level='low', status='executing',
+            description=f"[性能中心] EXPLAIN ANALYZE digest={digest[:16]}"
+                        + (f" set={set_name}" if set_name else ''),
+            sql_command=f"EXPLAIN ANALYZE {(sql_text or '')[:1800]}",
+            executor=getattr(request.user, 'username', str(request.user)))
+        try:
+            result = sql_explain.run(cfg, sql_text, set_name=set_name, timeout_ms=timeout_ms)
+        except sql_explain.ExplainRefused as e:
+            audit.status = 'rejected'
+            audit.description += f' 拒绝: {e}'
+            audit.save(update_fields=['status', 'description'])
+            return self.err('REFUSED', str(e), 400)
+        except Exception as e:
+            from monitor import degrade
+            degrade.note('perf.explain_analyze', f'{cfg.db_type} EXPLAIN ANALYZE 失败', e)
+            audit.status = 'failed'
+            audit.description += f' 失败: {type(e).__name__}'
+            audit.save(update_fields=['status', 'description'])
+            return self.err('EXPLAIN_FAIL', f'目标库执行失败：{e}', 502)
+        audit.status = 'success'
+        audit.save(update_fields=['status'])
+        return self.ok(result)
+
+    def _hottest_set(self, cfg, digest):
+        """近 24 小时该 digest 耗时最多的 set（只在这个 set 上执行）。"""
+        from monitor.sqlstat_query import window_by_set
+        td = timezone.now()
+        try:
+            with _ts_cursor() as cur:
+                if cur is None:
+                    return None
+                by_set = window_by_set(cur, cfg.id, td - timedelta(hours=24), td, [digest]).get(digest, {})
+        except Exception as e:
+            from monitor import degrade
+            degrade.note('perf.hottest_set', '取热点 set 失败，EXPLAIN ANALYZE 不加透传前缀', e)
+            return None
+        named = [(s, a) for s, a in by_set.items() if s]
+        if not named:
+            return None
+        return max(named, key=lambda kv: kv[1].get('elapsed_ms', 0))[0]
 
 
 # ============================================================
