@@ -283,6 +283,7 @@ UPDATE / DELETE 的目标表与 WHERE。
 | V-10 | 端到端 | 跑 `docs/review/tdsql/workload.sql` 的负载，观察平台慢 SQL 列表、SQL 详情、退化检测 | 数值与 `/*sets:allsets*/` 手工查询一致 |
 
 对应的自动化探测脚本：`scripts/tdsql_probe.py`（只读，凭据走环境变量），一次跑完 V-1 ~ V-9 并输出结论表。
+V-10 的负载与检查步骤见 `TDSQL_INTRANET_TEST_GUIDE.md`（负载脚本 `scripts/tdsql_workload.py`，只在独立测试库内读写）。
 
 ---
 
