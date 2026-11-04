@@ -30,7 +30,7 @@ DB-AIOps 侧的 A 自动领单链已建好并推上 main，Xinchuang 侧零改�
 | 4 | `scripts/validate.sh backend --json`（本地 PostgreSQL 16） | exit_code 0：编译、系统检查、迁移漂移、依赖、文档版本、全量测试均通过 |
 | 5 | `scripts/scan_secrets.py` | 通过 |
 | 6 | 人工拉起一次新定时任务（`fire_trigger`） | 会话 `cse_01GsGootU4N5HdpqfJaWnGqk` 已启动并在约 33 秒后结束；黑板上没有新的 claims 推送，与"无待办"相符。<br>**本会话看不到那次会话的输出内容**，所以只能证明定时任务能被拉起并自行结束，不能证明它跑到了 `--next`。这一项要等测试单才能确证。 |
-| 7 | Actions 工作流 | 本报告推上 main 时会首次触发，运行结果见下方「Actions 首次运行」补记。 |
+| 7 | Actions 工作流首次运行 | 本报告推上 main（`c0d3a7e`）后自动触发 run [41852541818](https://github.com/smudy-linsang/DB-AIOps/actions/runs/41852541818)：`--dispatch` 输出「无待办, 结束」，没有拉起、没有写占用，这是当前黑板下的正确行为。有单时的拉起分支，要等 Secrets 配好后用测试单验证。 |
 
 ## 未尽事项（条件）
 
@@ -50,7 +50,3 @@ DB-AIOps 侧的 A 自动领单链已建好并推上 main，Xinchuang 侧零改�
 
 - **直推 main 的代码目前不跑 CI**：`.github/workflows/ci.yml` 只监听 `master`。本次改动已在本地跑过 unit 与 backend 两道闸，但之后每个直推 main 的成员都只有本地验证这一道闸。
 - **给 O 的线索（未核实可用性）**：Xinchuang 仓库里有 `docs/pm/O-AUTORUN.md`、`tools/o_autorun.py`、`tools/wake_o.py`，可能就是 O 回执里找不到的 WAKE-O-AUTO 定义所在，供 O 参考。
-
-## Actions 首次运行
-
-（推送后补记）
