@@ -7,7 +7,7 @@
   - 单号：DB-001 起（DB-xxx、返工 DB-xxx-Rn）；测试单 DB-TEST-xxx 不受起始单号限制
     （DB-003：全链路验收测试单事后归档，不占正式编号）。
   - 起始单号 MIN_ORDER = 4：DB-001～DB-003 由人工承接，不自动叫醒。
-  - 回执（文件名含「回执」或 receipt）不算报告：接单规矩要求先回 ETA 回执，
+  - 回执（文件名含「回执」，或独立成段的 ack / receipt）不算报告：接单规矩要求先回 ETA 回执，
     若把回执当成交付报告，单会在干活前就被判为 done。
   - 别名表与成员解析内置（来自 Xinchuang member_poller.py 的 WAKE-W-4 版）：
     DB-AIOps 的 member_poller 适配归 GorkMan（DB-003 任务 1），本脚本不依赖它。
@@ -58,7 +58,8 @@ CLAIMS = "docs/pm/claims"
 
 # DB-004 / DB-004-R1 / 测试单 DB-TEST-001（测试单不受 MIN_ORDER 限制）
 ORDER_ID_RE = re.compile(r"^(DB-(TEST-)?(\d+)(?:-R\d+)?)(?=[-_.])")
-RECEIPT_RE = re.compile(r"回执|receipt", re.I)
+# 回执不算交付报告: 「回执」或文件名中独立成段的 ack / receipt (如 DB-003-ack-O.md); feedback 等词内部不算
+RECEIPT_RE = re.compile(r"回执|(?:^|[-_.])(?:ack|receipt)(?=[-_.]|$)", re.I)
 
 # 推送自检: 允许改动的路径前缀; 测试文件只许新增
 GUARD_ALLOW = ("docs/pm/reports/", "docs/pm/claims/")
@@ -549,6 +550,9 @@ def self_test():
 
         report("DB-043-回执-A.md")
         report("DB-044-receipt-A.md")
+        report("DB-049-ack-A.md")
+        ok("ack 回执不算报告, feedback 段仍算", report_members("DB-049-ack-A.md", "DB-049") == set()
+           and report_members("DB-049-feedback-A.md", "DB-049") == {"A"})
         ok("回执不算 A 的报告", {i["order"]: i for i in evaluate(root)}["DB-043"]["state"] == "ready")
         report("DB-043-regression-A.md")
         ok("A 报告存在 -> done", {i["order"]: i for i in evaluate(root)}["DB-043"]["state"] == "done")
