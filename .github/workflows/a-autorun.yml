@@ -1,0 +1,67 @@
+# A 黑板自动领单（DB-AIOps 版，DB-003 任务 3）: 黑板有推送时检查是否有轮到 A 的单,
+# 有则拉起 A 的云端定时任务「A DB-AIOps 黑板自动领单」。移植自 Xinchuang 的同名 workflow,
+# 两仓各用各的 Secrets 与定时任务, 互不影响。本 workflow 不调用任何模型; 无活时几秒结束。
+# 提示词与链路说明见 docs/pm/A-AUTORUN-PROMPT.md。
+# 需要本仓库 Secrets: A_AUTORUN_FIRE_URL (定时任务的 Fire URL)、A_AUTORUN_TOKEN (该任务的 API 令牌)。
+# 注意: schedule 兜底只在默认分支上运行; 本仓库默认分支是 master 而黑板在 main,
+# 因此兜底只有在本文件也进入默认分支后才生效 (见 docs/pm/reports/DB-003-report-A.md)。
+name: A autorun dispatch
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "docs/pm/orders/**"
+      - "docs/pm/reports/**"
+  schedule:
+    - cron: "47 */2 * * *"   # 兜底: 补漏事件、回收超时占用 (与 Xinchuang 错开分钟)
+  workflow_dispatch:
+
+concurrency:
+  group: a-autorun-db-aiops
+  cancel-in-progress: false
+
+permissions:
+  contents: write   # 只用于推 docs/pm/claims/ 下的 dispatched 占用文件
+
+jobs:
+  dispatch:
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+
+      - name: 检查 A 的收件箱并写 dispatched 占用
+        id: inbox
+        run: |
+          git config user.name "a-autorun-db-aiops[bot]"
+          git config user.email "a-autorun@users.noreply.github.com"
+          if out=$(python3 tools/a_inbox.py --dispatch); then
+            echo "$out"
+            order=$(printf '%s' "$out" | python3 -c 'import json,sys; print(json.load(sys.stdin)["order"])')
+            echo "order=$order" >> "$GITHUB_OUTPUT"
+          else
+            echo "无待办, 结束"
+          fi
+
+      - name: 拉起 A 的定时任务
+        if: steps.inbox.outputs.order != ''
+        env:
+          FIRE_URL: ${{ secrets.A_AUTORUN_FIRE_URL }}
+          TOKEN: ${{ secrets.A_AUTORUN_TOKEN }}
+        # 不附带 text: 会话自己用 a_inbox.py --next 取单 (以 claims/ 里的 dispatched 占用为准)
+        run: |
+          echo "拉起 A 处理 ${{ steps.inbox.outputs.order }}"
+          if [ -z "$FIRE_URL" ] || [ -z "$TOKEN" ]; then
+            echo "::error::缺少 Secrets A_AUTORUN_FIRE_URL / A_AUTORUN_TOKEN"; exit 1
+          fi
+          curl -fsS -X POST "$FIRE_URL" \
+            -H "Authorization: Bearer $TOKEN" \
+            -H "anthropic-beta: experimental-cc-routine-2026-04-01" \
+            -H "anthropic-version: 2023-06-01" \
+            -H "Content-Type: application/json" \
+            -d '{}' \
+            | python3 -c 'import json,sys; d=json.load(sys.stdin); print("已拉起:", d.get("claude_code_session_url"))'
