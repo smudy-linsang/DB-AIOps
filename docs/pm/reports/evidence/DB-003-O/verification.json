@@ -1,0 +1,36 @@
+{
+  "date": "2026-11-04",
+  "adapter_tests": {
+    "run": 9,
+    "passed": 9
+  },
+  "engine_tests": {
+    "run": 92,
+    "passed": 92,
+    "not_selected": [
+      "upstream local installer repeatability",
+      "upstream portable GG/A receipt helper"
+    ]
+  },
+  "backend": {
+    "run": 571,
+    "skipped": 24,
+    "passed": 547,
+    "configuration": "external TEST.TEMPLATE=template0; scripts/validate.sh backend exit 0"
+  },
+  "remote_scan": {
+    "inbox_count": 0,
+    "jobs": 0
+  },
+  "model_execution": "synthetic only",
+  "production_actions": "unverified; GitHub API requests Forbidden",
+  "full_chain": "not run; requires GorkMan broadcaster integration",
+  "sha256": {
+    "tools/o_db_autorun.py": "5d6e507dbaf8635792950d70755606e7850538b3321bf92089ed9e0bbfdb0e24",
+    ".github/workflows/o-autorun.yml": "2e06748d058f829025a890eaae8d95c6822c5bc536964120b526063cdf83d194",
+    "tools/o-autorun/engine/o_exec_worker.py": "ae28f1f6fb1d4be9d42eaf148999ade21e230c321b22124f7eaa7ea54af49a26",
+    "tools/o-autorun/engine/o_github_coordinator.py": "17af58e84a2feb35ff7d7799770b156e5933d6bcbbbb130ecadac7eb9c227109",
+    "tools/o-autorun/engine/o_autorun.py": "22ff0c9bfeb58dca31c3b6687d88e2fe8638a4c32da9489a99657cc4d74ab661",
+    "tools/o-autorun/engine/o_usage_diagnostics.py": "5748ba73fb4a392c7b67a4e8ac5c6c2e73254ddc5d46049f00b0fa56f1f57ccc"
+  }
+}

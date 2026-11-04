@@ -1,0 +1,2 @@
+# Only the hosted coordinator's authenticated checkpoint encryption needs this.
+cryptography==50.0.0

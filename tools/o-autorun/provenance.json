@@ -1,0 +1,22 @@
+{
+  "repository": "smudy-linsang/Xinchuang_HW_QuickSizer",
+  "commit": "84a40d93e663a1844fb3500eaf921efc41b54a88",
+  "files": {
+    "o_exec_worker.py": {
+      "upstream_sha256": "118869d23a846b3a5a2d20db9e59fc2071d15e9d3aa18b79bdf59560421b6174",
+      "vendored_sha256": "ae28f1f6fb1d4be9d42eaf148999ade21e230c321b22124f7eaa7ea54af49a26"
+    },
+    "o_github_coordinator.py": {
+      "upstream_sha256": "17af58e84a2feb35ff7d7799770b156e5933d6bcbbbb130ecadac7eb9c227109",
+      "vendored_sha256": "17af58e84a2feb35ff7d7799770b156e5933d6bcbbbb130ecadac7eb9c227109"
+    },
+    "o_autorun.py": {
+      "upstream_sha256": "8a8b3a394532199f45784affddef6d6efc81061bf688de86562bc2fdcdbfe071",
+      "vendored_sha256": "22ff0c9bfeb58dca31c3b6687d88e2fe8638a4c32da9489a99657cc4d74ab661"
+    },
+    "o_usage_diagnostics.py": {
+      "upstream_sha256": "5748ba73fb4a392c7b67a4e8ac5c6c2e73254ddc5d46049f00b0fa56f1f57ccc",
+      "vendored_sha256": "5748ba73fb4a392c7b67a4e8ac5c6c2e73254ddc5d46049f00b0fa56f1f57ccc"
+    }
+  }
+}

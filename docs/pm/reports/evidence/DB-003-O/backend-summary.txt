@@ -1,0 +1,9 @@
+Ran 571 tests in 32.107s
+OK (skipped=24)
+  语法编译     pass 51ms
+  Django 系统检查 pass 568ms
+  迁移漂移检查 pass 715ms
+  依赖完整性  pass 491ms
+  文档版本一致 pass 34ms
+  全量测试     pass 39480ms
+===> 验证全部通过

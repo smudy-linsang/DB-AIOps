@@ -1,44 +1,53 @@
-# DB-003：O 侧自动链接入进展与阻塞
+有条件通过
 
-- 成员：O（ChatGPT Codex）。
-- 日期：2026-11-04（Asia/Shanghai）。
-- 当前结论：**不通过**。既有 `WAKE-O-AUTO` 尚未修改，自动触发和全链路验收均未完成；本文件是 O 侧阻塞记录，不替代 GorkMan 的总验收报告 `DB-003-report-自动链接入.md`。
-- 接单与 ETA：见 [DB-003-ack-O.md](DB-003-ack-O.md)，已推送 main（`9986b71`）。
+# DB-003：O 侧 DB-AIOps 自动监听交付
+
+- 执行人：O；2026-11-04（Asia/Shanghai）。此前“配置入口未知”的阻塞已解除，按用户提供的位置读取 Xinchuang main `84a40d93e663a1844fb3500eaf921efc41b54a88` 及 `WAKE-AUTORUN-report-O.md`。
+- 本结论仅限 **O 侧代码与本地验证**，不是 DB-003 整单验收。正式汇总报告仍由 GorkMan 负责 `DB-003-report-自动链接入.md`。
+- 接单与 ETA 已先行落库，见 `DB-003-ack-O.md`。DB-002 不占用；DB-001、STATUS、DECISIONS 未修改。
+
+## 实现位置与行为
+
+| 位置 | 交付 |
+|---|---|
+| `.github/workflows/o-autorun.yml` | DB-AIOps 自有 Actions 工作流，默认 runner，main 上 orders/reports/dispatch 推送触发，声明每 5 分钟巡检与手动入口；队列并发组独立 |
+| `tools/o_db_autorun.py` | DB 编号与 O 精确路由、历史单排除、稳定身份去重、明确读取失败、模型启动前独立 ETA 回执 |
+| `tools/o-autorun/engine/` | 固定复用既有协调器/执行器/加密状态及白名单发布能力，不依赖运行时拉取 Xinchuang 私仓 |
+| `tools/o-autorun/provenance.json` | 上游提交和每个源文件/交付文件 SHA256；两处原异常分支为满足 DB-AIOps 红线作等价替换 |
+| `tools/o-autorun/README.md` | 部署、轮次/前置凭证、默认分支限制、账号所有者配置方法及验收要求 |
+| `tools/o-autorun/tests/test_db_board.py` | 9 项适配及真实本地 Git 链路测试 |
+
+不能通过某仓 workflow 的 paths 监听另一仓，因此为 DB-AIOps 独立部署，保持 Xinchuang **源码、工作流、队列和调度零改动**。状态分支属于 DB-AIOps，不共享 Xinchuang checkpoint；写入只使用 DB-AIOps 自身短期 github.token，无跨仓 PAT。
+
+自动收取 DB-004 起及 DB-TEST 临时单；DB-001..003 已人工承接，不追溯重复启动。显式 dispatch 可处理历史任务，并保留 source/round/requires 校验，等待前置凭证时不会抢跑。没有显式 dispatch 时 source_sha 固定到订单最后修改提交；普通报告更新不改变 job_key。改旧单需要新轮次时应显式 dispatch，不能覆盖旧报告。
+
+正式执行前先独立推送含身份键、接单时间、3 小时 ETA 的回执；失败则不继续启动模型。报告与 receipt 仍经原引擎验证发布。读取失败令工作流报错，不按空黑板吞掉。
 
 ## 已实测
 
-1. 经现有 Git HTTPS 代理成功读取 `smudy-linsang/DB-AIOps` 的 main，任务下达基线为 `79fc9a3851cd9ba1b69a242a0d1b7aa8d1a96f19`。初次推送遇到并发更新，获取并保留设计团队与 A 的回执后变基，正常推送成功；未强推。
-2. 读取黑板 README、ROSTER、STATUS、DECISIONS 及 DB-003 原单；原单独立 `执行：GorkMan、A、O` 行包含 O。此项只证明本会话手动读取成功，不证明定时自动任务可读。
-3. 检索当前工作区与 main 跟踪文件，`WAKE-O-AUTO` 仅为任务/回执中的引用，未发现其实际定义；本机 `/home/agent/.codex/automations` 与 `/workspace/.codex/automations` 均不存在。当前可调用工具没有自动任务查询、编辑或触发接口。这些观察不能证明任务在外部平台不存在。
-4. 回执提交前运行 `bash scripts/validate.sh unit --json`，退出码 0，红线扫描和 unit 阶段均通过。没有改应用代码、Xinchuang 链路、DB-001、DB-002、STATUS 或 DECISIONS。
+1. **适配 9/9**：O/OO/多人路由、历史排除、临时编号、重复单拒绝、缺执行行报错、读取失败、显式前置凭证、报告变更去重与回执幂等。真实临时 Git 裸仓实测发单 → ETA 回执 → **合成执行器** → 报告/receipt 校验推送 → 重扫不重复启动。不是模型实跑或线上广播验收。
+2. **复用引擎 92/92**：运行于本次交付引擎的上游 coordinator/worker/diagnostics/dispatch 专项，覆盖加密 checkpoint、去重、故障恢复、白名单发布等。首次尝试上游 94 项时，2 项本机 installer/便携 GG/A helper 因不在此次部署目录而报路径错误；本交付不包含这两项本机部署功能，最终明确选取 92 项 hosted 功能测试，原断言未改。
+3. **仓库 unit 通过**。提交前 backend 的静态、系统检查、迁移漂移、依赖及版本检查均通过。默认 TimescaleDB template1 初次完整测试仍有此前已诊断的 4 个 time_bucket 垫片冲突；在仓库外配置 TEST.TEMPLATE=template0 后，**完整 `scripts/validate.sh backend` 退出码 0**：571 项，547 通过、24 外部数据库用例跳过。没有修改仓库测试、断言或 settings。
+4. **远端只读扫描成功**：Git HTTPS 代理读取 DB-AIOps main，inbox=0、jobs=0，符合当前 DB-001..003 人工承接的排除策略；没有创建真实生产订单或调用模型。
+5. YAML 解析、并发组和工作流结构检查、diff 空白检查通过。Xinchuang checkout 无改动。
 
-## 所需外部入口
+复现：
 
-请提供既有 `WAKE-O-AUTO` 的配置仓库/文件路径，或使本会话能够查询、修改和验证该任务的管理入口。只需位置与接入方式，**不要在会话中提供密钥**。已在本会话询问该入口。
+```bash
+cd /workspace/DB-AIOps
+.venv/bin/python -m unittest discover -s tools/o-autorun/tests -v
+.venv/bin/python tools/o_db_autorun.py --scan-only --repo . --directory /tmp/o-db-scan
+source /workspace/.db-aiops-setup/dev-env.sh
+PYTHONPATH=/workspace/.db-aiops-setup/backend-config:/workspace/DB-AIOps bash scripts/validate.sh backend
+```
 
-拿到入口后，先读取原任务的完整定义，保留其 Xinchuang 监听、调度、路由、状态及权限设置，再追加 DB-AIOps。不能用云环境 `install_script`/`start_skill` 替代定时自动任务，也不能凭空新建一个同名任务并宣称既有自动链已接通。
+最后一条的仓库外 sitecustomize 只在 integration 测试启动时设置 TEST.TEMPLATE=template0，与已有 onboarding_test_settings 配置一致。该配置不是交付源码依赖，普通 PostgreSQL 的 CI 不需要。
 
-## 待追加的监听要求（尚未应用、尚未实测）
+证据：[verification.json](evidence/DB-003-O/verification.json)、[适配测试](evidence/DB-003-O/adapter-tests.txt)、[引擎专项](evidence/DB-003-O/engine-tests.txt)、[后端摘要](evidence/DB-003-O/backend-summary.txt)。
 
-- 来源：仓库 `smudy-linsang/DB-AIOps`，分支 **main**，目录 `docs/pm/orders/` 与 `docs/pm/reports/`；不得依赖默认分支恰好为 main。
-- 路由：按任务单独立 `执行：` 行精确匹配成员 O；遵守订单约束、黑板回执及 ETA 规矩。DB-002 仍是预留编号，不能自行立单或提前接单。
-- 独立状态：以仓库、分支及任务标识区分游标/去重记录；DB 编号不能与 Xinchuang 的 T 编号混用。人工承接的 DB-003 应有明确去重策略，避免再次启动同一执行。
-- 读取失败应输出明确警告及失败位置，保留上次成功状态，不能当作空黑板推进游标。首轮初始化、重试与报告变化的处理方式须结合原实现确认。
-- 领单结果必须落 DB-AIOps 的 `reports/`；广播成功只作为广播证据，不能替代成员接单回执。
+## 未解除条件与精确下一步
 
-## 验收记录
-
-| 检查 | 当前结果 |
-|---|---|
-| 本会话读取 DB-AIOps main 并识别 O 分工 | 通过（手动 Git 读取） |
-| O 接单与 ETA 落黑板 | 通过，`9986b71` |
-| 既有 WAKE-O-AUTO 定义读取、追加监听并保存 | 未执行：管理入口缺失 |
-| DB-AIOps 自动读取、O 路由与去重 | 未执行 |
-| Xinchuang 原链路回归 | 未执行，原链路未改 |
-| 分发器广播、成员自动领单、测试单归档全链路 | 未执行，待各侧接入后由 GorkMan 汇总 |
-
-全链路应使用不占正式编号的测试单，由 GorkMan 协调：记录落库提交、分发器可见性、广播结果、O 自动触发记录及 `reports/` 回执，并回归 Xinchuang 原行为；测试完成后归档测试单。入口恢复前不发布测试单，避免制造无法自动接收的假验收。
-
-## 风险与未尽事项
-
-当前只能确认手动 Git 读写正常。不得据此宣称 DB-AIOps 自动送达已打通；自动任务权限、持续调度、广播及真正自动领单仍需分别实测。预计 O 侧修改与验证耗时为入口就绪后 30 分钟；GorkMan 的 2026-11-05 起算安排与汇总职责保持不变。
+- **线上 Actions 未验证**：当前云环境访问 `api.github.com` 返回 Forbidden。Secret 名称查询、原链运行查询均失败，故不能认定 DB-AIOps 的 `O_CODEX_AUTH_JSON` / `O_AUTORUN_STATE_KEY` 已有或缺失，也没有请求重复配置、提取或复制 Xinchuang 秘密。已在环境草稿仅追加 `api.github.com`，保留原网络预设；保存成功但尚未应用或发布。用户在环境设置审阅、保存并发布后需重新测试 API，成功才可查询 Secrets 名称、运行记录并触发实跑。若 Secret 确实缺失，由账号所有者按 README 在自己的电脑安全配置，不在聊天提供值。
+- **定时条件未满足**：只读 `git ls-remote --symref origin HEAD` 实测 DB-AIOps 默认分支为 master。GitHub schedule/workflow_dispatch 要求默认分支有工作流；main 推送触发不等同于定时巡检生效。请用户/部门经理决定将默认分支设为 main，或授权独立的默认分支部署方案；本次未擅自修改默认分支或 master。
+- **全链路尚未验收**：GorkMan member_poller/分发器、A 链及 O Actions 真实执行就绪后，由 GorkMan 建立不占正式编号的 DB-TEST 单，记录订单提交、分发器可见性、群广播、Actions run ID、O 自动 ETA 回执及报告提交，再归档测试单并回归 Xinchuang。现有合成执行器测试与手动接单不能代替这些证据。
+- cloud 原有 CONNECT/环境发布条件没有被此次 runner 适配消除。全链路未通过前，不宣称已实现无人值守闭环。

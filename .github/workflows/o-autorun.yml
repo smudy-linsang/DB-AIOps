@@ -1,0 +1,110 @@
+name: O DB-AIOps automatic review
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'docs/pm/dispatch/**'
+      - 'docs/pm/orders/**'
+      - 'docs/pm/reports/**'
+      - 'tools/o_db_autorun.py'
+      - 'tools/o-autorun/**'
+      - '.github/workflows/o-autorun.yml'
+  schedule:
+    - cron: '*/5 * * * *'
+  workflow_dispatch:
+    inputs:
+      canary:
+        description: 'Create a real O canary (does not verify the external broadcaster)'
+        type: boolean
+        default: false
+      executor:
+        description: 'Execution backend (runner avoids native cloud environment discovery)'
+        type: choice
+        options: [runner, cloud]
+        default: runner
+
+concurrency:
+  group: o-db-aiops-coordinator
+  cancel-in-progress: false
+
+permissions:
+  contents: write
+
+jobs:
+  coordinate:
+    runs-on: ubuntu-latest
+    timeout-minutes: 240
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: main
+          fetch-depth: 0
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '24'
+      - name: Test DB-AIOps routing without model calls
+        run: python3 -m unittest discover -s tools/o-autorun/tests -v
+      - name: Scan DB-AIOps orders without model calls
+        run: python3 tools/o_db_autorun.py --scan-only --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/o-scan"
+      - name: Verify owner authorization is configured
+        env:
+          O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
+          O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
+        run: |
+          python3 - <<'PY'
+          import os,sys
+          missing=[n for n in ('O_CODEX_AUTH_JSON','O_AUTORUN_STATE_KEY') if not os.environ.get(n)]
+          if missing:
+              print('::error::One-time account-owner setup required: '+', '.join(missing))
+              sys.exit(1)
+          PY
+      - name: Install pinned coordinator tools
+        run: |
+          python3 -m pip install -r tools/o-autorun/requirements-ci.txt
+          npm install --global @openai/codex@0.159.2
+      - name: Enable supported Linux sandbox namespaces
+        if: ${{ runner.os == 'Linux' && runner.environment == 'github-hosted' }}
+        run: |
+          set -euo pipefail
+          # Official codex-action setup for Ubuntu's bubblewrap/AppArmor gate:
+          # https://github.com/openai/codex-action/blob/c05cfd74ad95c626cdf05c6685e62becc3bf7813/action.yml#L290
+          current_userns="$(sysctl -n kernel.unprivileged_userns_clone 2>/dev/null || true)"
+          if [ -n "$current_userns" ] && [ "$current_userns" != '1' ]; then
+            sudo -n sysctl -w kernel.unprivileged_userns_clone=1
+          fi
+          current_apparmor="$(sysctl -n kernel.apparmor_restrict_unprivileged_userns 2>/dev/null || true)"
+          if [ -n "$current_apparmor" ] && [ "$current_apparmor" != '0' ]; then
+            sudo -n sysctl -w kernel.apparmor_restrict_unprivileged_userns=0
+          fi
+      - name: Verify sandbox writes and boundary without a model call
+        id: sandbox_check
+        run: python3 tools/o-autorun/check-sandbox.py
+      - name: Persist safe sandbox result for remote diagnosis
+        if: ${{ always() && steps.sandbox_check.outcome != 'skipped' && steps.sandbox_check.outcome != '' }}
+        env:
+          O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
+          O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          O_SANDBOX_OUTCOME: ${{ steps.sandbox_check.outcome }}
+        run: |
+          python3 tools/o_db_autorun.py --repo "$GITHUB_WORKSPACE" \
+            --directory "$RUNNER_TEMP/o-autorun" \
+            --record-host-preflight "$O_SANDBOX_OUTCOME" --probe-file "$RUNNER_TEMP/o-sandbox-probe.json"
+      - name: Resume queue and cloud tasks, validate and publish reports
+        env:
+          O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
+          O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
+          GITHUB_TOKEN: ${{ github.token }}
+          O_CANARY: ${{ inputs.canary && '1' || '0' }}
+          O_CLOUD_ENV_ID: ${{ vars.O_CLOUD_ENV_ID || 'DB-AIOps' }}
+          O_AUTORUN_EXECUTOR: ${{ inputs.executor || vars.O_AUTORUN_EXECUTOR || 'runner' }}
+        run: |
+          args=()
+          if [ "$O_CANARY" = '1' ]; then args+=(--canary); fi
+          python3 tools/o_db_autorun.py --repo "$GITHUB_WORKSPACE" \
+            --directory "$RUNNER_TEMP/o-autorun" \
+            --environment "$O_CLOUD_ENV_ID" --executor "$O_AUTORUN_EXECUTOR" "${args[@]}"
