@@ -1,0 +1,84 @@
+{
+  "report_version": "V1.1",
+  "report_commit": "d86958b29cb6d1ede73d63c804199e425317050b",
+  "report_sha256": "9bc44906fc0bf9704ef0734ae28f25ca3d6c8b3d7c3964be00e15bbb5e4f489d",
+  "baseline_a": "cad2514ab0a51209c1ea58c74e312129a537217b",
+  "baseline_b": "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a",
+  "review_checkout": "56885c1184a916a17b179df433fc077113da716c",
+  "changed_paths_a_to_b": [
+    ".github/workflows/a-autorun.yml",
+    ".github/workflows/o-autorun.yml",
+    "docs/pm/A-AUTORUN-PROMPT.md",
+    "docs/pm/reports/DB-001-report-design-team.md",
+    "docs/pm/reports/DB-003-ack-O.md",
+    "docs/pm/reports/DB-003-ack-gorkman.md",
+    "docs/pm/reports/DB-003-report-A.md",
+    "docs/pm/reports/DB-003-report-O.md",
+    "\"docs/pm/reports/DB-003-\\345\\233\\236\\346\\211\\247-A.md\"",
+    "\"docs/pm/reports/M-team-\\345\\260\\261\\344\\275\\215\\345\\243\\260\\346\\230\\216.md\"",
+    "docs/pm/reports/evidence/DB-003-O/adapter-tests.txt",
+    "docs/pm/reports/evidence/DB-003-O/backend-summary.txt",
+    "docs/pm/reports/evidence/DB-003-O/engine-tests.txt",
+    "docs/pm/reports/evidence/DB-003-O/verification.json",
+    "monitor/tests_pm_a_inbox.py",
+    "tools/a_inbox.py",
+    "tools/o-autorun/README.md",
+    "tools/o-autorun/check-sandbox.py",
+    "tools/o-autorun/configure-github.py",
+    "tools/o-autorun/engine/o_autorun.py",
+    "tools/o-autorun/engine/o_exec_worker.py",
+    "tools/o-autorun/engine/o_github_coordinator.py",
+    "tools/o-autorun/engine/o_usage_diagnostics.py",
+    "tools/o-autorun/provenance.json",
+    "tools/o-autorun/requirements-ci.txt",
+    "tools/o-autorun/tests/test_db_board.py",
+    "tools/o_db_autorun.py"
+  ],
+  "files": {
+    "monitor/inspection_executor.py": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "034366b0b094a4a10f08e887cc75c90ede2430ce",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "034366b0b094a4a10f08e887cc75c90ede2430ce",
+      "56885c1184a916a17b179df433fc077113da716c": "034366b0b094a4a10f08e887cc75c90ede2430ce"
+    },
+    "monitor/inspection_registry.py": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "d909b5855f634b102ccc7b3562f69807b8e5d0cf",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "d909b5855f634b102ccc7b3562f69807b8e5d0cf",
+      "56885c1184a916a17b179df433fc077113da716c": "d909b5855f634b102ccc7b3562f69807b8e5d0cf"
+    },
+    "monitor/api_views_phase5.py": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "84872ca074991fb7584f7a0cac4b6356280997db",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "84872ca074991fb7584f7a0cac4b6356280997db",
+      "56885c1184a916a17b179df433fc077113da716c": "84872ca074991fb7584f7a0cac4b6356280997db"
+    },
+    "monitor/checkers/dm.py": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "7999238ce80d73dc119e94f90237e0f64fe0060c",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "7999238ce80d73dc119e94f90237e0f64fe0060c",
+      "56885c1184a916a17b179df433fc077113da716c": "7999238ce80d73dc119e94f90237e0f64fe0060c"
+    },
+    "monitor/management/commands/start_monitor.py": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "51c34f56945c8bae9b82b7d62d507898c6824c91",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "51c34f56945c8bae9b82b7d62d507898c6824c91",
+      "56885c1184a916a17b179df433fc077113da716c": "51c34f56945c8bae9b82b7d62d507898c6824c91"
+    },
+    ".github/workflows/ci.yml": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "c4bd98b2bc140862ec49ef9a4b6bb8638d70f4ae",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "c4bd98b2bc140862ec49ef9a4b6bb8638d70f4ae",
+      "56885c1184a916a17b179df433fc077113da716c": "c4bd98b2bc140862ec49ef9a4b6bb8638d70f4ae"
+    },
+    "README.md": {
+      "cad2514ab0a51209c1ea58c74e312129a537217b": "9ba76a5659415ea4edb8aa751f83b06b607d641c",
+      "0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a": "9ba76a5659415ea4edb8aa751f83b06b607d641c",
+      "56885c1184a916a17b179df433fc077113da716c": "9ba76a5659415ea4edb8aa751f83b06b607d641c"
+    }
+  },
+  "dialect_tests_per_class": {
+    "MySQLDialectTests": 5,
+    "MySQLSlowSqlDialectTests": 3,
+    "PostgresDialectTests": 3,
+    "MySQLCheckerDialectTests": 4,
+    "PostgresCheckerDialectTests": 3,
+    "OracleDialectTests": 4,
+    "DamengDialectTests": 2
+  },
+  "dialect_test_total": 24
+}

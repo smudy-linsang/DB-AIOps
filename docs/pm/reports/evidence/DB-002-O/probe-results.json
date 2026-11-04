@@ -1,0 +1,340 @@
+{
+  "checked_head": "e0732296c5fcc11de3c6eb5b1735d6a220d83532",
+  "dispatch": {
+    "total_items": 82,
+    "detector_keys": 26,
+    "statuses": {
+      "skip": 79,
+      "ok": 3
+    },
+    "calls": [
+      "INS-TDSQL-SHARD",
+      "INS-TDSQL-PROXY",
+      "INS-TDSQL-SHARDKEY"
+    ],
+    "same_named_methods": 11,
+    "missing_named_methods": [
+      {
+        "item_id": "INS-COM-USER-LOCKED",
+        "detect_method": "detect_locked_users"
+      },
+      {
+        "item_id": "INS-COM-PWD-EXPIRE",
+        "detect_method": "detect_expiring_passwords"
+      },
+      {
+        "item_id": "INS-COM-CAP-7D",
+        "detect_method": "detect_7d_capacity"
+      },
+      {
+        "item_id": "INS-COM-CAP-30D",
+        "detect_method": "detect_30d_capacity"
+      },
+      {
+        "item_id": "INS-COM-CONN-PEAK",
+        "detect_method": "detect_conn_peak"
+      },
+      {
+        "item_id": "INS-COM-DEADLOCK-24H",
+        "detect_method": "detect_deadlock_count"
+      },
+      {
+        "item_id": "INS-COM-SLOW-LOG",
+        "detect_method": "detect_slow_query_log"
+      },
+      {
+        "item_id": "INS-COM-INDEX-USAGE",
+        "detect_method": "detect_unused_indexes"
+      },
+      {
+        "item_id": "INS-COM-MISSING-INDEX",
+        "detect_method": "detect_missing_indexes"
+      },
+      {
+        "item_id": "INS-COM-PART-NEEDED",
+        "detect_method": "detect_large_table_not_partitioned"
+      },
+      {
+        "item_id": "INS-COM-SPARSE-INDEX",
+        "detect_method": "detect_sparse_index"
+      },
+      {
+        "item_id": "INS-COM-BLEVEL-HIGH",
+        "detect_method": "detect_high_blevel_index"
+      },
+      {
+        "item_id": "INS-COM-SEQ-MAX",
+        "detect_method": "detect_seq_near_max"
+      },
+      {
+        "item_id": "INS-COM-SEQ-NO-CACHE",
+        "detect_method": "detect_seq_no_cache"
+      },
+      {
+        "item_id": "INS-COM-PARAM-DEV",
+        "detect_method": "detect_param_deviation"
+      },
+      {
+        "item_id": "INS-COM-ARCH-GAP",
+        "detect_method": "detect_archive_gap"
+      },
+      {
+        "item_id": "INS-COM-LOG-SWITCH",
+        "detect_method": "detect_log_switches"
+      },
+      {
+        "item_id": "INS-COM-LOCK-WAIT",
+        "detect_method": "detect_lock_waits"
+      },
+      {
+        "item_id": "INS-COM-BLOCK-SESSION",
+        "detect_method": "detect_blocked_sessions"
+      },
+      {
+        "item_id": "INS-COM-OPEN-CURSOR",
+        "detect_method": "detect_open_cursors"
+      },
+      {
+        "item_id": "INS-COM-TEMP-USAGE",
+        "detect_method": "detect_temp_usage"
+      },
+      {
+        "item_id": "INS-COM-UNDO-USAGE",
+        "detect_method": "detect_undo_usage"
+      },
+      {
+        "item_id": "INS-COM-FRAG-TABLE",
+        "detect_method": "detect_high_parallel"
+      },
+      {
+        "item_id": "INS-ORA-AWR-SNAP",
+        "detect_method": "detect_awr_interval"
+      },
+      {
+        "item_id": "INS-ORA-AWR-RET",
+        "detect_method": "detect_awr_retention"
+      },
+      {
+        "item_id": "INS-ORA-AWR-TOP-EVT",
+        "detect_method": "detect_awr_top_event"
+      },
+      {
+        "item_id": "INS-ORA-AWR-TOP-SQL",
+        "detect_method": "detect_awr_top_sql"
+      },
+      {
+        "item_id": "INS-ORA-STA-OUTPUT",
+        "detect_method": "detect_sta_recommendations"
+      },
+      {
+        "item_id": "INS-ORA-SEG-ADV",
+        "detect_method": "detect_segment_advisor"
+      },
+      {
+        "item_id": "INS-ORA-AUTO-MW",
+        "detect_method": "detect_maintenance_window"
+      },
+      {
+        "item_id": "INS-ORA-FRA",
+        "detect_method": "detect_fra_usage"
+      },
+      {
+        "item_id": "INS-ORA-CTRL-BAK",
+        "detect_method": "detect_ctrlfile_backup"
+      },
+      {
+        "item_id": "INS-ORA-ARCH-DELETE",
+        "detect_method": "detect_arch_deletion_policy"
+      },
+      {
+        "item_id": "INS-ORA-DBA-USERS",
+        "detect_method": "detect_dba_users"
+      },
+      {
+        "item_id": "INS-ORA-TS-AUTOEXT",
+        "detect_method": "detect_ts_autoextend"
+      },
+      {
+        "item_id": "INS-ORA-LOB-PCT",
+        "detect_method": "detect_lob_pctversion"
+      },
+      {
+        "item_id": "INS-ORA-DBLINK",
+        "detect_method": "detect_dblinks"
+      },
+      {
+        "item_id": "INS-ORA-DIR-OBJ",
+        "detect_method": "detect_directory_objects"
+      },
+      {
+        "item_id": "INS-ORA-RMAN-AGE",
+        "detect_method": "detect_rman_backup_age"
+      },
+      {
+        "item_id": "INS-ORA-DG-LAG",
+        "detect_method": "detect_dg_lag"
+      },
+      {
+        "item_id": "INS-ORA-DG-STATUS",
+        "detect_method": "detect_dg_status"
+      },
+      {
+        "item_id": "INS-ORA-RAC-VIP",
+        "detect_method": "detect_rac_vip"
+      },
+      {
+        "item_id": "INS-ORA-REDOLOG-SIZE",
+        "detect_method": "detect_redolog_size"
+      },
+      {
+        "item_id": "INS-ORA-OPT-STATS-GATHER",
+        "detect_method": "detect_auto_stats_gather"
+      },
+      {
+        "item_id": "INS-ORA-OPEN-FILE",
+        "detect_method": "detect_open_files"
+      },
+      {
+        "item_id": "INS-ORA-LOB-CACHE",
+        "detect_method": "detect_lob_cache_hit"
+      },
+      {
+        "item_id": "INS-ORA-ASH-USAGE",
+        "detect_method": "detect_ash_memory"
+      },
+      {
+        "item_id": "INS-ORA-RMAN-CONF",
+        "detect_method": "detect_rman_config"
+      },
+      {
+        "item_id": "INS-ORA-AUDIT-TRAIL",
+        "detect_method": "detect_audit_trail"
+      },
+      {
+        "item_id": "INS-ORA-PGA-LEAK",
+        "detect_method": "detect_pga_leak"
+      },
+      {
+        "item_id": "INS-ORA-IO-STAT",
+        "detect_method": "detect_io_distribution"
+      },
+      {
+        "item_id": "INS-ORA-EXADATA",
+        "detect_method": "detect_exadata_features"
+      },
+      {
+        "item_id": "INS-MYSQL-BINLOG-DELAY",
+        "detect_method": "detect_binlog_dump_delay"
+      },
+      {
+        "item_id": "INS-MYSQL-GTID",
+        "detect_method": "detect_gtid_consistency"
+      },
+      {
+        "item_id": "INS-MYSQL-SEMI-SYNC",
+        "detect_method": "detect_semi_sync"
+      },
+      {
+        "item_id": "INS-MYSQL-EVENT",
+        "detect_method": "detect_event_scheduler"
+      },
+      {
+        "item_id": "INS-MYSQL-FK-CASCADE",
+        "detect_method": "detect_dangerous_fk"
+      },
+      {
+        "item_id": "INS-MYSQL-TMP-DISK",
+        "detect_method": "detect_tmp_disk_ratio"
+      },
+      {
+        "item_id": "INS-PG-WAL-RECV",
+        "detect_method": "detect_wal_receiver"
+      },
+      {
+        "item_id": "INS-PG-INACTIVE-SLOT",
+        "detect_method": "detect_inactive_repl_slot"
+      },
+      {
+        "item_id": "INS-PG-VACUUM-FREEZE",
+        "detect_method": "detect_freeze_age"
+      },
+      {
+        "item_id": "INS-PG-BLOAT",
+        "detect_method": "detect_bloat"
+      },
+      {
+        "item_id": "INS-PG-EXT-OUTDATED",
+        "detect_method": "detect_extension_versions"
+      },
+      {
+        "item_id": "INS-PG-STMT-TIMEOUT",
+        "detect_method": "detect_statement_timeout"
+      },
+      {
+        "item_id": "INS-DM-DSC",
+        "detect_method": "detect_dsc_nodes"
+      },
+      {
+        "item_id": "INS-DM-DW-STANDBY",
+        "detect_method": "detect_dw_standby"
+      },
+      {
+        "item_id": "INS-DM-ARCH",
+        "detect_method": "detect_dm_arch"
+      },
+      {
+        "item_id": "INS-DM-RLOG",
+        "detect_method": "detect_dm_rlog"
+      },
+      {
+        "item_id": "INS-GBASE-BALANCE",
+        "detect_method": "detect_gbase_node_balance"
+      },
+      {
+        "item_id": "INS-GBASE-DIST",
+        "detect_method": "detect_gbase_distribution"
+      },
+      {
+        "item_id": "INS-GBASE-NODE-DOWN",
+        "detect_method": "detect_gbase_node_down"
+      }
+    ],
+    "all_skip_score": 0.0,
+    "one_ok_79_skip_score": 100.0
+  },
+  "trigger": [
+    {
+      "case": "own-with-permissions",
+      "status": 400,
+      "body": {
+        "error": "巡检执行失败: InspectionExecutor.__init__() got an unexpected keyword argument 'level'"
+      },
+      "new_runs": 1
+    },
+    {
+      "case": "cross-scope-with-permissions",
+      "status": 400,
+      "body": {
+        "error": "巡检执行失败: InspectionExecutor.__init__() got an unexpected keyword argument 'level'"
+      },
+      "new_runs": 1
+    },
+    {
+      "case": "own-with-zero-permissions",
+      "status": 400,
+      "body": {
+        "error": "巡检执行失败: InspectionExecutor.__init__() got an unexpected keyword argument 'level'"
+      },
+      "new_runs": 1
+    }
+  ],
+  "cross_scope_detail": {
+    "status": 200,
+    "db_name": "DB002-synthetic-other",
+    "raw_data": {
+      "review_marker": "DB002-synthetic-only"
+    },
+    "scope_control_other_visible": false
+  },
+  "limits": "Original dispatcher/API/auth/ORM; detector bodies are spies; SQLite synthetic fixtures only; no target SQL or production acceptance"
+}
