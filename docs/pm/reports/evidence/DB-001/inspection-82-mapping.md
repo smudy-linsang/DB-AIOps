@@ -1,0 +1,84 @@
+| # | 定义 item_id | 标题 | 级别 | 适用方言 | 声明函数 | 同名实现类 | 注册键命中 | 测试引用 | 分层判定 |
+|---|---|---|---|---|---|---|---|---|---|
+| 1 | `INS-COM-INVALID-OBJ` | 无效对象检查 | daily | oracle,dm,gbase | `detect_invalid_objects` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 2 | `INS-COM-RECYCLEBIN` | 回收站清理检查 | weekly | oracle,dm | `detect_recyclebin` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 3 | `INS-COM-USER-LOCKED` | 账号锁定检查 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_locked_users` | - | 否 | 无测试引用 | **无同名实现** |
+| 4 | `INS-COM-PWD-EXPIRE` | 密码即将过期 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_expiring_passwords` | - | 否 | 无测试引用 | **无同名实现** |
+| 5 | `INS-COM-CAP-7D` | 7天容量预测 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_7d_capacity` | - | 否 | 无测试引用 | **无同名实现** |
+| 6 | `INS-COM-CAP-30D` | 30天容量预测 | weekly | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_30d_capacity` | - | 否 | 无测试引用 | **无同名实现** |
+| 7 | `INS-COM-CONN-PEAK` | 连接峰值检查 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_conn_peak` | - | 否 | 无测试引用 | **无同名实现** |
+| 8 | `INS-COM-LONG-TXN` | 长事务检查 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_long_transactions` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 9 | `INS-COM-DEADLOCK-24H` | 24h 死锁次数 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_deadlock_count` | - | 否 | 无测试引用 | **无同名实现** |
+| 10 | `INS-COM-SLOW-LOG` | 慢查询日志检查 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_slow_query_log` | - | 否 | 无测试引用 | **无同名实现** |
+| 11 | `INS-COM-INDEX-USAGE` | 索引使用率检查 | weekly | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_unused_indexes` | - | 否 | 无测试引用 | **无同名实现** |
+| 12 | `INS-COM-MISSING-INDEX` | 缺失索引检查 | weekly | oracle,mysql,pgsql,dm | `detect_missing_indexes` | - | 否 | 无测试引用 | **无同名实现** |
+| 13 | `INS-COM-FK-NO-INDEX` | 外键无索引 | weekly | oracle,mysql,pgsql,dm | `detect_fk_no_index` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 14 | `INS-COM-PART-NEEDED` | 大表未分区 | monthly | oracle,mysql,pgsql,dm,gbase | `detect_large_table_not_partitioned` | - | 否 | 无测试引用 | **无同名实现** |
+| 15 | `INS-COM-STAT-STALE` | 统计信息过期 | weekly | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_stale_stats` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 16 | `INS-COM-SPARSE-INDEX` | 稀疏索引 | monthly | oracle,mysql,pgsql,dm | `detect_sparse_index` | - | 否 | 无测试引用 | **无同名实现** |
+| 17 | `INS-COM-BLEVEL-HIGH` | 高 BLEVEL 索引 | monthly | oracle,mysql,pgsql,dm | `detect_high_blevel_index` | - | 否 | 无测试引用 | **无同名实现** |
+| 18 | `INS-COM-SEQ-MAX` | 序列接近 MAX | daily | oracle,dm,pgsql | `detect_seq_near_max` | - | 否 | 无测试引用 | **无同名实现** |
+| 19 | `INS-COM-SEQ-NO-CACHE` | 序列无 CACHE | monthly | oracle,dm | `detect_seq_no_cache` | - | 否 | 无测试引用 | **无同名实现** |
+| 20 | `INS-COM-PARAM-DEV` | 参数偏离最佳实践 | monthly | oracle,mysql,pgsql,dm,gbase | `detect_param_deviation` | - | 否 | 无测试引用 | **无同名实现** |
+| 21 | `INS-COM-BACKUP` | 备份状态 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_backup_status` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 22 | `INS-COM-ARCH-GAP` | 归档间隙 | daily | oracle,dm | `detect_archive_gap` | - | 否 | 无测试引用 | **无同名实现** |
+| 23 | `INS-COM-LOG-SWITCH` | 日志切换频率 | daily | oracle,dm | `detect_log_switches` | - | 否 | 无测试引用 | **无同名实现** |
+| 24 | `INS-COM-LOCK-WAIT` | 当前锁等待 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_lock_waits` | - | 否 | 无测试引用 | **无同名实现** |
+| 25 | `INS-COM-BLOCK-SESSION` | 被阻塞会话 | daily | oracle,mysql,pgsql,dm,gbase,tdsql | `detect_blocked_sessions` | - | 否 | 无测试引用 | **无同名实现** |
+| 26 | `INS-COM-OPEN-CURSOR` | 打开游标数 | daily | oracle,dm | `detect_open_cursors` | - | 否 | 无测试引用 | **无同名实现** |
+| 27 | `INS-COM-TEMP-USAGE` | 临时表空间使用 | daily | oracle,mysql,pgsql,dm,gbase | `detect_temp_usage` | - | 否 | 无测试引用 | **无同名实现** |
+| 28 | `INS-COM-UNDO-USAGE` | Undo 使用率 | daily | oracle,dm,pgsql | `detect_undo_usage` | - | 否 | 无测试引用 | **无同名实现** |
+| 29 | `INS-COM-FRAG-TABLE` | 高并行度表 | monthly | oracle,dm,gbase | `detect_high_parallel` | - | 否 | 无测试引用 | **无同名实现** |
+| 30 | `INS-COM-FAILED-LOGIN` | 失败登录异常 | daily | oracle,mysql,pgsql,dm | `detect_failed_logins` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 31 | `INS-ORA-AWR-SNAP` | AWR 快照间隔 | weekly | oracle | `detect_awr_interval` | - | 否 | 无测试引用 | **无同名实现** |
+| 32 | `INS-ORA-AWR-RET` | AWR 保留周期 | monthly | oracle | `detect_awr_retention` | - | 否 | 无测试引用 | **无同名实现** |
+| 33 | `INS-ORA-AWR-TOP-EVT` | 业务高峰 Top Event | weekly | oracle | `detect_awr_top_event` | - | 否 | 无测试引用 | **无同名实现** |
+| 34 | `INS-ORA-AWR-TOP-SQL` | 业务高峰 Top SQL | weekly | oracle | `detect_awr_top_sql` | - | 否 | 无测试引用 | **无同名实现** |
+| 35 | `INS-ORA-SCN-HEADROOM` | SCN Headroom | daily | oracle | `detect_scn_headroom` | GenericDetector | 否 | 无测试引用 | **同名可调用未注册** |
+| 36 | `INS-ORA-STA-OUTPUT` | SQL Tuning Advisor 结果 | weekly | oracle | `detect_sta_recommendations` | - | 否 | 无测试引用 | **无同名实现** |
+| 37 | `INS-ORA-SEG-ADV` | Segment Advisor 结果 | weekly | oracle | `detect_segment_advisor` | - | 否 | 无测试引用 | **无同名实现** |
+| 38 | `INS-ORA-AUTO-MW` | 自动维护窗口 | monthly | oracle | `detect_maintenance_window` | - | 否 | 无测试引用 | **无同名实现** |
+| 39 | `INS-ORA-FRA` | FRA 使用率 | daily | oracle | `detect_fra_usage` | - | 否 | 无测试引用 | **无同名实现** |
+| 40 | `INS-ORA-CTRL-BAK` | 控制文件备份 | weekly | oracle | `detect_ctrlfile_backup` | - | 否 | 无测试引用 | **无同名实现** |
+| 41 | `INS-ORA-ARCH-DELETE` | 归档日志清理策略 | weekly | oracle | `detect_arch_deletion_policy` | - | 否 | 无测试引用 | **无同名实现** |
+| 42 | `INS-ORA-DBA-USERS` | DBA 权限账号 | monthly | oracle | `detect_dba_users` | - | 否 | 无测试引用 | **无同名实现** |
+| 43 | `INS-ORA-TS-AUTOEXT` | 表空间自动扩展 | monthly | oracle,dm | `detect_ts_autoextend` | - | 否 | 无测试引用 | **无同名实现** |
+| 44 | `INS-ORA-LOB-PCT` | LOB PCTVERSION 异常 | monthly | oracle | `detect_lob_pctversion` | - | 否 | 无测试引用 | **无同名实现** |
+| 45 | `INS-ORA-DBLINK` | 残留 DBLINK | monthly | oracle | `detect_dblinks` | - | 否 | 无测试引用 | **无同名实现** |
+| 46 | `INS-ORA-DIR-OBJ` | Directory 对象 | monthly | oracle | `detect_directory_objects` | - | 否 | 无测试引用 | **无同名实现** |
+| 47 | `INS-ORA-RMAN-AGE` | RMAN 备份距今 | daily | oracle | `detect_rman_backup_age` | - | 否 | 无测试引用 | **无同名实现** |
+| 48 | `INS-ORA-DG-LAG` | DataGuard Lag | daily | oracle | `detect_dg_lag` | - | 否 | 无测试引用 | **无同名实现** |
+| 49 | `INS-ORA-DG-STATUS` | DataGuard 状态 | daily | oracle | `detect_dg_status` | - | 否 | 无测试引用 | **无同名实现** |
+| 50 | `INS-ORA-RAC-VIP` | RAC VIP 状态 | daily | oracle | `detect_rac_vip` | - | 否 | 无测试引用 | **无同名实现** |
+| 51 | `INS-ORA-REDOLOG-SIZE` | Redo Log 大小 | monthly | oracle | `detect_redolog_size` | - | 否 | 无测试引用 | **无同名实现** |
+| 52 | `INS-ORA-OPT-STATS-GATHER` | 自动统计信息收集 | weekly | oracle | `detect_auto_stats_gather` | - | 否 | 无测试引用 | **无同名实现** |
+| 53 | `INS-ORA-OPEN-FILE` | 打开文件数 | daily | oracle | `detect_open_files` | - | 否 | 无测试引用 | **无同名实现** |
+| 54 | `INS-ORA-LOB-CACHE` | LOB CACHE 读取 | monthly | oracle | `detect_lob_cache_hit` | - | 否 | 无测试引用 | **无同名实现** |
+| 55 | `INS-ORA-ASH-USAGE` | ASH 内存使用 | monthly | oracle | `detect_ash_memory` | - | 否 | 无测试引用 | **无同名实现** |
+| 56 | `INS-ORA-RMAN-CONF` | RMAN 配置 | monthly | oracle | `detect_rman_config` | - | 否 | 无测试引用 | **无同名实现** |
+| 57 | `INS-ORA-AUDIT-TRAIL` | 审计日志 | weekly | oracle | `detect_audit_trail` | - | 否 | 无测试引用 | **无同名实现** |
+| 58 | `INS-ORA-PGA-LEAK` | PGA 泄漏 | monthly | oracle | `detect_pga_leak` | - | 否 | 无测试引用 | **无同名实现** |
+| 59 | `INS-ORA-IO-STAT` | IO 分布 | monthly | oracle | `detect_io_distribution` | - | 否 | 无测试引用 | **无同名实现** |
+| 60 | `INS-ORA-EXADATA` | Exadata 特性 | monthly | oracle | `detect_exadata_features` | - | 否 | 无测试引用 | **无同名实现** |
+| 61 | `INS-MYSQL-BINLOG-DELAY` | Binlog Dump 延迟 | daily | mysql,tdsql | `detect_binlog_dump_delay` | - | 否 | 无测试引用 | **无同名实现** |
+| 62 | `INS-MYSQL-GTID` | GTID 一致性 | weekly | mysql,tdsql | `detect_gtid_consistency` | - | 否 | 无测试引用 | **无同名实现** |
+| 63 | `INS-MYSQL-SEMI-SYNC` | 半同步复制状态 | daily | mysql,tdsql | `detect_semi_sync` | - | 否 | 无测试引用 | **无同名实现** |
+| 64 | `INS-MYSQL-EVENT` | Event 调度器 | weekly | mysql,tdsql | `detect_event_scheduler` | - | 否 | 无测试引用 | **无同名实现** |
+| 65 | `INS-MYSQL-FK-CASCADE` | 危险外键级联 | monthly | mysql,tdsql | `detect_dangerous_fk` | - | 否 | 无测试引用 | **无同名实现** |
+| 66 | `INS-MYSQL-TMP-DISK` | 磁盘临时表比例 | daily | mysql,tdsql | `detect_tmp_disk_ratio` | - | 否 | 无测试引用 | **无同名实现** |
+| 67 | `INS-PG-WAL-RECV` | WAL Receiver 状态 | daily | pgsql | `detect_wal_receiver` | - | 否 | 无测试引用 | **无同名实现** |
+| 68 | `INS-PG-INACTIVE-SLOT` | 失效复制槽 | daily | pgsql | `detect_inactive_repl_slot` | - | 否 | 无测试引用 | **无同名实现** |
+| 69 | `INS-PG-VACUUM-FREEZE` | Freeze Age | daily | pgsql | `detect_freeze_age` | - | 否 | 无测试引用 | **无同名实现** |
+| 70 | `INS-PG-BLOAT` | 表/索引膨胀 | weekly | pgsql | `detect_bloat` | - | 否 | 无测试引用 | **无同名实现** |
+| 71 | `INS-PG-EXT-OUTDATED` | 扩展版本 | monthly | pgsql | `detect_extension_versions` | - | 否 | 无测试引用 | **无同名实现** |
+| 72 | `INS-PG-STMT-TIMEOUT` | Statement Timeout | monthly | pgsql | `detect_statement_timeout` | - | 否 | 无测试引用 | **无同名实现** |
+| 73 | `INS-DM-DSC` | DSC 节点状态 | daily | dm | `detect_dsc_nodes` | - | 否 | 无测试引用 | **无同名实现** |
+| 74 | `INS-DM-DW-STANDBY` | 主备同步状态 | daily | dm | `detect_dw_standby` | - | 否 | 无测试引用 | **无同名实现** |
+| 75 | `INS-DM-ARCH` | 归档状态 | daily | dm | `detect_dm_arch` | - | 否 | 无测试引用 | **无同名实现** |
+| 76 | `INS-DM-RLOG` | RLOG 同步状态 | daily | dm | `detect_dm_rlog` | - | 否 | 无测试引用 | **无同名实现** |
+| 77 | `INS-GBASE-BALANCE` | 节点负载均衡 | daily | gbase | `detect_gbase_node_balance` | - | 否 | 无测试引用 | **无同名实现** |
+| 78 | `INS-GBASE-DIST` | 数据分布均衡 | weekly | gbase | `detect_gbase_distribution` | - | 否 | 无测试引用 | **无同名实现** |
+| 79 | `INS-GBASE-NODE-DOWN` | 节点宕机 | daily | gbase | `detect_gbase_node_down` | - | 否 | 无测试引用 | **无同名实现** |
+| 80 | `INS-TDSQL-SHARD` | Set 主备健康 | daily | tdsql | `detect_tdsql_set_health` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |
+| 81 | `INS-TDSQL-PROXY` | Proxy 网关状态 | daily | tdsql | `detect_tdsql_proxy` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |
+| 82 | `INS-TDSQL-SHARDKEY` | 分片表配置 | daily | tdsql | `detect_tdsql_shardkey` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |

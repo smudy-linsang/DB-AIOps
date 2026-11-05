@@ -1,0 +1,833 @@
+{
+ "summary": {
+  "total": 82,
+  "registry_keys": 26,
+  "declared_methods": 33,
+  "direct": 3,
+  "alias": 8,
+  "missing": 71,
+  "tested": 0
+ },
+ "rows": [
+  {
+   "item_id": "INS-COM-INVALID-OBJ",
+   "title": "无效对象检查",
+   "level": "daily",
+   "dbs": "oracle,dm,gbase",
+   "detect": "detect_invalid_objects",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-RECYCLEBIN",
+   "title": "回收站清理检查",
+   "level": "weekly",
+   "dbs": "oracle,dm",
+   "detect": "detect_recyclebin",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-USER-LOCKED",
+   "title": "账号锁定检查",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_locked_users",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-PWD-EXPIRE",
+   "title": "密码即将过期",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_expiring_passwords",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-CAP-7D",
+   "title": "7天容量预测",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_7d_capacity",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-CAP-30D",
+   "title": "30天容量预测",
+   "level": "weekly",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_30d_capacity",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-CONN-PEAK",
+   "title": "连接峰值检查",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_conn_peak",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-LONG-TXN",
+   "title": "长事务检查",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_long_transactions",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-DEADLOCK-24H",
+   "title": "24h 死锁次数",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_deadlock_count",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-SLOW-LOG",
+   "title": "慢查询日志检查",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_slow_query_log",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-INDEX-USAGE",
+   "title": "索引使用率检查",
+   "level": "weekly",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_unused_indexes",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-MISSING-INDEX",
+   "title": "缺失索引检查",
+   "level": "weekly",
+   "dbs": "oracle,mysql,pgsql,dm",
+   "detect": "detect_missing_indexes",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-FK-NO-INDEX",
+   "title": "外键无索引",
+   "level": "weekly",
+   "dbs": "oracle,mysql,pgsql,dm",
+   "detect": "detect_fk_no_index",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-PART-NEEDED",
+   "title": "大表未分区",
+   "level": "monthly",
+   "dbs": "oracle,mysql,pgsql,dm,gbase",
+   "detect": "detect_large_table_not_partitioned",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-STAT-STALE",
+   "title": "统计信息过期",
+   "level": "weekly",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_stale_stats",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-SPARSE-INDEX",
+   "title": "稀疏索引",
+   "level": "monthly",
+   "dbs": "oracle,mysql,pgsql,dm",
+   "detect": "detect_sparse_index",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-BLEVEL-HIGH",
+   "title": "高 BLEVEL 索引",
+   "level": "monthly",
+   "dbs": "oracle,mysql,pgsql,dm",
+   "detect": "detect_high_blevel_index",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-SEQ-MAX",
+   "title": "序列接近 MAX",
+   "level": "daily",
+   "dbs": "oracle,dm,pgsql",
+   "detect": "detect_seq_near_max",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-SEQ-NO-CACHE",
+   "title": "序列无 CACHE",
+   "level": "monthly",
+   "dbs": "oracle,dm",
+   "detect": "detect_seq_no_cache",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-PARAM-DEV",
+   "title": "参数偏离最佳实践",
+   "level": "monthly",
+   "dbs": "oracle,mysql,pgsql,dm,gbase",
+   "detect": "detect_param_deviation",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-BACKUP",
+   "title": "备份状态",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_backup_status",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-ARCH-GAP",
+   "title": "归档间隙",
+   "level": "daily",
+   "dbs": "oracle,dm",
+   "detect": "detect_archive_gap",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-LOG-SWITCH",
+   "title": "日志切换频率",
+   "level": "daily",
+   "dbs": "oracle,dm",
+   "detect": "detect_log_switches",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-LOCK-WAIT",
+   "title": "当前锁等待",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_lock_waits",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-BLOCK-SESSION",
+   "title": "被阻塞会话",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
+   "detect": "detect_blocked_sessions",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-OPEN-CURSOR",
+   "title": "打开游标数",
+   "level": "daily",
+   "dbs": "oracle,dm",
+   "detect": "detect_open_cursors",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-TEMP-USAGE",
+   "title": "临时表空间使用",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm,gbase",
+   "detect": "detect_temp_usage",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-UNDO-USAGE",
+   "title": "Undo 使用率",
+   "level": "daily",
+   "dbs": "oracle,dm,pgsql",
+   "detect": "detect_undo_usage",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-FRAG-TABLE",
+   "title": "高并行度表",
+   "level": "monthly",
+   "dbs": "oracle,dm,gbase",
+   "detect": "detect_high_parallel",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-COM-FAILED-LOGIN",
+   "title": "失败登录异常",
+   "level": "daily",
+   "dbs": "oracle,mysql,pgsql,dm",
+   "detect": "detect_failed_logins",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AWR-SNAP",
+   "title": "AWR 快照间隔",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_awr_interval",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AWR-RET",
+   "title": "AWR 保留周期",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_awr_retention",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AWR-TOP-EVT",
+   "title": "业务高峰 Top Event",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_awr_top_event",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AWR-TOP-SQL",
+   "title": "业务高峰 Top SQL",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_awr_top_sql",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-SCN-HEADROOM",
+   "title": "SCN Headroom",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_scn_headroom",
+   "class": "GenericDetector",
+   "kind": "同名可调用未注册",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-STA-OUTPUT",
+   "title": "SQL Tuning Advisor 结果",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_sta_recommendations",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-SEG-ADV",
+   "title": "Segment Advisor 结果",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_segment_advisor",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AUTO-MW",
+   "title": "自动维护窗口",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_maintenance_window",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-FRA",
+   "title": "FRA 使用率",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_fra_usage",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-CTRL-BAK",
+   "title": "控制文件备份",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_ctrlfile_backup",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-ARCH-DELETE",
+   "title": "归档日志清理策略",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_arch_deletion_policy",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-DBA-USERS",
+   "title": "DBA 权限账号",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_dba_users",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-TS-AUTOEXT",
+   "title": "表空间自动扩展",
+   "level": "monthly",
+   "dbs": "oracle,dm",
+   "detect": "detect_ts_autoextend",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-LOB-PCT",
+   "title": "LOB PCTVERSION 异常",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_lob_pctversion",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-DBLINK",
+   "title": "残留 DBLINK",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_dblinks",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-DIR-OBJ",
+   "title": "Directory 对象",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_directory_objects",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-RMAN-AGE",
+   "title": "RMAN 备份距今",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_rman_backup_age",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-DG-LAG",
+   "title": "DataGuard Lag",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_dg_lag",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-DG-STATUS",
+   "title": "DataGuard 状态",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_dg_status",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-RAC-VIP",
+   "title": "RAC VIP 状态",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_rac_vip",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-REDOLOG-SIZE",
+   "title": "Redo Log 大小",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_redolog_size",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-OPT-STATS-GATHER",
+   "title": "自动统计信息收集",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_auto_stats_gather",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-OPEN-FILE",
+   "title": "打开文件数",
+   "level": "daily",
+   "dbs": "oracle",
+   "detect": "detect_open_files",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-LOB-CACHE",
+   "title": "LOB CACHE 读取",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_lob_cache_hit",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-ASH-USAGE",
+   "title": "ASH 内存使用",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_ash_memory",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-RMAN-CONF",
+   "title": "RMAN 配置",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_rman_config",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-AUDIT-TRAIL",
+   "title": "审计日志",
+   "level": "weekly",
+   "dbs": "oracle",
+   "detect": "detect_audit_trail",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-PGA-LEAK",
+   "title": "PGA 泄漏",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_pga_leak",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-IO-STAT",
+   "title": "IO 分布",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_io_distribution",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-ORA-EXADATA",
+   "title": "Exadata 特性",
+   "level": "monthly",
+   "dbs": "oracle",
+   "detect": "detect_exadata_features",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-BINLOG-DELAY",
+   "title": "Binlog Dump 延迟",
+   "level": "daily",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_binlog_dump_delay",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-GTID",
+   "title": "GTID 一致性",
+   "level": "weekly",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_gtid_consistency",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-SEMI-SYNC",
+   "title": "半同步复制状态",
+   "level": "daily",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_semi_sync",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-EVENT",
+   "title": "Event 调度器",
+   "level": "weekly",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_event_scheduler",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-FK-CASCADE",
+   "title": "危险外键级联",
+   "level": "monthly",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_dangerous_fk",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-MYSQL-TMP-DISK",
+   "title": "磁盘临时表比例",
+   "level": "daily",
+   "dbs": "mysql,tdsql",
+   "detect": "detect_tmp_disk_ratio",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-WAL-RECV",
+   "title": "WAL Receiver 状态",
+   "level": "daily",
+   "dbs": "pgsql",
+   "detect": "detect_wal_receiver",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-INACTIVE-SLOT",
+   "title": "失效复制槽",
+   "level": "daily",
+   "dbs": "pgsql",
+   "detect": "detect_inactive_repl_slot",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-VACUUM-FREEZE",
+   "title": "Freeze Age",
+   "level": "daily",
+   "dbs": "pgsql",
+   "detect": "detect_freeze_age",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-BLOAT",
+   "title": "表/索引膨胀",
+   "level": "weekly",
+   "dbs": "pgsql",
+   "detect": "detect_bloat",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-EXT-OUTDATED",
+   "title": "扩展版本",
+   "level": "monthly",
+   "dbs": "pgsql",
+   "detect": "detect_extension_versions",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-PG-STMT-TIMEOUT",
+   "title": "Statement Timeout",
+   "level": "monthly",
+   "dbs": "pgsql",
+   "detect": "detect_statement_timeout",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-DM-DSC",
+   "title": "DSC 节点状态",
+   "level": "daily",
+   "dbs": "dm",
+   "detect": "detect_dsc_nodes",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-DM-DW-STANDBY",
+   "title": "主备同步状态",
+   "level": "daily",
+   "dbs": "dm",
+   "detect": "detect_dw_standby",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-DM-ARCH",
+   "title": "归档状态",
+   "level": "daily",
+   "dbs": "dm",
+   "detect": "detect_dm_arch",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-DM-RLOG",
+   "title": "RLOG 同步状态",
+   "level": "daily",
+   "dbs": "dm",
+   "detect": "detect_dm_rlog",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-GBASE-BALANCE",
+   "title": "节点负载均衡",
+   "level": "daily",
+   "dbs": "gbase",
+   "detect": "detect_gbase_node_balance",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-GBASE-DIST",
+   "title": "数据分布均衡",
+   "level": "weekly",
+   "dbs": "gbase",
+   "detect": "detect_gbase_distribution",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-GBASE-NODE-DOWN",
+   "title": "节点宕机",
+   "level": "daily",
+   "dbs": "gbase",
+   "detect": "detect_gbase_node_down",
+   "class": "-",
+   "kind": "无同名实现",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-TDSQL-SHARD",
+   "title": "Set 主备健康",
+   "level": "daily",
+   "dbs": "tdsql",
+   "detect": "detect_tdsql_set_health",
+   "class": "TDSQLDetector",
+   "kind": "直接命中",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-TDSQL-PROXY",
+   "title": "Proxy 网关状态",
+   "level": "daily",
+   "dbs": "tdsql",
+   "detect": "detect_tdsql_proxy",
+   "class": "TDSQLDetector",
+   "kind": "直接命中",
+   "tested": "无测试引用"
+  },
+  {
+   "item_id": "INS-TDSQL-SHARDKEY",
+   "title": "分片表配置",
+   "level": "daily",
+   "dbs": "tdsql",
+   "detect": "detect_tdsql_shardkey",
+   "class": "TDSQLDetector",
+   "kind": "直接命中",
+   "tested": "无测试引用"
+  }
+ ]
+}
