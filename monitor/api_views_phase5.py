@@ -17,7 +17,7 @@ from django.views import View
 from django.utils.decorators import method_decorator
 from django.views.decorators.csrf import csrf_exempt
 
-from monitor.auth import require_auth, get_user_database_ids
+from monitor.auth import require_auth, require_permission, Perm
 from monitor.models import (
     AlertLog, DatabaseConfig, AlertCase, RemediationPlan,
     BusinessImpactAssessment, InspectionItem, InspectionRun,
@@ -58,19 +58,19 @@ class AlertRCADetailView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, alert_id):
+        # 权限闸 + 范围闸
+        visible_dbs = DatabaseConfig.objects.visible_to(request.user)
         try:
-            alert = AlertLog.objects.select_related('config').get(id=alert_id)
+            alert = AlertLog.objects.select_related('config').filter(
+                id=alert_id, config__in=visible_dbs
+            ).get()
         except AlertLog.DoesNotExist:
             return self.error_response(f'告警 {alert_id} 不存在', 404)
-
-        # RBAC 校验
-        allowed = get_user_database_ids(request.user)
-        if allowed is not None and alert.config_id not in allowed:
-            return self.error_response('Permission denied', 403)
 
         result = {
             'alert_id': alert.id,
@@ -142,6 +142,7 @@ class AlertRCAQuickView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -169,28 +170,27 @@ class InspectionRunListView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request):
-        config_id = request.GET.get('config_id')
+        config_id = request.GET.get('config_id') or request.GET.get('db_id')
         level = request.GET.get('level')
         status = request.GET.get('status')
         limit = int(request.GET.get('limit', 50))
 
-        # InspectionRun 外键名为 db_config (列 db_config_id)
-        qs = InspectionRun.objects.select_related('db_config').order_by('-started_at')
+        # 权限闸 + 范围闸
+        visible_dbs = DatabaseConfig.objects.visible_to(request.user)
+        qs = InspectionRun.objects.select_related('db_config').filter(
+            db_config__in=visible_dbs
+        ).order_by('-started_at')
         if config_id:
             qs = qs.filter(db_config_id=config_id)
         if level:
             qs = qs.filter(level=level)
         if status:
             qs = qs.filter(status=status)
-
-        # RBAC
-        allowed = get_user_database_ids(request.user)
-        if allowed is not None:
-            qs = qs.filter(db_config_id__in=allowed)
 
         runs = []
         for r in qs[:limit]:
@@ -211,7 +211,9 @@ class InspectionRunListView(_BaseView):
                 'error_count': r.error_count,
                 'warn_count': r.warn_count,
                 'total_risk_score': r.total_risk_score,
-                'health_score': (r.summary or {}).get('health_score', 0),
+                'health_score': (r.summary or {}).get('health_score'),
+                'coverage_status': (r.summary or {}).get('coverage_status', 'normal' if r.executed_items > 0 else 'unassessed'),
+                'coverage_rate': (r.summary or {}).get('coverage_rate', 0.0),
             })
         return self.json_response({'total': len(runs), 'runs': runs})
 
@@ -221,6 +223,7 @@ class InspectionRunTriggerView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -229,62 +232,38 @@ class InspectionRunTriggerView(_BaseView):
             body = json.loads(request.body.decode('utf-8')) if request.body else {}
         except Exception:
             body = {}
-        config_id = body.get('config_id') or request.GET.get('config_id')
+        config_id = body.get('config_id') or body.get('db_id') or request.GET.get('config_id')
         level = body.get('level', 'daily')
 
         if not config_id:
             return self.error_response('config_id 必填')
 
-        try:
-            config = DatabaseConfig.objects.get(id=config_id)
-        except DatabaseConfig.DoesNotExist:
+        # 范围闸：仅能对 visible_to 范围内的实例触发巡检
+        config = DatabaseConfig.objects.visible_to(request.user).filter(id=config_id).first()
+        if not config:
             return self.error_response(f'数据库 {config_id} 不存在', 404)
 
-        # 触发巡检(同步执行 - 简化)
+        # 触发巡检（执行器契约统一）
         from monitor.inspection_executor import InspectionExecutor
-        run_id = f"INSP-{datetime.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}"
-        run = InspectionRun.objects.create(
-            run_id=run_id,
-            db_config=config,
-            level=level,
-            status='running',
-            started_at=timezone.now(),
-            triggered_by='api',
-        )
-
         try:
-            executor = InspectionExecutor(config, level=level)
+            executor = InspectionExecutor(config, level=level, triggered_by='api')
             result = executor.run()
-            # 写入结果
-            run.status = result['status']
-            run.finished_at = timezone.now()
-            run.duration_sec = (run.finished_at - run.started_at).total_seconds()
-            run.total_items = result['total_items']
-            run.executed_items = result['executed_items']
-            run.passed_items = result['passed_items']
-            run.failed_items = result['failed_items']
-            run.error_items = result.get('error_items', 0)
-            run.critical_count = result['critical_count']
-            run.error_count = result['error_count']
-            run.warn_count = result['warn_count']
-            run.info_count = result.get('info_count', 0)
-            run.total_risk_score = result['total_risk_score']
-            run.summary = result.get('summary', {})
-            run.save()
         except Exception as e:
             logger.error(f"[Inspection API] 巡检执行失败: {e}")
-            run.status = 'failed'
-            run.error_message = str(e)
-            run.finished_at = timezone.now()
-            run.save()
-            return self.error_response(f'巡检执行失败: {e}')
+            return self.error_response(f'巡检执行失败: {e}', 500)
 
+        summary = result.get('summary', {})
         return self.json_response({
-            'run_id': run.run_id,
-            'status': run.status,
-            'total_items': run.total_items,
-            'failed_items': run.failed_items,
-            'critical_count': run.critical_count,
+            'run_id': result['run_id'],
+            'status': result['status'],
+            'total_items': result['total_items'],
+            'executed_items': result['executed_items'],
+            'passed_items': result['passed_items'],
+            'failed_items': result['failed_items'],
+            'critical_count': result['critical_count'],
+            'health_score': summary.get('health_score'),
+            'coverage_status': summary.get('coverage_status', 'normal'),
+            'coverage_rate': summary.get('coverage_rate', 0.0),
         })
 
 
@@ -293,12 +272,17 @@ class InspectionRunDetailView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
     def get(self, request, run_id):
+        # 权限闸 + 范围闸
+        visible_dbs = DatabaseConfig.objects.visible_to(request.user)
         try:
-            run = InspectionRun.objects.get(run_id=run_id)
+            run = InspectionRun.objects.select_related('db_config').filter(
+                run_id=run_id, db_config__in=visible_dbs
+            ).get()
         except InspectionRun.DoesNotExist:
             return self.error_response(f'巡检 {run_id} 不存在', 404)
 
@@ -336,7 +320,9 @@ class InspectionRunDetailView(_BaseView):
                 'error_count': run.error_count,
                 'warn_count': run.warn_count,
                 'total_risk_score': run.total_risk_score,
-                'health_score': (run.summary or {}).get('health_score', 0),
+                'health_score': (run.summary or {}).get('health_score'),
+                'coverage_status': (run.summary or {}).get('coverage_status', 'normal' if run.executed_items > 0 else 'unassessed'),
+                'coverage_rate': (run.summary or {}).get('coverage_rate', 0.0),
             },
             'findings': findings,
         })
@@ -347,6 +333,7 @@ class InspectionItemListView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -387,6 +374,7 @@ class InspectionIssuePatternListView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -416,6 +404,7 @@ class AlertCaseListView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -455,6 +444,7 @@ class AlertCaseSearchView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.ALERTS_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 
@@ -525,6 +515,7 @@ class Phase5StatsView(_BaseView):
 
     @method_decorator(csrf_exempt)
     @method_decorator(require_auth)
+    @method_decorator(require_permission(Perm.DATABASES_VIEW))
     def dispatch(self, *args, **kwargs):
         return super().dispatch(*args, **kwargs)
 

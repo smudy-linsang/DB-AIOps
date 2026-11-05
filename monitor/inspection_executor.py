@@ -24,6 +24,7 @@ import json
 import logging
 import time
 import traceback
+import uuid
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from dataclasses import dataclass, field
 from datetime import datetime, timedelta
@@ -1499,20 +1500,65 @@ class InspectionExecutor:
     """巡检执行器
 
     用法:
+        # 方式 1: 直接指定实例执行
         executor = InspectionExecutor()
-        run = executor.run_for_db(db_config, level="daily")
+        run_id = executor.run_for_db(db_config, level="daily")
+
+        # 方式 2: 面向对象契约执行
+        executor = InspectionExecutor(db_config, level="daily")
+        result = executor.run()
+
+        # 方式 3: 批量执行
+        run_ids = InspectionExecutor().run_for_all_dbs(level="daily")
     """
 
     DEFAULT_TIMEOUT = 30
     MAX_WORKERS = 4
 
-    def __init__(self, max_workers: int = MAX_WORKERS, default_timeout: int = DEFAULT_TIMEOUT):
-        self.max_workers = max_workers
-        self.default_timeout = default_timeout
+    def __init__(self, db_config=None, level: str = "daily",
+                 max_workers: int = MAX_WORKERS, default_timeout: int = DEFAULT_TIMEOUT,
+                 triggered_by: str = "manual", **kwargs):
+        # 兼容旧签名 InspectionExecutor(max_workers, default_timeout)
+        if isinstance(db_config, int):
+            self.max_workers = db_config
+            self.default_timeout = level if isinstance(level, int) else default_timeout
+            self.db_config = None
+            self.level = "daily"
+            self.triggered_by = triggered_by
+        else:
+            self.db_config = db_config
+            self.level = level
+            self.max_workers = kwargs.get("max_workers", max_workers)
+            self.default_timeout = kwargs.get("default_timeout", default_timeout)
+            self.triggered_by = triggered_by
         self._logger = logging.getLogger("monitor.inspection_executor")
 
+    def run(self) -> Dict[str, Any]:
+        """针对构造时传入的 db_config 执行巡检并返回结果字典"""
+        if not self.db_config:
+            raise ValueError("InspectionExecutor.run() 需要 db_config 实例，或改用 run_for_db(db_config)")
+        run_id = self.run_for_db(self.db_config, level=self.level, triggered_by=self.triggered_by)
+        from monitor.models import InspectionRun
+        run = InspectionRun.objects.get(run_id=run_id)
+        return {
+            'run_id': run.run_id,
+            'status': run.status,
+            'total_items': run.total_items,
+            'executed_items': run.executed_items,
+            'passed_items': run.passed_items,
+            'failed_items': run.failed_items,
+            'error_items': run.error_items,
+            'critical_count': run.critical_count,
+            'error_count': run.error_count,
+            'warn_count': run.warn_count,
+            'info_count': run.info_count,
+            'total_risk_score': run.total_risk_score,
+            'summary': run.summary or {},
+        }
+
     def run_for_db(self, db_config, level: str = "daily",
-                   item_ids: Optional[List[str]] = None) -> str:
+                   item_ids: Optional[List[str]] = None,
+                   triggered_by: str = "scheduler") -> str:
         """针对单个数据库执行一次巡检
 
         参数:
@@ -1538,13 +1584,15 @@ class InspectionExecutor:
         self._sync_items_to_db(items)
 
         # 3) 创建 Run
+        run_id = f"INSP-{timezone.now().strftime('%Y%m%d%H%M%S')}-{uuid.uuid4().hex[:6].upper()}-{db_config.id}"
         run = InspectionRun.objects.create(
-            run_id=f"INSP-{timezone.now().strftime('%Y%m%d%H%M%S')}-{db_config.id}",
+            run_id=run_id,
             level=level,
             db_config=db_config,
             status="running",
             started_at=timezone.now(),
             total_items=len(items),
+            triggered_by=triggered_by,
         )
 
         # 4) 准备检测上下文
@@ -1636,8 +1684,14 @@ class InspectionExecutor:
         run.info_count = skip
         run.total_risk_score = round(total_risk, 1)
         run.duration_sec = round(time.time() - start_ts, 1)
+        coverage_status, coverage_rate = self._calc_coverage_status(ok, warn, crit, err, skip)
+        health_score = self._calc_health_score(ok, warn, crit, err, skip)
         run.summary = {
-            "health_score": self._calc_health_score(ok, warn, crit, err),
+            "health_score": health_score,
+            "coverage_status": coverage_status,
+            "coverage_rate": coverage_rate,
+            "total_items": executed + skip,
+            "executed_items": executed,
             "skipped": skip,
         }
         run.save()
@@ -1696,10 +1750,33 @@ class InspectionExecutor:
         return r
 
     @staticmethod
-    def _calc_health_score(ok: int, warn: int, crit: int, err: int) -> float:
+    def _calc_coverage_status(ok: int, warn: int, crit: int, err: int, skip: int) -> Tuple[str, float]:
+        """根据已执行项与跳过项计算覆盖状态与覆盖率
+
+        返回值: (status, rate_percentage)
+        - status 取值:
+          - "unassessed": 未执行任何项 (executed == 0)
+          - "insufficient_coverage": 执行项不足 (skip > 0 且 skip / (executed + skip) > 0.5)
+          - "normal": 正常执行
+        """
+        executed = ok + warn + crit + err
+        total = executed + skip
+        if total == 0:
+            return "unassessed", 0.0
+        rate = round(executed / total * 100, 1)
+        if executed == 0:
+            return "unassessed", 0.0
+        if skip > 0 and (skip / total) > 0.5:
+            return "insufficient_coverage", rate
+        return "normal", rate
+
+    @staticmethod
+    def _calc_health_score(ok: int, warn: int, crit: int, err: int, skip: int = 0) -> float:
         """计算健康分(0-100)"""
-        total = max(ok + warn + crit + err, 1)
-        score = (ok * 1.0 + warn * 0.6 + crit * 0.2 + err * 0.0) / total * 100
+        executed = ok + warn + crit + err
+        if executed == 0:
+            return 0.0
+        score = (ok * 1.0 + warn * 0.6 + crit * 0.2 + err * 0.0) / executed * 100
         return round(score, 1)
 
     @staticmethod
@@ -1707,6 +1784,7 @@ class InspectionExecutor:
         """把内存中的巡检项定义同步到 DB"""
         from monitor.models import InspectionItem as ItemModel
         for it in items:
+            db_types = it.get("applicable_db_types", [])
             obj, created = ItemModel.objects.update_or_create(
                 item_id=it.get("item_id"),
                 defaults={
@@ -1714,7 +1792,6 @@ class InspectionExecutor:
                     "category": it.get("category", ""),
                     "level": it.get("level", "daily"),
                     "severity": it.get("severity", "warn"),
-                    "applicable_db_types": it.get("applicable_db_types", []),
                     "description": it.get("description", ""),
                     "detect_method": it.get("detect_method", ""),
                     "threshold": it.get("threshold", {}),
@@ -1723,6 +1800,9 @@ class InspectionExecutor:
                     "auto_fix_sql": it.get("auto_fix_sql", ""),
                 },
             )
+            # 4NF: 子表关联属性在主模型落库后单独赋值，避免 setter 在 __init__ 中提前 save 触发重复插入冲突
+            if db_types:
+                obj.applicable_db_types = db_types
 
 
 # ============================================================================

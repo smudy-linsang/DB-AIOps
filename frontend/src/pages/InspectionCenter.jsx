@@ -131,11 +131,21 @@ const InspectionCenter = () => {
       dataIndex: 'health_score',
       key: 'health',
       sorter: (a, b) => (a.health_score || 0) - (b.health_score || 0),
-      render: (s) => {
+      render: (s, r) => {
+        if (r.coverage_status === 'unassessed') {
+          return <Tag color="default">未评估</Tag>
+        }
+        if (r.coverage_status === 'insufficient_coverage') {
+          return (
+            <Tooltip title={`覆盖率 ${r.coverage_rate || 0}%（有效评估项不足50%）`}>
+              <Tag color="warning">覆盖不足 ({s || 0}分)</Tag>
+            </Tooltip>
+          )
+        }
         const v = s || 0
         const color = v >= 90 ? '#52c41a' : v >= 70 ? '#faad14' : '#f5222d'
         return (
-          <Tooltip title={`健康度: ${v}/100`}>
+          <Tooltip title={`健康度: ${v}/100 (覆盖率 ${r.coverage_rate || 100}%)`}>
             <Progress percent={v} size="small" strokeColor={color} />
           </Tooltip>
         )

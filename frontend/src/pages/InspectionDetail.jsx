@@ -63,9 +63,17 @@ const InspectionDetail = () => {
     return <Alert type="warning" message="无数据" />
   }
 
-  const score = run.health_score || 0
-  const scoreColor = score >= 90 ? '#52c41a' : score >= 70 ? '#faad14' : '#f5222d'
-  const scoreText = score >= 90 ? '健康' : score >= 70 ? '注意' : '风险'
+  const coverageStatus = run.coverage_status || 'normal'
+  const score = run.health_score ?? 0
+  let scoreColor = score >= 90 ? '#52c41a' : score >= 70 ? '#faad14' : '#f5222d'
+  let scoreText = score >= 90 ? '健康' : score >= 70 ? '注意' : '风险'
+  if (coverageStatus === 'unassessed') {
+    scoreColor = '#8c8c8c'
+    scoreText = '未评估'
+  } else if (coverageStatus === 'insufficient_coverage') {
+    scoreColor = '#faad14'
+    scoreText = `覆盖不足 (覆盖率 ${run.coverage_rate || 0}%)`
+  }
 
   const findingColumns = [
     { title: '编号', dataIndex: 'item_code', key: 'item_code', width: 100 },
