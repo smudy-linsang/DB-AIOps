@@ -50,3 +50,9 @@
   - 改动：`frontend/package-lock.json` 把 follow-redirects 升到 1.16.2，3 行（version / resolved / integrity）。
   - 本地验证：`npm ci` 后 `npm audit --audit-level=high` exit 0，`validate.sh frontend` exit 0。
 - **待确认**：这个依赖修复超出 DB-012 "只改触发分支"的范围，是否由 A 直推，待用户 / 部门经理确认。AGENTS.md 要求"看到红立刻修或回滚"，回滚本单并不能消除红灯。
+
+## 补记：红灯已修复（2026-11-05）
+
+- 用户 2026-11-05 确认由 A 直推依赖修复：`2bb70cc` `fix(deps): follow-redirects 1.16.1 → 1.16.2`，只改 `frontend/package-lock.json` 3 行。
+- CI [#102 41949496556](https://github.com/smudy-linsang/DB-AIOps/actions/runs/41949496556)（main @`2bb70cc`）结论为 **success**，main 恢复全绿。
+- 仍有 vitest 的 2 条 moderate 通告（GHSA-qxg6-89mg-rqv8、GHSA-xp26-3454-mjgp），低于门禁阈值 high，未处理；如需清零，需要升级 vitest 大版本，宜另立单。
