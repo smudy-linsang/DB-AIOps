@@ -1,0 +1,27 @@
+{
+  "source_sha": "71db4fa3db13685c9768df01b6e9e03de178fc02",
+  "mapping_rows": 82,
+  "items": 82,
+  "registry_keys": 26,
+  "counts": {
+    "同名可调用未注册": 8,
+    "无同名实现": 71,
+    "直接命中": 3
+  },
+  "mapping_mismatches": [],
+  "design_categories": {
+    "部分落地": 12,
+    "已落地": 11,
+    "仍有效": 1,
+    "已过时": 1
+  },
+  "dialect_test_count": 24,
+  "cad_to_O": [
+    ".github/workflows/a-autorun.yml",
+    ".github/workflows/o-autorun.yml",
+    "monitor/tests_pm_a_inbox.py"
+  ],
+  "O_to_source": [
+    ".github/workflows/ci.yml"
+  ]
+}

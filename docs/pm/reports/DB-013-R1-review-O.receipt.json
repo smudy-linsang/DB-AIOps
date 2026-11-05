@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "role": "O",
+  "task_id": "DB-013",
+  "round": 1,
+  "source_sha": "71db4fa3db13685c9768df01b6e9e03de178fc02",
+  "job_key": "2a582d66b4216fde47923fa14e3c0090ba5546ea018654834c46a6fea1822be0",
+  "conclusion": "有条件通过",
+  "report_path": "docs/pm/reports/DB-013-R1-review-O.md",
+  "report_sha256": "18bf015e1bb270e8d08227af69ecb277d9e05bdc84dbb39ae35af6aa13fc72d3",
+  "checks": [
+    {
+      "name": "合成API与调度披露复现",
+      "result": "PASS"
+    },
+    {
+      "name": "82项静态映射与25稿分类核对",
+      "result": "PASS"
+    },
+    {
+      "name": "冻结基线及CI现状表述",
+      "result": "FAIL"
+    },
+    {
+      "name": "安全前置与依赖审查",
+      "result": "PASS"
+    },
+    {
+      "name": "unit统一入口（归档无git）",
+      "result": "BLOCKED"
+    },
+    {
+      "name": "派单manifest可用性",
+      "result": "BLOCKED"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "docs/pm/reports/evidence/DB-013-R1-O/lint.txt",
+      "sha256": "3bb0bcdcbc8bf0a58cc18153ea6a979e22b501480c31b2b877e7993e1179480c"
+    },
+    {
+      "path": "docs/pm/reports/evidence/DB-013-R1-O/probe-results.json",
+      "sha256": "28823cbbb6243daa5c6e58821203ae34809d2a63b8923523855d3430865ecd74"
+    },
+    {
+      "path": "docs/pm/reports/evidence/DB-013-R1-O/reproduce.py",
+      "sha256": "566a170051e6d89b197fa4fdbb608cf041e8417437698d8be866da546bcf0aef"
+    },
+    {
+      "path": "docs/pm/reports/evidence/DB-013-R1-O/static-results.json",
+      "sha256": "c163eb4189e4be83bcf4225071dc26e31811634c56f6d6936311c9a47a3c1009"
+    },
+    {
+      "path": "docs/pm/reports/evidence/DB-013-R1-O/unit.json",
+      "sha256": "b5e9ff38621cb7315bd8c7512bf3c7232f945af23e76d4843d0cc6b876e0445e"
+    }
+  ]
+}
