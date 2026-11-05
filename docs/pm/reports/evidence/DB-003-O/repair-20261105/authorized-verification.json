@@ -1,0 +1,14 @@
+{
+  "owner_authorization": "verified by real Actions",
+  "model_run": "41954863519",
+  "delivery_run": "41955924701",
+  "job_count": 1,
+  "job_state": "done",
+  "job_key": "2a582d66b4216fde47923fa14e3c0090ba5546ea018654834c46a6fea1822be0",
+  "source_sha": "71db4fa3db13685c9768df01b6e9e03de178fc02",
+  "validated_publication_sha": "74f42ba58331d8c102d8d450de04c81cb9fd49c8",
+  "canonical_report_sha256": "18bf015e1bb270e8d08227af69ecb277d9e05bdc84dbb39ae35af6aa13fc72d3",
+  "conclusion": "有条件通过",
+  "duplicate_model_execution": false,
+  "limits": "O executor chain only; does not claim external broadcaster/whole DB-003 acceptance"
+}
