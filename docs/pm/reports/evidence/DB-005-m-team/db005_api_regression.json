@@ -1,0 +1,775 @@
+{
+  "label": "B",
+  "base": "http://<local-host>:<platform-port>",
+  "db_config_id": 18,
+  "slow_time_range": "30m",
+  "regression_window": {
+    "from": "2026-11-05T20:45:58+08:00",
+    "to": "2026-11-05T20:59:30+08:00",
+    "base_from": "2026-11-05T20:33:00+08:00",
+    "base_to": "2026-11-05T20:44:00+08:00"
+  },
+  "login_user": "mteam",
+  "results": [
+    {
+      "id": "C-1",
+      "name": "慢 SQL 列表非空 + basis=window",
+      "status": "PASS",
+      "detail": "count=19 basis=window warning=None untrusted=[]",
+      "expect": "basis=window 且无「数据不可信」提示"
+    },
+    {
+      "id": "C-2",
+      "name": "排序：慢查询排前、点查不在前列",
+      "status": "PASS",
+      "detail": "slow_user_sort 位次=1；pk_lookup 位次=5；慢 SQL 列表 Top8：1) SELECT status, COUNT(*), SUM(amount) FROM orde | avg_ms=60.913 exec=115 total_s=7.005 ‖ 2) SELECT id, amount FROM orders WHERE user_id =  | avg_ms=18.003 exec=295 total_s=5.311 ‖ 3) SELECT COUNT(*) FROM orders WHERE created_at > | avg_ms=43.521 exec=94 total_s=4.091 ‖ 4) SELECT table_schema AS table_schema, table_nam | avg_ms=61.767 exec=30 total_s=1.853 ‖ 5) SELECT table_schema AS db_name,\n               | avg_ms=51.233 exec=30 total_s=1.537 ‖ 6) SELECT id FROM orders WHERE id = 286108 AND us | avg_ms=0.324 exec=2075 total_s=0.673 ‖ 7) SELECT id, user, host, db, command, time, stat | avg_ms=0.133 exec=30 total_s=0.004 ‖ 8) SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FRO | avg_ms=1.0 exec=2 total_s=0.002",
+      "expect": "场景 B 期间 slow_user_sort 排第一，pk_lookup 不在前列"
+    },
+    {
+      "id": "C-3",
+      "name": "单位：avg_ms 与客户端平均耗时同数量级",
+      "status": "OBSERVED",
+      "detail": "平台 avg_ms：slow_user_sort=18.003、pk_lookup=0.324、agg=60.913、range=43.521；客户端侧（workload 打印）：slow_user_sort 23.4ms、pk_lookup 4.5ms、agg 42.3ms、range 18.0ms（平台为库内耗时，客户端为驱动端耗时，含 proxy 往返）",
+      "expect": "与 workload 客户端平均耗时同数量级且同趋势"
+    },
+    {
+      "id": "A-1",
+      "name": "优化建议：I-01 复合索引 DDL 可执行、不误报 D-01",
+      "status": "PASS",
+      "detail": "advice_codes=['I-01', 'I-02'] index_suggestions=[{\"table\": \"为表 orders 建立复合索引\", \"columns\": [\"user_id\", \"created_at\"], \"create_sql\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);\", \"reason\": \"按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)\"}, {\"ta",
+      "expect": "I-01 给出可执行 DDL；不出现 D-01"
+    },
+    {
+      "id": "A-2",
+      "name": "优化建议：索引已存在时不再建议建同一索引",
+      "status": "PASS",
+      "detail": "专项脚本实测（digest 6171e5b3b12f5cc4016eacc2545f3359）：索引已删 ⇒ advice=['I-01', 'I-02']；index add 后索引已存在 ⇒ advice=['I-03']（不再建议建同一索引，转 I-03）；复原后 ⇒ ['I-01', 'I-02']",
+      "expect": "索引缺失时给 I-01；索引存在时不重复建议（I-03/I-04）"
+    },
+    {
+      "id": "A-5",
+      "name": "优化建议：表名/列名真实存在、无系统表建议",
+      "status": "OBSERVED",
+      "detail": "advice_codes=['I-01', 'I-02'] index_suggestions=[{\"table\": \"为表 orders 建立复合索引\", \"columns\": [\"user_id\", \"created_at\"], \"create_sql\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);\", \"reason\": \"按 等值列 → 排序/分组列 → 范围列",
+      "expect": "建议里表名/列名真实存在，无 information_schema 建议"
+    },
+    {
+      "id": "B-1",
+      "name": "耗时构成三段：CPU 未采集时不得显示 100% CPU",
+      "status": "PASS",
+      "detail": "breakdown={\"lock_ms\": 0.0, \"cpu_ms\": null, \"other_ms\": null, \"cpu_known\": false, \"cpu_hint\": \"CPU 时间未采集：需在目标库开启 performance_schema 的 events_statements_cpu consumer （UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME='events_statements_cpu'）；该设置重启后失效，持久化需在 my.cnf 配置 performance-schema-consumer-events-statements-cpu=ON。开启后才能拆分 CPU 与 IO/等待\"} finding_codes=['SCAN_INEFFICIENT', 'FUL",
+      "expect": "未开 CPU consumer 时显示「CPU 未采集」且不出现 100% CPU"
+    },
+    {
+      "id": "B-2",
+      "name": "每次执行明细含扫描效率/全表扫描结论",
+      "status": "PASS",
+      "detail": "finding_codes=['SCAN_INEFFICIENT', 'FULL_SCAN'] per_exec={\"rows_examined\": 150003.0, \"rows_sent\": 3.0, \"sort_rows\": 3.0, \"sort_merge_passes\": 0.0} ratios={\"scan_efficiency\": 50824.0, \"full_scan_share\": 1.0, \"full_join_share\": 0.0, \"no_index_share\": 1.0, \"tmp_disk_share\": null, \"error_share\": 0.0, \"lock_share\": 0.0}",
+      "expect": "含 SCAN_INEFFICIENT / FULL_SCAN"
+    },
+    {
+      "id": "B-3",
+      "name": "锁等待：平台汇总出 LOCK_WAIT",
+      "status": "PASS",
+      "detail": "finding_codes=['LOCK_WAIT'] breakdown={\"lock_ms\": 18060.0, \"cpu_ms\": null, \"other_ms\": null, \"cpu_known\": false, \"cpu_hint\": \"CPU 时间未采集：需在目标库开启 performance_schema 的 events_statements_cpu consumer （UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME='events_statements_cpu'）；该设置重启后失效，持久化需在 my.cnf 配置 performance-schema-consumer-events-statements-cpu=ON。开启后才能拆分 CPU 与 IO/等待\"} ratios=",
+      "expect": "lockwait 跑过之后该 UPDATE 的锁等待占比显著且给出 LOCK_WAIT"
+    },
+    {
+      "id": "R-1",
+      "name": "退化：slow_user_sort 状态=退化且倍数>1.5",
+      "status": "PASS",
+      "detail": "status=regressed avg_ratio=47.02 current={'exec': 494, 'total_ms': 9151, 'avg_ms': 18.524, 'rows_examined_per_exec': 150003.0, 'lock_ms_per_exec': 0.0} baseline={'exec': 360, 'total_ms': 142, 'avg_ms': 0.394, 'rows_examined_per_exec': 3.0, 'lock_ms_per_exec': 0.0} plan_changed_at=2026-11-05T12:50:03.103823+00:00",
+      "expect": "slow_user_sort 为「退化」，倍数>1.5，且能反映计划变化时间"
+    },
+    {
+      "id": "R-2",
+      "name": "退化：点查 pk_lookup 未退化（稳定/改善）",
+      "status": "PASS",
+      "detail": "pk_lookup 不在 items（接口过滤 stable，counts.stable=6）；平台口径 avg：当前窗 0.311 ms vs 基线窗 0.286 ms ⇒ 倍率 1.087（<1.5 即未判退化）",
+      "expect": "pk_lookup「稳定」——接口对 stable 不返回条目，以 counts.stable + 两窗 avg 倍率判定"
+    },
+    {
+      "id": "R-3",
+      "name": "新增语义：基线窗口完全未出现的 SQL 判为「新增」",
+      "status": "PASS",
+      "detail": "lockwait UPDATE status=new baseline=None；全部 new 项 digest=['d92061db99b8', '0b230517d4f6', '57755c0cc694', '0eec58c68977', 'eed7e918c0a1', '3e67fa9d38d8', '94922d524b37', '263efc9027b5']",
+      "expect": "只有基线窗口完全没出现过的 SQL 才是「新增」"
+    },
+    {
+      "id": "B-7",
+      "name": "EXPLAIN ANALYZE 守卫：写语句被本地拒绝",
+      "status": "SKIP_GATE_CLOSED",
+      "detail": "HTTP 403 body={\"code\": \"DISABLED\", \"message\": \"EXPLAIN ANALYZE 未开启（配置项 PERF_EXPLAIN_ANALYZE_ENABLED）\"}",
+      "expect": "开关关闭时未进入守卫分支（功能级拒绝），无法验「语句级拒绝」"
+    },
+    {
+      "id": "C-5",
+      "name": "慢 SQL 告警：场景 B 内平台产出慢 SQL 告警",
+      "status": "PASS",
+      "detail": "slow_query 告警 1 条：2026-11-05 20:53:58 [WARNING] 慢查询检测 — 近 30 分钟检测到 1 条慢 SQL 最慢 SQL 平均耗时：11305.0ms（执行 2 次） SQL摘要：UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?",
+      "expect": "场景 B 内出现慢 SQL 告警（阈值 SLOW_SQL_AVG_MS 实测 1000ms，本单未改该配置）"
+    },
+    {
+      "id": "B-3b",
+      "name": "锁等待告警：阻塞分析侧独立告警",
+      "status": "PASS",
+      "detail": "lock 告警 1 条：2026-11-05 20:44:58 [CRITICAL] 性能告警：锁等待 — 检测到严重的数据库阻塞（Lock Wait）：  -------------------------------- 凶手 (Blocker): N/A (16850) 受害 (Waiter) : N/A (16851) 已阻塞时   : 12 秒 -------------------------------- 注意：时长仍在增加，请DB",
+      "expect": "阻塞分析侧独立产出锁等待告警"
+    },
+    {
+      "id": "C-4p",
+      "name": "单 set 口径等价对账：平台 exec_count 与手工 COUNT_STAR 同量级",
+      "status": "OBSERVED",
+      "detail": "platform=[{\"sql\": \"SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY \", \"manual_count_star\": 330, \"manual_total_ms\": 14598.047, \"manual_rows_examined\": 49500000, \"manual_lock_s\": 1.281, \"platform_exec_count\": 115, \"platform_total_time_sec\": 7.005, \"platform_avg_ms\": 60.913, \"platform_rows_examined\": 17250000}, {\"sql\": \"SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? OR",
+      "expect": "mock 为单 set，只做单 set 口径等价验证（set 级对账见 C-4 缺口）"
+    },
+    {
+      "id": "C-4",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "跨 set 对账需真 TDSQL set 拓扑（mock 无 set 级真值）",
+      "expect": ""
+    },
+    {
+      "id": "A-3",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "D-01/D-05 需 groupshard 实例与 set 数（mock 拓扑识别失败）",
+      "expect": ""
+    },
+    {
+      "id": "A-4",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "D-01 需 groupshard 实例与 shardkey 路由语义",
+      "expect": ""
+    },
+    {
+      "id": "B-4",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "按 set 分布需 set 级真值",
+      "expect": ""
+    },
+    {
+      "id": "B-5",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "EXPLAIN ANALYZE 门禁：V-7 内网结论「无法判定」⇒ 不放行（开关默认关，实测 403 DISABLED）",
+      "expect": ""
+    },
+    {
+      "id": "B-6",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "EXPLAIN ANALYZE 超时截断同上（受同一门禁约束）",
+      "expect": ""
+    },
+    {
+      "id": "R-4",
+      "name": "外网不可跑（记缺口）",
+      "status": "SKIP_NOT_EXTERNAL",
+      "detail": "昨日/上周同时段需运行满一天",
+      "expect": ""
+    }
+  ],
+  "notes": {
+    "digests": {
+      "lockwait_update": {
+        "digest64": "d92061db99b87ea3af2c3c20182c7d6951631459d022271067c7eabcfefb4f77",
+        "digest32": "d92061db99b87ea3af2c3c20182c7d69",
+        "count_star": 2,
+        "total_ms": 22610.067,
+        "lock_s": 18060.47,
+        "rows_examined": 2,
+        "text": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+      },
+      "slow_user_sort": {
+        "digest64": "6171e5b3b12f5cc4016eacc2545f3359d872f06e041f1f07eb0721bacd837535",
+        "digest32": "6171e5b3b12f5cc4016eacc2545f3359",
+        "count_star": 1025,
+        "total_ms": 9694.268,
+        "lock_s": 3.491,
+        "rows_examined": 77403088,
+        "text": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+      },
+      "agg_no_shardkey": {
+        "digest64": "5f9188806d79ff78a3f0a05bea9c49cfa3bf2292bb77012f1a19acaed0692a1d",
+        "digest32": "5f9188806d79ff78a3f0a05bea9c49cf",
+        "count_star": 330,
+        "total_ms": 14598.047,
+        "lock_s": 1.281,
+        "rows_examined": 49500000,
+        "text": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+      },
+      "range_no_key": {
+        "digest64": "403d6015f4e53d1edc7c7ffd6c02fd03e99c0da05438a8abc1bec7e08f61f199",
+        "digest32": "403d6015f4e53d1edc7c7ffd6c02fd03",
+        "count_star": 302,
+        "total_ms": 6596.708,
+        "lock_s": 1.102,
+        "rows_examined": 45300000,
+        "text": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+      },
+      "pk_lookup": {
+        "digest64": "1581b156e40f00f664570a0264cf25321f4382d268edeed4a42aab234443e49d",
+        "digest32": "1581b156e40f00f664570a0264cf2532",
+        "count_star": 6727,
+        "total_ms": 2046.036,
+        "lock_s": 24.15,
+        "rows_examined": 0,
+        "text": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+      }
+    },
+    "raw_digest_rows": {
+      "lockwait_update": [
+        {
+          "DIGEST": "d92061db99b87ea3af2c3c20182c7d6951631459d022271067c7eabcfefb4f77",
+          "DIGEST_TEXT": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?",
+          "COUNT_STAR": 2,
+          "total_ms": 22610.067,
+          "lock_s": 18060.47,
+          "rows_ex": 2
+        }
+      ],
+      "slow_user_sort": [
+        {
+          "DIGEST": "6171e5b3b12f5cc4016eacc2545f3359d872f06e041f1f07eb0721bacd837535",
+          "DIGEST_TEXT": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?",
+          "COUNT_STAR": 1025,
+          "total_ms": 9694.268,
+          "lock_s": 3.491,
+          "rows_ex": 77403088
+        }
+      ],
+      "agg_no_shardkey": [
+        {
+          "DIGEST": "5f9188806d79ff78a3f0a05bea9c49cfa3bf2292bb77012f1a19acaed0692a1d",
+          "DIGEST_TEXT": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS",
+          "COUNT_STAR": 330,
+          "total_ms": 14598.047,
+          "lock_s": 1.281,
+          "rows_ex": 49500000
+        }
+      ],
+      "range_no_key": [
+        {
+          "DIGEST": "403d6015f4e53d1edc7c7ffd6c02fd03e99c0da05438a8abc1bec7e08f61f199",
+          "DIGEST_TEXT": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR",
+          "COUNT_STAR": 302,
+          "total_ms": 6596.708,
+          "lock_s": 1.102,
+          "rows_ex": 45300000
+        },
+        {
+          "DIGEST": "0b230517d4f6513c9e6cee87741f1d9c712c25cea8a79417f8c044204408690b",
+          "DIGEST_TEXT": "EXPLAIN FORMAT = JSON SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR",
+          "COUNT_STAR": 2,
+          "total_ms": 1.08,
+          "lock_s": 0.005,
+          "rows_ex": 0
+        },
+        {
+          "DIGEST": "4d4f0bd83b6136f7457fdc405ff24af8d0bea8ec6a9ee63de7143819f5542740",
+          "DIGEST_TEXT": "EXPLAIN FORMAT = `TREE` SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR",
+          "COUNT_STAR": 2,
+          "total_ms": 0.985,
+          "lock_s": 0.004,
+          "rows_ex": 0
+        }
+      ],
+      "pk_lookup": [
+        {
+          "DIGEST": "1581b156e40f00f664570a0264cf25321f4382d268edeed4a42aab234443e49d",
+          "DIGEST_TEXT": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?",
+          "COUNT_STAR": 6727,
+          "total_ms": 2046.036,
+          "lock_s": 24.15,
+          "rows_ex": 0
+        }
+      ]
+    },
+    "slow_http": 200,
+    "slow_time_range": "30m",
+    "slow_count": 19,
+    "basis": "window",
+    "warning": null,
+    "shape_positions": {
+      "slow_user_sort": 1,
+      "agg_no_shardkey": 0,
+      "range_no_key": 2,
+      "pk_lookup": 5
+    },
+    "slow_top": [
+      {
+        "sql": "SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+        "digest32": "5f9188806d79ff78a3f0a05bea9c49cf",
+        "avg_ms": 60.913,
+        "exec_count": 115,
+        "total_time_sec": 7.005,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT id, amount FROM orders WHERE user_id = 37720 ORDER BY created_a",
+        "digest32": "6171e5b3b12f5cc4016eacc2545f3359",
+        "avg_ms": 18.003,
+        "exec_count": 295,
+        "total_time_sec": 5.311,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 4 HOU",
+        "digest32": "403d6015f4e53d1edc7c7ffd6c02fd03",
+        "avg_ms": 43.521,
+        "exec_count": 94,
+        "total_time_sec": 4.091,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT table_schema AS table_schema, table_name AS table_name,\n       ",
+        "digest32": "80804d1cc937b0fb077c1495a19c0964",
+        "avg_ms": 61.767,
+        "exec_count": 30,
+        "total_time_sec": 1.853,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT table_schema AS db_name,\n                           ROUND(SUM(d",
+        "digest32": "d1b847d614e6c2b66f91d482065ece0c",
+        "avg_ms": 51.233,
+        "exec_count": 30,
+        "total_time_sec": 1.537,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT id FROM orders WHERE id = 286108 AND user_id = 21434",
+        "digest32": "1581b156e40f00f664570a0264cf2532",
+        "avg_ms": 0.324,
+        "exec_count": 2075,
+        "total_time_sec": 0.673,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT id, user, host, db, command, time, state, info AS sql_info\n    ",
+        "digest32": "8976a6772b61765005bf7e497e07f4c7",
+        "avg_ms": 0.133,
+        "exec_count": 30,
+        "total_time_sec": 0.004,
+        "is_slow": false
+      },
+      {
+        "sql": "SELECT TABLE_NAME, INDEX_NAME, COLUMN_NAME FROM information_schema.sta",
+        "digest32": "a5df47899326d3d183539025603f93c2",
+        "avg_ms": 1.0,
+        "exec_count": 2,
+        "total_time_sec": 0.002,
+        "is_slow": false
+      }
+    ],
+    "slow_user_sort_detail": {
+      "http": 200,
+      "advice_codes": [
+        "I-01",
+        "I-02"
+      ],
+      "index_suggestions": "[{\"table\": \"为表 orders 建立复合索引\", \"columns\": [\"user_id\", \"created_at\"], \"create_sql\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);\", \"reason\": \"按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)\"}, {\"table\": \"可选：表 orders 的覆盖索引\", \"columns\": [\"user_id\", \"created_at\", \"amount\"], \"create_sql\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);\", \"reason\": \"在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大\"}]",
+      "advice": "[{\"code\": \"I-01\", \"severity\": \"high\", \"category\": \"index\", \"title\": \"为表 orders 建立复合索引\", \"detail\": \"按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)\", \"evidence\": {\"columns\": [\"user_id\", \"created_at\"]}, \"ddl\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);\", \"rewrite\": null, \"expected\": \"消除全表扫描与排序\"}, {\"code\": \"I-02\", \"severity\": \"low\", \"category\": \"index\", \"title\": \"可选：表 orders 的覆盖索引\", \"detail\": \"在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大\", \"evidence\": {\"columns\": [\"user_id\", \"created_at\", \"amount\"]}, \"ddl\": \"ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);\", \"rewrite\": null, \"expected\": \"消除回表\"}]",
+      "profile_breakdown": {
+        "lock_ms": 0.0,
+        "cpu_ms": null,
+        "other_ms": null,
+        "cpu_known": false,
+        "cpu_hint": "CPU 时间未采集：需在目标库开启 performance_schema 的 events_statements_cpu consumer （UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME='events_statements_cpu'）；该设置重启后失效，持久化需在 my.cnf 配置 performance-schema-consumer-events-statements-cpu=ON。开启后才能拆分 CPU 与 IO/等待"
+      },
+      "finding_codes": [
+        "SCAN_INEFFICIENT",
+        "FULL_SCAN"
+      ],
+      "per_exec": {
+        "rows_examined": 150003.0,
+        "rows_sent": 3.0,
+        "sort_rows": 3.0,
+        "sort_merge_passes": 0.0
+      },
+      "ratios": {
+        "scan_efficiency": 50824.0,
+        "full_scan_share": 1.0,
+        "full_join_share": 0.0,
+        "no_index_share": 1.0,
+        "tmp_disk_share": null,
+        "error_share": 0.0,
+        "lock_share": 0.0
+      },
+      "plan_changed_at": "2026-11-05T12:50:03.103823+00:00",
+      "plans_count": 2
+    },
+    "lockwait_detail": {
+      "http": 200,
+      "finding_codes": [
+        "LOCK_WAIT"
+      ],
+      "breakdown": {
+        "lock_ms": 18060.0,
+        "cpu_ms": null,
+        "other_ms": null,
+        "cpu_known": false,
+        "cpu_hint": "CPU 时间未采集：需在目标库开启 performance_schema 的 events_statements_cpu consumer （UPDATE performance_schema.setup_consumers SET ENABLED='YES' WHERE NAME='events_statements_cpu'）；该设置重启后失效，持久化需在 my.cnf 配置 performance-schema-consumer-events-statements-cpu=ON。开启后才能拆分 CPU 与 IO/等待"
+      },
+      "ratios": {
+        "scan_efficiency": 1.0,
+        "full_scan_share": 0.0,
+        "full_join_share": 0.0,
+        "no_index_share": 0.0,
+        "tmp_disk_share": null,
+        "error_share": 0.0,
+        "lock_share": 0.799
+      },
+      "findings": "[{\"code\": \"LOCK_WAIT\", \"severity\": \"high\", \"text\": \"平均耗时中 80% 是锁等待（18060.0ms）\", \"evidence\": {\"lock_ms\": 18060.0, \"avg_ms\": 22610.0}}]"
+    },
+    "regression_http": 200,
+    "regression_query": "/api/v1/databases/18/perf/sql-regression/?from=2026-11-05T20%3A45%3A58%2B08%3A00&to=2026-11-05T20%3A59%3A30%2B08%3A00&base_from=2026-11-05T20%3A33%3A00%2B08%3A00&base_to=2026-11-05T20%3A44%3A00%2B08%3A00",
+    "regression_window": {
+      "from": "2026-11-05T20:45:58+08:00",
+      "to": "2026-11-05T20:59:30+08:00"
+    },
+    "regression_baseline": {
+      "kind": "custom",
+      "from": "2026-11-05T20:33:00+08:00",
+      "to": "2026-11-05T20:44:00+08:00"
+    },
+    "regression_counts": {
+      "regressed": 3,
+      "new": 12,
+      "improved": 0,
+      "gone": 1,
+      "stable": 6
+    },
+    "regression_thresholds": {
+      "avg_ratio": 1.5,
+      "min_delta_ms": 5.0
+    },
+    "regression_baseline_note": null,
+    "regression_items": "[{\"digest\": \"6171e5b3b12f5cc4016eacc2545f3359\", \"status\": \"regressed\", \"avg_ratio\": 47.02, \"exec_ratio\": 1.37, \"impact_ms\": 9009}, {\"digest\": \"5f9188806d79ff78a3f0a05bea9c49cf\", \"status\": \"regressed\", \"avg_ratio\": 1.51, \"exec_ratio\": 1.49, \"impact_ms\": 4798}, {\"digest\": \"403d6015f4e53d1edc7c7ffd6c02fd03\", \"status\": \"regressed\", \"avg_ratio\": 2.77, \"exec_ratio\": 1.25, \"impact_ms\": 3372}, {\"digest\": \"d92061db99b87ea3af2c3c20182c7d69\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 22610}, {\"digest\": \"0b230517d4f6513c9e6cee87741f1d9c\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 1}, {\"digest\": \"57755c0cc69482aaf69a940f6c0e01f2\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 1}, {\"digest\": \"0eec58c68977ee942d0dce9ee969850a\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 1}, {\"digest\": \"eed7e918c0a1d6b4f61e0b63ffae5fad\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 0}, {\"digest\": \"3e67fa9d38d82054e7fc01fe3ee8844d\", \"status\": \"new\", \"avg_ratio\": null, \"exec_ratio\": null, \"impact_ms\": 0}, {\"digest\": \"94922d524b37705ddc2452b06da20bd5\", \"status\": \"new\", \"avg_ratio\": null, \"exe",
+    "regression_shapes": {
+      "lockwait_update": {
+        "digest": "d92061db99b87ea3af2c3c20182c7d69",
+        "status": "new",
+        "avg_ratio": null,
+        "exec_ratio": null,
+        "impact_ms": 22610,
+        "current": {
+          "exec": 1,
+          "total_ms": 22610,
+          "avg_ms": 22610.0,
+          "rows_examined_per_exec": 1.0,
+          "lock_ms_per_exec": 18060.0
+        },
+        "baseline": null,
+        "plan_changed_at": null
+      },
+      "slow_user_sort": {
+        "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+        "status": "regressed",
+        "avg_ratio": 47.02,
+        "exec_ratio": 1.37,
+        "impact_ms": 9009,
+        "current": {
+          "exec": 494,
+          "total_ms": 9151,
+          "avg_ms": 18.524,
+          "rows_examined_per_exec": 150003.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "baseline": {
+          "exec": 360,
+          "total_ms": 142,
+          "avg_ms": 0.394,
+          "rows_examined_per_exec": 3.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "plan_changed_at": "2026-11-05T12:50:03.103823+00:00"
+      },
+      "agg_no_shardkey": {
+        "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+        "status": "regressed",
+        "avg_ratio": 1.51,
+        "exec_ratio": 1.49,
+        "impact_ms": 4798,
+        "current": {
+          "exec": 164,
+          "total_ms": 8636,
+          "avg_ms": 52.659,
+          "rows_examined_per_exec": 150000.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "baseline": {
+          "exec": 110,
+          "total_ms": 3838,
+          "avg_ms": 34.891,
+          "rows_examined_per_exec": 150000.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "plan_changed_at": null
+      },
+      "range_no_key": {
+        "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+        "status": "regressed",
+        "avg_ratio": 2.77,
+        "exec_ratio": 1.25,
+        "impact_ms": 3372,
+        "current": {
+          "exec": 146,
+          "total_ms": 4743,
+          "avg_ms": 32.486,
+          "rows_examined_per_exec": 150000.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "baseline": {
+          "exec": 117,
+          "total_ms": 1371,
+          "avg_ms": 11.718,
+          "rows_examined_per_exec": 150000.0,
+          "lock_ms_per_exec": 0.0
+        },
+        "plan_changed_at": "2026-11-05T12:50:03.272810+00:00"
+      }
+    },
+    "pk_lookup_stable_evidence": {
+      "in_items": false,
+      "reason": "接口对 status=stable 的条目不返回（shown 过滤），故以「不在 items + counts.stable>0」判定",
+      "counts_stable": 6,
+      "avg_ms_current_window": 0.311,
+      "avg_ms_baseline_window": 0.286,
+      "avg_ratio": 1.087
+    },
+    "guard_http": 403,
+    "guard_body": "{\"code\": \"DISABLED\", \"message\": \"EXPLAIN ANALYZE 未开启（配置项 PERF_EXPLAIN_ANALYZE_ENABLED）\"}",
+    "alerts_http": 200,
+    "alerts": [
+      {
+        "type": "slow_query",
+        "severity": "warning",
+        "status": "active",
+        "title": "[WARNING] 慢查询检测",
+        "metric_key": "slow_queries",
+        "create_time": "2026-11-05T12:53:58.423347+00:00",
+        "last_notified_at": "2026-11-05T12:53:58.423347+00:00",
+        "description": "近 30 分钟检测到 1 条慢 SQL\n最慢 SQL 平均耗时：11305.0ms（执行 2 次）\nSQL摘要：UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+      },
+      {
+        "type": "lock",
+        "severity": "critical",
+        "status": "resolved",
+        "title": "[CRITICAL] 性能告警：锁等待",
+        "metric_key": "",
+        "create_time": "2026-11-05T12:44:58.057723+00:00",
+        "last_notified_at": "2026-11-05T12:44:58.056718+00:00",
+        "description": "检测到严重的数据库阻塞（Lock Wait）：\n\n--------------------------------\n凶手 (Blocker): N/A (16850)\n受害 (Waiter) : N/A (16851)\n已阻塞时   : 12 秒\n--------------------------------\n注意：时长仍在增加，请DBA立即检查！"
+      },
+      {
+        "type": "health",
+        "severity": "warning",
+        "status": "active",
+        "title": "[WARNING] 数据库健康评分 D级",
+        "metric_key": "health_score",
+        "create_time": "2026-11-05T12:29:28.357868+00:00",
+        "last_notified_at": "2026-11-05T12:29:28.357868+00:00",
+        "description": "健康评分：63.0 分\n等级：D (较差)\n\n各维度得分：\n• availability: 70.0\n• capacity: 100.0\n• performance: 11.2\n• configuration: 85.0\n• operations: 50.0\n\n改进建议：\n• ⚠️ 性能评分较低，当前 31 个活跃慢查询，建议优化 SQL\n• ⚠️ 运维评分较低，监控覆盖率 0.0%，建议增加监控频率"
+      }
+    ],
+    "lock_alerts": [
+      {
+        "type": "lock",
+        "severity": "critical",
+        "status": "resolved",
+        "title": "[CRITICAL] 性能告警：锁等待",
+        "metric_key": "",
+        "create_time": "2026-11-05T12:44:58.057723+00:00",
+        "last_notified_at": "2026-11-05T12:44:58.056718+00:00",
+        "description": "检测到严重的数据库阻塞（Lock Wait）：\n\n--------------------------------\n凶手 (Blocker): N/A (16850)\n受害 (Waiter) : N/A (16851)\n已阻塞时   : 12 秒\n--------------------------------\n注意：时长仍在增加，请DBA立即检查！"
+      }
+    ],
+    "manual_top": [
+      {
+        "DIGEST": "d92061db99b87ea3af2c3c20182c7d6951631459d022271067c7eabcfefb4f77",
+        "COUNT_STAR": 2,
+        "total_ms": 22610.067,
+        "lock_s": 18060.47,
+        "rows_ex": 2,
+        "q": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+      },
+      {
+        "DIGEST": "5f9188806d79ff78a3f0a05bea9c49cfa3bf2292bb77012f1a19acaed0692a1d",
+        "COUNT_STAR": 330,
+        "total_ms": 14598.047,
+        "lock_s": 1.281,
+        "rows_ex": 49500000,
+        "q": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+      },
+      {
+        "DIGEST": "6171e5b3b12f5cc4016eacc2545f3359d872f06e041f1f07eb0721bacd837535",
+        "COUNT_STAR": 1025,
+        "total_ms": 9694.268,
+        "lock_s": 3.491,
+        "rows_ex": 77403088,
+        "q": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` D"
+      },
+      {
+        "DIGEST": "403d6015f4e53d1edc7c7ffd6c02fd03e99c0da05438a8abc1bec7e08f61f199",
+        "COUNT_STAR": 302,
+        "total_ms": 6596.708,
+        "lock_s": 1.102,
+        "rows_ex": 45300000,
+        "q": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_"
+      },
+      {
+        "DIGEST": "f7cf0f552e85a519a462735fc8d4242b23188195a7e0bb0bc8cde44cab5eb3c6",
+        "COUNT_STAR": 150,
+        "total_ms": 4504.909,
+        "lock_s": 0.466,
+        "rows_ex": 0,
+        "q": "INSERT INTO `orders` ( `user_id` , STATUS , `amount` , `created_at` , `note` ) V"
+      },
+      {
+        "DIGEST": "87b19c8074a0ed39710a964e39d1c7d24d1e11022725c92dbd7cfb9729c8c8a2",
+        "COUNT_STAR": 1,
+        "total_ms": 2637.825,
+        "lock_s": 0.04,
+        "rows_ex": 0,
+        "q": "ALTER TABLE `orders` ADD INDEX `idx_user_created` ( `user_id` , `created_at` )"
+      },
+      {
+        "DIGEST": "1581b156e40f00f664570a0264cf25321f4382d268edeed4a42aab234443e49d",
+        "COUNT_STAR": 6727,
+        "total_ms": 2046.036,
+        "lock_s": 24.15,
+        "rows_ex": 0,
+        "q": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+      },
+      {
+        "DIGEST": "748524157f320c22d680383817a2132196c35979b10729dabcdc7c58289251d9",
+        "COUNT_STAR": 1,
+        "total_ms": 99.701,
+        "lock_s": 0.023,
+        "rows_ex": 0,
+        "q": "CREATE TABLE `orders` ( `id` INT8 NOT NULL AUTO_INCREMENT , `user_id` INTEGER NO"
+      },
+      {
+        "DIGEST": "fc7ae28a15d257f9183da7e5a7a2f1d28b1323820346f025abe2cf94f62a2eb6",
+        "COUNT_STAR": 1,
+        "total_ms": 38.112,
+        "lock_s": 0.055,
+        "rows_ex": 0,
+        "q": "ALTER TABLE `orders` DROP INDEX `idx_user_created`"
+      },
+      {
+        "DIGEST": "9d1c0152b43abdf2d5bd39b0097e3a981841810a65dbba7254f5d0282786d9be",
+        "COUNT_STAR": 1,
+        "total_ms": 26.806,
+        "lock_s": 0.006,
+        "rows_ex": 0,
+        "q": "ANALYZE TABLE `orders`"
+      }
+    ],
+    "manual_vs_platform": [
+      {
+        "sql": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY ",
+        "manual_count_star": 330,
+        "manual_total_ms": 14598.047,
+        "manual_rows_examined": 49500000,
+        "manual_lock_s": 1.281,
+        "platform_exec_count": 115,
+        "platform_total_time_sec": 7.005,
+        "platform_avg_ms": 60.913,
+        "platform_rows_examined": 17250000
+      },
+      {
+        "sql": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `cre",
+        "manual_count_star": 1025,
+        "manual_total_ms": 9694.268,
+        "manual_rows_examined": 77403088,
+        "manual_lock_s": 3.491,
+        "platform_exec_count": 295,
+        "platform_total_time_sec": 5.311,
+        "platform_avg_ms": 18.003,
+        "platform_rows_examined": 44250891
+      },
+      {
+        "sql": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTER",
+        "manual_count_star": 302,
+        "manual_total_ms": 6596.708,
+        "manual_rows_examined": 45300000,
+        "manual_lock_s": 1.102,
+        "platform_exec_count": 94,
+        "platform_total_time_sec": 4.091,
+        "platform_avg_ms": 43.521,
+        "platform_rows_examined": 14100000
+      },
+      {
+        "sql": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?",
+        "manual_count_star": 6727,
+        "manual_total_ms": 2046.036,
+        "manual_rows_examined": 0,
+        "manual_lock_s": 24.15,
+        "platform_exec_count": 2075,
+        "platform_total_time_sec": 0.673,
+        "platform_avg_ms": 0.324,
+        "platform_rows_examined": 0
+      }
+    ],
+    "a2_index_advice_check": {
+      "verdict": {
+        "A-1_索引缺失时给出I-01": true,
+        "A-2_索引存在时不重复建议同一索引": true,
+        "复原后回到I-01": true,
+        "codes_索引缺失": [
+          "I-01",
+          "I-02"
+        ],
+        "codes_索引存在": [
+          "I-03"
+        ],
+        "codes_复原": [
+          "I-01",
+          "I-02"
+        ]
+      },
+      "steps": [
+        {
+          "phase": "1_索引已删（场景B末态）",
+          "advice_codes": [
+            "I-01",
+            "I-02"
+          ]
+        },
+        {
+          "phase": "2_index_add",
+          "advice_codes": null
+        },
+        {
+          "phase": "3_索引已存在",
+          "advice_codes": [
+            "I-03"
+          ]
+        },
+        {
+          "phase": "4_index_drop（复原）",
+          "advice_codes": null
+        },
+        {
+          "phase": "5_复原后",
+          "advice_codes": [
+            "I-01",
+            "I-02"
+          ]
+        }
+      ]
+    }
+  },
+  "counts": {
+    "OBSERVED": 3,
+    "PASS": 12,
+    "SKIP_GATE_CLOSED": 1,
+    "SKIP_NOT_EXTERNAL": 7
+  }
+}

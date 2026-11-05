@@ -1,0 +1,151 @@
+{
+  "label": "after",
+  "base": "http://<local-host>:<platform-port>",
+  "db_config_id": 18,
+  "captured_at_local": "2026-11-05T20:50:02",
+  "plans": [
+    {
+      "name": "pk_lookup",
+      "digest": "d92061db99b87ea3af2c3c20182c7d69",
+      "sql": "UPDATE orders SET status = status WHERE id = 1 AND user_id = 30289",
+      "http": 200,
+      "plan_hash": "1eb7a192f391f434453790384b9da4d2",
+      "cost_total": null,
+      "captured_at": "2026-11-05T12:50:02.936290+00:00",
+      "plan_text": "<not executable by iterator executor>\n",
+      "error": null
+    },
+    {
+      "name": "agg_no_shardkey",
+      "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+      "sql": "SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+      "http": 200,
+      "plan_hash": "5fe8730203a0fbc7c29851f58584c081",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-05T12:44:21.082319+00:00",
+      "plan_text": "-> Table scan on <temporary>\n    -> Aggregate using temporary table\n        -> Table scan on orders  (cost=15258 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "slow_user_sort",
+      "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+      "sql": "SELECT id, amount FROM orders WHERE user_id = 12236 ORDER BY created_at DESC LIMIT 10",
+      "http": 200,
+      "plan_hash": "72597b207ace250608a9fcc53ca05ced",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-05T12:50:03.103823+00:00",
+      "plan_text": "-> Limit: 10 row(s)  (cost=15258 rows=10)\n    -> Sort: orders.created_at DESC, limit input to 10 row(s) per chunk  (cost=15258 rows=148488)\n        -> Filter: (orders.user_id = 12236)  (cost=15258 rows=148488)\n            -> Table scan on orders  (cost=15258 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "range_no_key",
+      "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+      "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 12 HOUR",
+      "http": 200,
+      "plan_hash": "6c7cd21af7729a11d3336d3f858404ca",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-05T12:50:03.272810+00:00",
+      "plan_text": "-> Aggregate: count(0)  (cost=10307 rows=1)\n    -> Filter: (orders.created_at >= <cache>((now() - interval 12 hour)))  (cost=5358 rows=49491)\n        -> Table scan on orders  (cost=5358 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "pk_lookup",
+      "digest": "1581b156e40f00f664570a0264cf2532",
+      "sql": "SELECT id FROM orders WHERE id = 184981 AND user_id = 20862",
+      "http": 200,
+      "plan_hash": "4c164406308252ea64efb0879b41b69a",
+      "cost_total": null,
+      "captured_at": "2026-11-05T12:44:21.329293+00:00",
+      "plan_text": "-> Zero rows (no matching row in const table)  (cost=0..0 rows=0)\n",
+      "error": null
+    },
+    {
+      "name": "agg_no_shardkey",
+      "digest": "94922d524b37705ddc2452b06da20bd5",
+      "sql": "EXPLAIN FORMAT=JSON SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "range_no_key",
+      "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+      "sql": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 21 HOUR",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "range_no_key",
+      "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+      "sql": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 21 HOUR",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "slow_user_sort",
+      "digest": "0eec58c68977ee942d0dce9ee969850a",
+      "sql": "EXPLAIN FORMAT=JSON SELECT id, amount FROM orders WHERE user_id = 25713 ORDER BY created_at DESC LIMIT 10",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "pk_lookup",
+      "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+      "sql": "EXPLAIN FORMAT=JSON SELECT id FROM orders WHERE id = 114917 AND user_id = 29769",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "agg_no_shardkey",
+      "digest": "ed4de50f035be12188597ba5c7c730a6",
+      "sql": "EXPLAIN FORMAT=TREE SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "slow_user_sort",
+      "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+      "sql": "EXPLAIN FORMAT=TREE SELECT id, amount FROM orders WHERE user_id = 25713 ORDER BY created_at DESC LIMIT 10",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "pk_lookup",
+      "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+      "sql": "EXPLAIN FORMAT=TREE SELECT id FROM orders WHERE id = 114917 AND user_id = 29769",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    }
+  ]
+}

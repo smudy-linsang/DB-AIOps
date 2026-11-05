@@ -1,0 +1,52 @@
+{
+  "label": "before",
+  "base": "http://<local-host>:<platform-port>",
+  "db_config_id": 18,
+  "captured_at_local": "2026-11-05T20:44:20",
+  "plans": [
+    {
+      "name": "agg_no_shardkey",
+      "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+      "sql": "SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+      "http": 200,
+      "plan_hash": "5fe8730203a0fbc7c29851f58584c081",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-05T12:44:21.082319+00:00",
+      "plan_text": "-> Table scan on <temporary>\n    -> Aggregate using temporary table\n        -> Table scan on orders  (cost=15258 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "range_no_key",
+      "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+      "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 21 HOUR",
+      "http": 200,
+      "plan_hash": "bfbe76a40417f03993d59c5a575d2b1f",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-05T12:44:21.201716+00:00",
+      "plan_text": "-> Aggregate: count(0)  (cost=10307 rows=1)\n    -> Filter: (orders.created_at >= <cache>((now() - interval 21 hour)))  (cost=5358 rows=49491)\n        -> Index scan on orders using idx_user_created  (cost=5358 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "pk_lookup",
+      "digest": "1581b156e40f00f664570a0264cf2532",
+      "sql": "SELECT id FROM orders WHERE id = 114917 AND user_id = 29769",
+      "http": 200,
+      "plan_hash": "4c164406308252ea64efb0879b41b69a",
+      "cost_total": null,
+      "captured_at": "2026-11-05T12:44:21.329293+00:00",
+      "plan_text": "-> Zero rows (no matching row in const table)  (cost=0..0 rows=0)\n",
+      "error": null
+    },
+    {
+      "name": "slow_user_sort",
+      "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+      "sql": "SELECT id, amount FROM orders WHERE user_id = 25713 ORDER BY created_at DESC LIMIT 10",
+      "http": 200,
+      "plan_hash": "b9e5ae404a8d67f3afed0b88b46e2c7f",
+      "cost_total": 1.4,
+      "captured_at": "2026-11-05T12:44:21.453118+00:00",
+      "plan_text": "-> Limit: 10 row(s)  (cost=1.4 rows=4)\n    -> Index lookup on orders using idx_user_created (user_id=25713) (reverse)  (cost=1.4 rows=4)\n",
+      "error": null
+    }
+  ]
+}

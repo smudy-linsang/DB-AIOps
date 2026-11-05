@@ -1,0 +1,152 @@
+{
+  "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+  "steps": [
+    {
+      "phase": "1_索引已删（场景B末态）",
+      "advice": {
+        "http": 200,
+        "codes": [
+          "I-01",
+          "I-02"
+        ],
+        "advice": [
+          {
+            "code": "I-01",
+            "severity": "high",
+            "title": "为表 orders 建立复合索引",
+            "detail": "按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)",
+            "ddl": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);"
+          },
+          {
+            "code": "I-02",
+            "severity": "low",
+            "title": "可选：表 orders 的覆盖索引",
+            "detail": "在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大",
+            "ddl": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);"
+          }
+        ],
+        "index_suggestions": [
+          {
+            "table": "为表 orders 建立复合索引",
+            "columns": [
+              "user_id",
+              "created_at"
+            ],
+            "create_sql": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);",
+            "reason": "按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)"
+          },
+          {
+            "table": "可选：表 orders 的覆盖索引",
+            "columns": [
+              "user_id",
+              "created_at",
+              "amount"
+            ],
+            "create_sql": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);",
+            "reason": "在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大"
+          }
+        ]
+      }
+    },
+    {
+      "phase": "2_index_add",
+      "cmd": {
+        "action": "add",
+        "exit": 0,
+        "stdout": "索引 idx_user_created 已添加\n",
+        "stderr": ""
+      }
+    },
+    {
+      "phase": "3_索引已存在",
+      "advice": {
+        "http": 200,
+        "codes": [
+          "I-03"
+        ],
+        "advice": [
+          {
+            "code": "I-03",
+            "severity": "info",
+            "title": "表 orders 已有可用索引",
+            "detail": "已有索引 (user_id, created_at) 的最左前缀覆盖建议列 (user_id, created_at)；若仍慢，用 EXPLAIN ANALYZE 确认是否真的走了该索引",
+            "ddl": null
+          }
+        ],
+        "index_suggestions": []
+      }
+    },
+    {
+      "phase": "4_index_drop（复原）",
+      "cmd": {
+        "action": "drop",
+        "exit": 0,
+        "stdout": "索引 idx_user_created 已删除\n",
+        "stderr": ""
+      }
+    },
+    {
+      "phase": "5_复原后",
+      "advice": {
+        "http": 200,
+        "codes": [
+          "I-01",
+          "I-02"
+        ],
+        "advice": [
+          {
+            "code": "I-01",
+            "severity": "high",
+            "title": "为表 orders 建立复合索引",
+            "detail": "按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)",
+            "ddl": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);"
+          },
+          {
+            "code": "I-02",
+            "severity": "low",
+            "title": "可选：表 orders 的覆盖索引",
+            "detail": "在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大",
+            "ddl": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);"
+          }
+        ],
+        "index_suggestions": [
+          {
+            "table": "为表 orders 建立复合索引",
+            "columns": [
+              "user_id",
+              "created_at"
+            ],
+            "create_sql": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at` (`user_id`, `created_at`);",
+            "reason": "按 等值列 → 排序/分组列 → 范围列 的顺序建立复合索引：(user_id, created_at)"
+          },
+          {
+            "table": "可选：表 orders 的覆盖索引",
+            "columns": [
+              "user_id",
+              "created_at",
+              "amount"
+            ],
+            "create_sql": "ALTER TABLE `orders` ADD INDEX `idx_user_id_created_at_amount` (`user_id`, `created_at`, `amount`);",
+            "reason": "在 I-01 基础上追加查询列 (amount)，可免回表；代价是索引更宽、写放大更大"
+          }
+        ]
+      }
+    }
+  ],
+  "verdict": {
+    "A-1_索引缺失时给出I-01": true,
+    "A-2_索引存在时不重复建议同一索引": true,
+    "复原后回到I-01": true,
+    "codes_索引缺失": [
+      "I-01",
+      "I-02"
+    ],
+    "codes_索引存在": [
+      "I-03"
+    ],
+    "codes_复原": [
+      "I-01",
+      "I-02"
+    ]
+  }
+}

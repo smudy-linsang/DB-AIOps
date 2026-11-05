@@ -1,0 +1,10 @@
+# DB-005 场景 B（删索引制造退化）客户端侧汇总 · 2026-11-05 20:44:35-20:58:35
+# 来源：scripts/tdsql_workload.py run --minutes 14 --qps 5（经 mock proxy <proxy-port>）
+# 对照 场景A（20:28:47-20:42:47，有索引）：slow_user_sort 509 次 / 4.3ms；agg_no_shardkey 157 次 / 42.6ms；range_no_key 152 次 / 16.9ms；pk_lookup 3374 次 / 4.2ms
+
+
+客户端侧汇总（次数, 平均 ms）：
+  slow_user_sort      516      23.4
+  agg_no_shardkey     173      42.3
+  range_no_key        150      18.0
+  pk_lookup          3353       4.5
