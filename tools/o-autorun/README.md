@@ -31,3 +31,5 @@ git show FETCH_HEAD:health.json
 ```
 
 若授权阶段失败，先依据健康记录的 `missing_owner_secret_names` 核实缺少的本仓 Actions Secrets，再由账号所有者执行安全配置；不得从 Xinchuang 的加密状态提取或复制凭据。不能把本地环境里没有这些变量当作 Actions 未配置的证据。
+
+自动执行结果先保存在不可覆盖的轮次报告和机器 receipt 中。如果订单明确写了本任务 `docs/pm/reports/DB-xxx-report-O.md` 固定交付路径，协调器在该任务 done 后，从已验证的 published_sha 读取原始报告并逐字节交付到该路径。校验来源身份/哈希、拒绝符号链接和同名不同内容；同内容重复运行不会再提交，也不会调用模型。原轮次报告和 receipt 保留，固定入口不是新一轮评审。

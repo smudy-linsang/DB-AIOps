@@ -133,7 +133,8 @@ class DBBoardTests(unittest.TestCase):
             self.jobs()
 
     def test_local_execution_and_validated_report_publication(self):
-        self.order('DB-TEST-E2E')
+        self.write('docs/pm/orders/DB-TEST-E2E-test.md', '执行：O\n交付：docs/pm/reports/DB-TEST-E2E-report-O.md\n')
+        self.commit()
         job = self.jobs()[0]
         db.acknowledge(self.cfg, job)
         report = '通过\n\nsource_sha: ' + job['source_sha'] + '\nSynthetic executor only.\n'
@@ -172,6 +173,33 @@ class DBBoardTests(unittest.TestCase):
         self.assertEqual(cloud.submitted, 1)
         result = self.git('--git-dir', str(self.remote), 'show', 'main:' + job['report_path'])
         self.assertEqual(result, report.encode())
+        published = dispatcher.store.rows()[0]['published_sha']
+        canonical = db.publish_requested_report(str(self.remote), job, published)
+        self.assertEqual(canonical, 'docs/pm/reports/DB-TEST-E2E-report-O.md')
+        self.assertEqual(self.git('--git-dir', str(self.remote), 'show', 'main:' + canonical), report.encode())
+        head = self.git('--git-dir', str(self.remote), 'rev-parse', 'main')
+        db.publish_requested_report(str(self.remote), job, published)
+        self.assertEqual(self.git('--git-dir', str(self.remote), 'rev-parse', 'main'), head)
+        dispatcher.tick()
+        self.assertEqual(cloud.submitted, 1)
+        # A changed receipt cannot be used as an authority even if the alias exists.
+        self.git('pull', '--quiet', '--ff-only', 'origin', 'main', cwd=self.seed)
+        meta['report_sha256'] = '0' * 64
+        self.write(job['receipt_path'], json.dumps(meta))
+        self.commit()
+        tampered = self.git('rev-parse', 'HEAD', cwd=self.seed).decode().strip()
+        with self.assertRaisesRegex(auto.Failure, 'CANONICAL_SOURCE_IDENTITY_MISMATCH'):
+            db.publish_requested_report(str(self.remote), job, tampered)
+        db.publish_requested_report(str(self.remote), job, published)
+        self.write(canonical, 'Pre-existing user content\n')
+        self.commit()
+        with self.assertRaisesRegex(auto.Failure, 'CANONICAL_REPORT_COLLISION'):
+            db.publish_requested_report(str(self.remote), job, published)
+
+    def test_canonical_delivery_requires_explicit_task_path(self):
+        self.order()
+        job = self.jobs()[0]
+        self.assertIsNone(db.publish_requested_report(str(self.remote), job, job['source_sha']))
 
     def test_legacy_engine_board_unchanged(self):
         self.order()

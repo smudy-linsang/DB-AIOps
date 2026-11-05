@@ -104,6 +104,63 @@ def acknowledge(cfg, job):
                     raise
 
 
+def publish_requested_report(repo_url, job, published_sha):
+    """Expose a validated round result at the task's explicitly requested name.
+
+    The original report/receipt remain immutable. No model call, overwrite or
+    fresh queue identity is involved in this delivery step.
+    """
+    if not isinstance(published_sha, str) or not auto.SHA.fullmatch(published_sha):
+        raise auto.Failure('INVALID_CANONICAL_PUBLICATION')
+    task = job['task_id']
+    if not re.fullmatch(DB_TASK, task):
+        return None
+    canonical = 'docs/pm/reports/' + task + '-report-O.md'
+    if canonical == job['report_path']:
+        return None
+    for attempt in range(3):
+        with tempfile.TemporaryDirectory(prefix='o-db-delivery-') as tmp:
+            auto.command(['git', 'clone', '--quiet', '--branch', 'main', repo_url, tmp])
+            order_path = auto.path_ok(job['order_path'], 'docs/pm/orders/' + task + '-')
+            order = auto.command(['git', 'show', job['dispatch_sha'] + ':' + order_path], cwd=tmp).decode()
+            if canonical not in order:
+                return None
+
+            auto.command(['git', 'merge-base', '--is-ancestor', published_sha, 'HEAD'], cwd=tmp)
+
+            def regular(path):
+                path = auto.path_ok(path, 'docs/pm/reports/' + task + '-')
+                entry = auto.command(['git', 'ls-tree', '-z', published_sha, '--', path], cwd=tmp)
+                if not entry.startswith(b'100644 blob '):
+                    raise auto.Failure('INVALID_CANONICAL_SOURCE')
+                return auto.command(['git', 'show', published_sha + ':' + path], cwd=tmp)
+
+            report = regular(job['report_path'])
+            receipt = json.loads(regular(job['receipt_path']))
+            expected = {key: job[key] for key in ('task_id', 'round', 'source_sha', 'job_key', 'report_path')}
+            expected['report_sha256'] = auto.digest(report)
+            if any(receipt.get(key) != value for key, value in expected.items()):
+                raise auto.Failure('CANONICAL_SOURCE_IDENTITY_MISMATCH')
+            target = Path(tmp) / canonical
+            if target.is_symlink() or any(p.is_symlink() for p in target.parents):
+                raise auto.Failure('CANONICAL_REPORT_COLLISION')
+            if target.exists():
+                if target.read_bytes() != report:
+                    raise auto.Failure('CANONICAL_REPORT_COLLISION')
+                return canonical
+            target.write_bytes(report)
+            auto.command(['git', 'add', '--', canonical], cwd=tmp)
+            auto.command(['git', '-c', 'user.name=O automation',
+                          '-c', 'user.email=o-automation@users.noreply.github.com',
+                          'commit', '--quiet', '-m', 'docs(pm): deliver validated ' + task + ' report'], cwd=tmp)
+            try:
+                auto.command(['git', 'push', '--quiet', 'origin', 'HEAD:refs/heads/main'], cwd=tmp)
+                return canonical
+            except auto.Failure:
+                if attempt == 2:
+                    raise
+
+
 def activate():
     auto.TASK = re.compile('(?:' + UPSTREAM_TASK + '|' + DB_TASK + r')\Z')
     auto.Board = DBBoard
@@ -121,7 +178,21 @@ def activate():
 def main():
     activate()
     if '--scan-only' not in sys.argv:
-        return hosted.main()
+        result = hosted.main()
+        if not any(arg.startswith('--record-host-preflight') for arg in sys.argv):
+            delivery_parser = argparse.ArgumentParser(add_help=False)
+            delivery_parser.add_argument('--repo', default='.')
+            delivery_parser.add_argument('--directory', required=True)
+            args, _ = delivery_parser.parse_known_args()
+            remote = auto.command(['git', 'remote', 'get-url', 'origin'], cwd=args.repo).decode().strip()
+            store = auto.Store(args.directory)
+            try:
+                completed = [(json.loads(row['payload']), row['published_sha']) for row in store.rows() if row['state'] == 'done']
+            finally:
+                store.db.close()
+            for job, published_sha in completed:
+                publish_requested_report(remote, job, published_sha)
+        return result
     parser = argparse.ArgumentParser()
     parser.add_argument('--scan-only', action='store_true')
     parser.add_argument('--repo', required=True)
