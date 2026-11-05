@@ -1,11 +1,11 @@
 # DB-AIOps 建设方向研判报告（设计团队）
 
-- 任务单：`docs/pm/orders/DB-001-设计团队-建设方向研判.md`；修订单：`docs/pm/orders/DB-011-设计团队修订DB-001研判.md`
+- 任务单：`docs/pm/orders/DB-001-设计团队-建设方向研判.md`；修订单：`docs/pm/orders/DB-011-设计团队修订DB-001研判.md`；订正单：`docs/pm/orders/DB-014-设计团队补DB-001报告文字订正.md`（DB-013 复审转通过条件①）
 - 执行：DSMan（队长、研判主笔）、GG（架构与实现可行性）
-- 版本：V2.1（合并 GG 与 DSMan 两份并行 V2.0 修订，统一为单一版本；按 DB-002 R1–R4）
+- 版本：V2.2（在 V2.1 基础上按 DB-014 做文字订正；结论与数据未改）
 - 日期：2026-11-05
 - 结论：**有条件通过**（设计团队自评；条件见第七节，须 O 复审）
-- 合并说明：V2.0 曾出现两份并行修订（GG 08:38 提交与 DSMan 同刻修订），本 V2.1 以 DSMan 版为底合并 GG 版细节；两版对 R1–R4 的结论一致，GG 版“79 项确实未编写”的过度表述与 11/12 汇总口径错误已按 O 的返工要求更正。
+- 合并说明：V2.0 曾出现两份并行修订（GG 08:38 提交与 DSMan 同刻修订），V2.1 以 DSMan 版为底合并 GG 版细节；两版对 R1–R4 的结论一致，GG 版“79 项确实未编写”的过度表述与 11/12 汇总口径错误已按 O 的返工要求更正。
 - 修订依据：`docs/pm/reports/DB-002-report-O.md`（结论：不通过）及 O 的复现证据 `docs/pm/reports/evidence/DB-002-O/`
 - 成本披露：搜索 0 次、抓取 0 次（纯本地代码与文档盘点）
 
@@ -15,8 +15,9 @@
 |---|---|---|
 | 静态盘点源码 | `cad2514ab0a51209c1ea58c74e312129a537217b` | D-team 三份 notes 的取证提交 |
 | O 独立复核源码 | `0ccc682c2bbc5cc554d42aedb4d83b2d2cc5ca7a` | DB-002 评审基线；与 `cad2514` 的产品文件一致（差异仅黑板/自动链与 `monitor/tests_pm_a_inbox.py`） |
-| 本次修订源码 | 当前 HEAD（含 DB-011 时点） | `git diff --stat 0ccc682..HEAD -- monitor dbmonitor frontend scripts .github requirements.txt requirements.lock` 为空；产品代码未变 |
-| 报告版本 | V1.1 `d86958b`（O 评审对象）→ 本 V2.0 | 版本递增见文末版本记录 |
+| 本次订正源码 | `5559ff01585d0f4c70325a95346596c8d037a75e`（DB-014 修订时 HEAD） | 业务代码（`monitor`、`dbmonitor`、`scripts`、`requirements.txt`、`requirements.lock`）自 `0ccc682` 起零差异；`frontend/` 仅 `package-lock.json` 由 `2bb70cc` 更新 follow-redirects 1.16.1→1.16.2，无源码改动 |
+| CI/自动链配置 | `.github/workflows/ci.yml` 自 `0150511`（DB-012）起监听 main；另新增 `o-autorun.yml` 与 `tools/o-autorun*` | 与上行业务代码分开陈述：配置确有变化，不能写成“产品代码与配置全未变” |
+| 报告版本 | V1.1 `d86958b`（O 评审对象）→ 本 V2.2 | 版本递增见文末版本记录 |
 | 运行证据 | O 的隔离 SQLite 探针（未连真实库） | 证据：`evidence/DB-002-O/probe-results.json`、`reproduce.py`、`baseline-comparison.json` |
 | 静态 vs 运行 | 本报告第 1、2 节为静态盘点；第 1.5 节的越权/400 为 O 的运行实测 | 静态“真实现”不等于环境验证通过；未测入口不宣称安全 |
 
@@ -77,7 +78,7 @@
 7. **巡检覆盖与健康分语义**：82 项定义中，按 `item_id` 直接命中注册表 3 项；另有 8 项 `detect_method` 有同名 callable 但未注册（连同 3 个直接命中，共 11 项有同名实现）；其余 71 项无同名 callable。**“79 项只是接线错”不成立**：接线错只解释 3 个直接命中之外的调度覆盖，不能证明 71 项都有等价实现，也不能推导固定工期。
 8. **文档基线互相矛盾**：TEST_REPORT 结论过期 131 个提交，PROJECT_SUMMARY 的“双闸闭合”缺当前基线证据；README 正文停在 v2.1。对外取证前必须先统一文档基线。
 9. **默认安全/能力开关偏保守**：`ENABLE_RATE_LIMIT=False`、`LLM/AGENT/OAM_ENABLED=False`；默认部署既无限流也无 AI 能力。
-10. **CI 触发分支（DEC-006 已定调）**：DEC-006 决定默认分支改 main、master 冻结，`ci.yml` 由 A 在 DB-012 改为监听 main；当前 `ci.yml` 仍为 master，DB-012 与仓库默认分支切换完成前，main 上的漂移不被拦截。不能把“已决定”当作“已生效”。
+10. **CI 触发分支（DB-012 已落地）**：DEC-006 决定默认分支改 main、master 冻结；A 已在 DB-012（`0150511`）把 `ci.yml` 的 push/pull_request 触发分支改为 `[main]`。截至 `0ccc682` CI 仍监听 master，这一历史事实保留；自 `0150511` 起 main 推送已实际触发 CI，实测成功 run（push `d46365c`，run `41956241301`，2026-11-05 02:35Z 触发、4m47s 完成）。仓库默认分支经 `gh api repos/smudy-linsang/DB-AIOps` 实测为 `main`。不再保留“当前仍为 master、main 漂移不被拦截”的表述。
 11. **巡检安全缺陷（R1/R2，见 1.5）**：详情越权读取与触发入口 400 是 O 实测的仓库内可复现缺陷，不能归因于环境。
 
 ### 1.5 安全现状与已知入口缺陷（R1、R2）
@@ -134,7 +135,7 @@
 | 9 | `PHASE5_DEVELOPMENT_DESIGN.md` | 部分落地（**巡检性质更正**） | RCA 2.0 与巡检主体代码在；巡检是功能/安全缺陷（1.5 R1/R2），不只是文档旧名；`impact_engine` 可指认 HealthImpact/BusinessImpact 计算，但 `causal_graph.py` 等与因果链的映射需补证，不能笼统说已并入 |
 | 10 | `PHASE6_DEVELOPMENT_DESIGN.md` | 已落地（限实现层） | 六支柱主要代码在；1-5-10 无本轮运行证据；八类问题矩阵的 ≤90s/≤3min 检测预算与统一目标的关系需单列测量，不能当作全场景达标 |
 | 11 | `NEXT_PHASE_DEVELOPMENT_DESIGN.md` | **部分落地（R4 更正，原判已落地）** | checkers 拆分、多层写入、指标配置化有落点；P2-1 的 Redis/Mongo 仍是存根（`start_monitor.py:68-75`、`:92`），是整稿“已落地”的直接反例 |
-| 12 | `PROJECT_IMPROVEMENT_DESIGN.md` | 已落地（限定施工项） | validate.sh、CI、依赖/密钥扫描、appconf/self_monitor 可指认；按 DEC-006：默认分支改 main、master 冻结，`ci.yml` 由 A 在 DB-012 改为监听 main；当前仍为 master，完成前 main 漂移不被拦截；本轮未核实远端 CI 绿灯 |
+| 12 | `PROJECT_IMPROVEMENT_DESIGN.md` | 已落地（限定施工项） | validate.sh、CI、依赖/密钥扫描、appconf/self_monitor 可指认；按 DEC-006，默认分支与 `ci.yml` 监听均已切到 main（DB-012，`0150511`），main 推送实测触发 CI 成功（run `41956241301`）；镜像签名/WORM/行内准入不在本稿范围 |
 | 13 | `PROJECT_ANALYSIS_AND_NEXT_PHASE.md` | **已过时** | v2.2 时代体检报告，前提与建议已被 Phase 5/6 吸收，不能当现状分析引用 |
 | 14 | `METRICS_DESIGN.md` | 部分落地 | 指标实现超出其“当前状态”表；完整清单不能靠返回键数验收，语义、单位、缺值仍需方言证明 |
 | 15 | `DB_SCHEMA_4NF_DESIGN.md` | 已落地（限定 12 组拆表） | models 子表与 0018/0023 回填在；不外推 Timescale/ES 或全部生产数据已验收 |
@@ -234,7 +235,7 @@
 - **安全基线**：R1 越权（详情/触发）与 R2 入口 400 是仓库内可复现缺陷，必须先闭合；修复前不宣称巡检路径可用或全平台双闸闭合。
 - **环境**：GG/C/D 的 DB-AIOps 本机 clone 与 `docker-compose.dev` 未建；DM/TDSQL 无真实实例（GBase 有历史真实连通证据）；Lingma 仅内网人工转达。
 - **团队**：gork-team 2026-11-05 前 token 耗尽不可用；O 只做独立评审；GG 与 DSMan 无直连通道（本节由 GG 原复核内容保留 + DSMan 按 R3 更正）。
-- **纪律**：直推 main、无 PR 门禁、CI 事后信号（DB-012 处理 main 监听）；代码任务必须带 `scripts/validate.sh` 证据；版本唯一源 `dbmonitor/version.py`。
+- **纪律**：直推 main、无 PR 门禁、CI 事后信号（DB-012 已落地：默认分支与 `ci.yml` 均监听 main，main 推送触发 CI）；代码任务必须带 `scripts/validate.sh` 证据；版本唯一源 `dbmonitor/version.py`。
 - **证据缺口**：500 实例容量/长稳/主备切换/五方签字；TDSQL 实库；DM/GBase 当前版本方言用例；巡检 71 项无同名实现的语义评估。
 - **文档债**：README 停在 v2.1；TEST_REPORT 落后 131 个提交且与 PROJECT_SUMMARY 冲突；`【未实现】` 标记未落地；RCA 规模 6/10/39 三种口径。
 - **工程质量**：告警 `ALERT_TYPE_CHOICES` 5 vs 实发 11；`AlertDetail.jsx` 未接路由；限流默认关闭。
@@ -373,3 +374,4 @@
 | V1.1 | 2026-11-04 | GG | GG 完成第 6 节架构复核并签署 |
 | V2.0 | 2026-11-05 | DSMan（GG 原复核保留） | 按 DB-002 R1–R4 修订：披露 R1/R2；撤回 R3 低成本/固定工期并补 82 项映射；更正 R4 五项与汇总（11/12/1/1）；统一基线；首批任务补安全前置与依赖顺序；结论改“有条件通过” |
 | V2.1 | 2026-11-05 | DSMan（合并 GG 并行 V2.0） | 合并两份并行 V2.0，统一单一版本；更正 GG 版“79 项确实未编写”的过度表述与 11/12 汇总错误；CI 口径按 DEC-006 更新；DB-010 拆为 010A/010B |
+| V2.2 | 2026-11-05 | DSMan | 按 DB-014（DB-013 转通过条件①）**仅作文字订正**：§0 固定源码基线 `5559ff0` 并把“业务代码未变”与“CI 配置已变”拆开陈述（含 package-lock 依赖锁更新如实说明）；§1.4 第 10 条与 §2.1 #12 的 CI 口径更新为 main 已生效并附实测 run；§0 版本号“本 V2.0”更正为 V2.2；结论与数据未改 |
