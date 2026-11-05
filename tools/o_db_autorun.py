@@ -45,7 +45,7 @@ class DBBoard(auto.Board):
             if task in explicit or (task[3:].isdigit() and int(task[3:]) <= 3):
                 continue
             text = super().read(path).decode('utf-8')
-            lines = re.findall(r'^执行：[ \t]*(.*)$', text, re.MULTILINE)
+            lines = re.findall(r'^[ \t]*(?:[-*+][ \t]+)?执行[ \t]*[：:][ \t]*(.*)$', text, re.MULTILINE)
             if len(lines) != 1:
                 raise auto.Failure('INVALID_DB_EXECUTOR_LINE', path)
             members = re.split(r'[、,，\s]+', lines[0].strip())

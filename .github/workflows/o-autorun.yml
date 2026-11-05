@@ -47,10 +47,13 @@ jobs:
         with:
           node-version: '24'
       - name: Test DB-AIOps routing without model calls
+        id: adapter_tests
         run: python3 -m unittest discover -s tools/o-autorun/tests -v
       - name: Scan DB-AIOps orders without model calls
+        id: board_scan
         run: python3 tools/o_db_autorun.py --scan-only --repo "$GITHUB_WORKSPACE" --directory "$RUNNER_TEMP/o-scan"
       - name: Verify owner authorization is configured
+        id: owner_auth
         env:
           O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
           O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
@@ -62,7 +65,23 @@ jobs:
               print('::error::One-time account-owner setup required: '+', '.join(missing))
               sys.exit(1)
           PY
+      - name: Publish safe preflight health through Git
+        continue-on-error: true
+        if: ${{ always() }}
+        env:
+          O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
+          O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
+          O_HEALTH_TESTS: ${{ steps.adapter_tests.outcome }}
+          O_HEALTH_SCAN: ${{ steps.board_scan.outcome }}
+          O_HEALTH_AUTHORIZATION: ${{ steps.owner_auth.outcome }}
+          O_HEALTH_INSTALL: ${{ steps.install_tools.outcome }}
+          O_HEALTH_SANDBOX: ${{ steps.sandbox_check.outcome }}
+          O_HEALTH_COORDINATOR: ${{ steps.coordinator.outcome }}
+          O_HEALTH_PHASE: preflight
+        run: python3 tools/o-autorun/publish-health.py --repo "$GITHUB_WORKSPACE"
+
       - name: Install pinned coordinator tools
+        id: install_tools
         run: |
           python3 -m pip install -r tools/o-autorun/requirements-ci.txt
           npm install --global @openai/codex@0.159.2
@@ -95,6 +114,7 @@ jobs:
             --directory "$RUNNER_TEMP/o-autorun" \
             --record-host-preflight "$O_SANDBOX_OUTCOME" --probe-file "$RUNNER_TEMP/o-sandbox-probe.json"
       - name: Resume queue and cloud tasks, validate and publish reports
+        id: coordinator
         env:
           O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
           O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
@@ -108,3 +128,17 @@ jobs:
           python3 tools/o_db_autorun.py --repo "$GITHUB_WORKSPACE" \
             --directory "$RUNNER_TEMP/o-autorun" \
             --environment "$O_CLOUD_ENV_ID" --executor "$O_AUTORUN_EXECUTOR" "${args[@]}"
+
+      - name: Publish safe O chain health through Git
+        if: ${{ always() }}
+        env:
+          O_CODEX_AUTH_JSON: ${{ secrets.O_CODEX_AUTH_JSON }}
+          O_AUTORUN_STATE_KEY: ${{ secrets.O_AUTORUN_STATE_KEY }}
+          O_HEALTH_TESTS: ${{ steps.adapter_tests.outcome }}
+          O_HEALTH_SCAN: ${{ steps.board_scan.outcome }}
+          O_HEALTH_AUTHORIZATION: ${{ steps.owner_auth.outcome }}
+          O_HEALTH_INSTALL: ${{ steps.install_tools.outcome }}
+          O_HEALTH_SANDBOX: ${{ steps.sandbox_check.outcome }}
+          O_HEALTH_COORDINATOR: ${{ steps.coordinator.outcome }}
+          O_HEALTH_PHASE: final
+        run: python3 tools/o-autorun/publish-health.py --repo "$GITHUB_WORKSPACE"

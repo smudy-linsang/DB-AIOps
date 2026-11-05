@@ -78,6 +78,27 @@ class DBBoardTests(unittest.TestCase):
         with self.assertRaisesRegex(auto.Failure, 'DUPLICATE_DB_ORDER'):
             self.jobs()
 
+    def test_db013_markdown_executor_line(self):
+        self.write('docs/pm/orders/DB-013-O复审DB-001修订版V2.1.md',
+                   '# DB-013\n\n- 任务单：synthetic\n- 执行：O\n- 评审对象：synthetic\n')
+        self.commit()
+        job = self.jobs()[0]
+        self.assertEqual(job['task_id'], 'DB-013')
+        self.assertEqual(job['order_path'], 'docs/pm/orders/DB-013-O复审DB-001修订版V2.1.md')
+
+    def test_markdown_multimember_and_exact_matching(self):
+        self.write('docs/pm/orders/DB-014-test.md', '- 执行：GG、O\n')
+        self.write('docs/pm/orders/DB-015-test.md', '* 执行: OO\n')
+        self.write('docs/pm/orders/DB-016-test.md', '正文说执行：O，不是指派行\n执行：A\n')
+        self.commit()
+        self.assertEqual([j['task_id'] for j in self.jobs()], ['DB-014'])
+
+    def test_conflicting_markdown_executor_lines_fail_closed(self):
+        self.write('docs/pm/orders/DB-013-test.md', '执行：O\n- 执行：A\n')
+        self.commit()
+        with self.assertRaisesRegex(auto.Failure, 'INVALID_DB_EXECUTOR_LINE'):
+            self.jobs()
+
     def test_missing_executor_is_failure(self):
         self.write('docs/pm/orders/DB-004-test.md', 'No executor line\n')
         self.commit()
