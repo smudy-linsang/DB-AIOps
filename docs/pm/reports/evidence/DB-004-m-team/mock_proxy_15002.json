@@ -1,0 +1,100 @@
+{
+  "topology": {
+    "mode": null,
+    "sets": [],
+    "rw_split": null,
+    "proxy_version": null,
+    "routes_error": "(1064, \"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'routes' at line 1\")"
+  },
+  "results": [
+    {
+      "id": "V-1",
+      "title": "allsets 透传可用且带 info 列",
+      "status": "FAIL",
+      "detail": "返回 1 行但没有 info 列；列=['x']",
+      "evidence": {
+        "rows": [
+          {
+            "x": 1
+          }
+        ]
+      }
+    },
+    {
+      "id": "V-2",
+      "title": "透传查询 performance_schema digest 表",
+      "status": "FAIL",
+      "detail": "可查询但结果无 info 列（未经 TDSQL proxy 透传？）：[{'n': 19}]",
+      "evidence": null
+    },
+    {
+      "id": "V-3",
+      "title": "digest 扩展列（SUM_CPU_TIME / QUERY_SAMPLE_TEXT）与 CPU consumer",
+      "status": "WARN",
+      "detail": "扩展列齐全，但 events_statements_cpu consumer 未全部开启：「耗时构成」中 CPU 会显示\"未采集\"。开启方法见内网测试指南 §2.2",
+      "evidence": {
+        "columns": {
+          "SUM_CPU_TIME": true,
+          "QUERY_SAMPLE_TEXT": true,
+          "SUM_LOCK_TIME": true,
+          "SUM_SORT_MERGE_PASSES": true,
+          "SUM_CREATED_TMP_DISK_TABLES": true,
+          "FIRST_SEEN": true,
+          "LAST_SEEN": true
+        },
+        "events_statements_cpu": {
+          "None": "NO"
+        }
+      }
+    },
+    {
+      "id": "V-4",
+      "title": "透传 SHOW GLOBAL STATUS",
+      "status": "FAIL",
+      "detail": "无 info 列：[{'Variable_name': 'Questions', 'Value': '16542'}, {'Variable_name': 'Uptime', 'Value': '182853'}]",
+      "evidence": null
+    },
+    {
+      "id": "V-5",
+      "title": "指定单个 set 透传",
+      "status": "SKIP",
+      "detail": "show routes 未取到 set 名",
+      "evidence": null
+    },
+    {
+      "id": "V-6",
+      "title": "单 set 透传 EXPLAIN ANALYZE（TREE 计划）",
+      "status": "PASS",
+      "detail": "返回 TREE 计划；前 160 字符：-> Aggregate: count(0)  (cost=103 rows=1) (actual time=0.145..0.145 rows=1 loops=1)\n    -> Nested loop inner join  (cost=91.8 rows=114) (actual time=0.0503..0.1",
+      "evidence": null
+    },
+    {
+      "id": "V-7",
+      "title": "只读事务经 proxy 生效（EXPLAIN ANALYZE 的写保护）",
+      "status": "PASS",
+      "detail": "透传只读事务内的写被拒绝（1792）",
+      "evidence": null
+    },
+    {
+      "id": "V-8",
+      "title": "MAX_EXECUTION_TIME 经 proxy 生效",
+      "status": "PASS",
+      "detail": "约 0.52s 返回（期望 ≈0.5s）；返回 [{'r': 1}]",
+      "evidence": null
+    },
+    {
+      "id": "V-9",
+      "title": "读写分离时透传是否落主",
+      "status": "SKIP",
+      "detail": "show routes 未取到 set 名",
+      "evidence": null
+    }
+  ],
+  "counts": {
+    "PASS": 3,
+    "WARN": 1,
+    "FAIL": 3,
+    "SKIP": 2
+  },
+  "probed_at": "2026-11-05 19:57:05"
+}
