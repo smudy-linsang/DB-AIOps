@@ -1,0 +1,22 @@
+test_conflicting_markdown_executor_lines_fail_closed (test_db_board.DBBoardTests.test_conflicting_markdown_executor_lines_fail_closed) ... ok
+test_db013_markdown_executor_line (test_db_board.DBBoardTests.test_db013_markdown_executor_line) ... ok
+test_exact_member_and_history_filters (test_db_board.DBBoardTests.test_exact_member_and_history_filters) ... ok
+test_explicit_manifest_keeps_prerequisites_and_round (test_db_board.DBBoardTests.test_explicit_manifest_keeps_prerequisites_and_round) ... ok
+test_legacy_engine_board_unchanged (test_db_board.DBBoardTests.test_legacy_engine_board_unchanged) ... ok
+test_local_execution_and_validated_report_publication (test_db_board.DBBoardTests.test_local_execution_and_validated_report_publication) ... ok
+test_markdown_multimember_and_exact_matching (test_db_board.DBBoardTests.test_markdown_multimember_and_exact_matching) ... ok
+test_missing_executor_is_failure (test_db_board.DBBoardTests.test_missing_executor_is_failure) ... ok
+test_read_failure_is_not_empty (test_db_board.DBBoardTests.test_read_failure_is_not_empty) ... ok
+test_refresh_rechecks_changed_order_before_submission (test_db_board.DBBoardTests.test_refresh_rechecks_changed_order_before_submission) ... ok
+test_reports_do_not_resubmit_and_receipt_precedes_worker (test_db_board.DBBoardTests.test_reports_do_not_resubmit_and_receipt_precedes_worker) ... ok
+test_test_namespace_and_duplicate_rejection (test_db_board.DBBoardTests.test_test_namespace_and_duplicate_rejection) ... ok
+test_authorization_failure_and_missing_names (test_health.HealthTests.test_authorization_failure_and_missing_names) ... ok
+test_present_secrets_never_appear_in_snapshot (test_health.HealthTests.test_present_secrets_never_appear_in_snapshot) ... ok
+test_read_failure_remains_visible (test_health.HealthTests.test_read_failure_remains_visible) ... ok
+test_real_git_publication_is_separate_and_non_force (test_health.HealthTests.test_real_git_publication_is_separate_and_non_force) ... warning: You appear to have cloned an empty repository.
+ok
+
+----------------------------------------------------------------------
+Ran 16 tests in 1.995s
+
+OK

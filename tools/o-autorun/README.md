@@ -16,3 +16,18 @@
 适配测试：`python -m unittest discover -s tools/o-autorun/tests -v`。9 项测试包含本地真实 Git 的发单、ETA 回执、**合成执行器**、验证发布及重扫去重；不是模型实跑、飞书广播或线上全链路验收。原引擎只做两处 Linux/仓库红线兼容替换（异常分支 `pass` 改为等价的循环继续/进程状态读取），保留上游协议与校验。
 
 全链路由 GorkMan 使用临时 DB-TEST 单验收，记录订单提交、分发器可见性和群广播、Actions run ID、自动回执与报告提交，然后归档测试单。当前不会以手动扫描或合成执行器代替该验收。
+
+## 2026-11-05 自动链修复
+
+负责人行兼容独立 `执行：O`、Markdown 列表 `- 执行：O`（也接受 `*`/`+` 列表及半角冒号）；仍精确匹配 O，出现多个相互冲突的负责人行时拒绝收单。当前默认分支已由用户改为 main，旧文档的 master 默认分支限制属于历史情况。
+
+每次 Actions 在授权检查后与结束时，将白名单状态写入本仓 `o-autorun-health` 分支的 `health.json`：run URL、源码 SHA、测试/扫描/授权/安装/沙箱/执行结果及缺失的 Secret **名称**。不记录 Secret 值、模型提示词或原始日志。状态分支既不触发 main 工作流，也不替代真实任务报告。
+
+只读查询（无需 Actions API）：
+
+```bash
+git fetch origin refs/heads/o-autorun-health
+git show FETCH_HEAD:health.json
+```
+
+若授权阶段失败，先依据健康记录的 `missing_owner_secret_names` 核实缺少的本仓 Actions Secrets，再由账号所有者执行安全配置；不得从 Xinchuang 的加密状态提取或复制凭据。不能把本地环境里没有这些变量当作 Actions 未配置的证据。
