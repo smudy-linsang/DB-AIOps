@@ -1,18 +1,18 @@
 {
   "schema_version": 1,
-  "observed_at": "2026-11-05T02:05:05.695465+00:00",
+  "observed_at": "2026-11-05T02:05:07.123664+00:00",
   "repository": "smudy-linsang/DB-AIOps",
   "run_id": "41952802349",
   "run_url": "https://github.com/smudy-linsang/DB-AIOps/actions/runs/41952802349",
-  "phase": "preflight",
+  "phase": "final",
   "reason": "AUTHORIZATION_FAILURE",
   "stages": {
     "tests": "success",
     "scan": "success",
     "authorization": "failure",
-    "install": "pending",
-    "sandbox": "pending",
-    "coordinator": "pending"
+    "install": "skipped",
+    "sandbox": "skipped",
+    "coordinator": "skipped"
   },
   "missing_owner_secret_names": [
     "O_CODEX_AUTH_JSON",
