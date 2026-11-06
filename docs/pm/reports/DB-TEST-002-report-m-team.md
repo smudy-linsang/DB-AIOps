@@ -12,7 +12,7 @@
 | 会话标识 | `mvs_6a1f8e191fe545168fa208a984940aa6` |
 | 触发时刻 | **2026-11-06 10:39:31 +0800（Asia/Shanghai）** |
 | 触发方式 | **HTTP Fire 出口**：`POST http://127.0.0.1:24711/fire`，请求头 `Authorization: Bearer <令牌>`（令牌明文不入库、不入报告） |
-| 落库 commit | 见 §6（提交后回填） |
+| 落库 commit | `0d07ec5`（正文/回执/证据包，见 §6；§6 回填修订见 v1.1） |
 
 ---
 
@@ -161,7 +161,7 @@ started_at : 2026-11-06T02:39:31.640232+00:00   （= 10:39:31.640 +0800）
 |---|---|
 | 仓库 | `smudy-linsang/DB-AIOps`，分支 `main`，工作区 `C:\DB-AIOps` |
 | 任务单 commit | `a7a3d16`（2026-11-06 10:39:13 +0800） |
-| 本报告落库 commit | §6 回填 |
+| 本报告落库 commit | `0d07ec5`（§6 回填修订见 v1.1） |
 | 代码改动 | **无**（本单不含产品开发；仅新增 `docs/pm/reports/` 下 2 份 md + 6 份证据文件） |
 | 产品代码测试 | 不适用（无代码改动，故不引用测试条数；`scripts/validate.sh unit` 结果见 §6） |
 | 令牌处置 | 令牌仅存于 `C:\dispatcher\mman_fire_token.txt`（64 字节，服务同目录、仅本用户可读）；**未写入报告、未写入证据包、未写入仓库**（已对 6 份证据文件逐一做令牌明文比对，全部 clean） |
@@ -194,10 +194,13 @@ A 用定时任务 Fire API、O 用 WAKE-O-AUTO、DSMan 用 DSH `/api/bot`；**M-
 
 | 项 | 值 |
 |---|---|
-| 推送分支 | `origin/main` |
-| 报告落库 commit | 待推送后回填 |
+| 推送分支 | `origin/main`（push 结果：`a7a3d16..0d07ec5  main -> main`） |
+| 报告落库 commit | **`0d07ec5`** — `docs(pm): DB-TEST-002 MMMan 叫醒出口（HTTP Fire）全链路验收报告与证据`（8 文件，363 行新增） |
 | 包含文件 | `docs/pm/reports/DB-TEST-002-report-m-team.md`、`docs/pm/reports/DB-TEST-002-receipt-m-team.md`、`docs/pm/reports/evidence/DB-TEST-002-m-team/`（6 份） |
-| `scripts/validate.sh unit` | 待回填 |
+| §6 回填修订 | v1.1（补写本节落地值，SHA 见提交历史，结论不变） |
+| `scripts/validate.sh unit` | **exit_code 0** — `{"mode":"unit","exit_code":0,"stages":[{"name":"红线扫描","status":"pass"},{"name":"unit 测试","status":"pass"}],"git_rev":"a7a3d16"}`（红线扫描 786ms，unit 测试 34889ms） |
+| `scripts/scan_secrets.py` | **通过**（对本单 2 份 md + 证据目录扫描，输出「密钥扫描通过」） |
+| 提交纪律复核 | `git diff --cached --stat` 仅含本单 8 个文件；未 `git add .`、未 force、未改 `STATUS.md` / `DECISIONS.md` / 他人文件 |
 
 ---
 
@@ -227,3 +230,4 @@ A 用定时任务 Fire API、O 用 WAKE-O-AUTO、DSMan 用 DSH `/api/bot`；**M-
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-06 | MMMan | 首版：M-team HTTP Fire 叫醒出口全链路验收，4/4 项通过，结论「通过」；登记 G-1～G-4 四项缺口 |
+| v1.1 | 2026-11-06 | MMMan | 回填 §6 落库记录（commit `0d07ec5`、push 结果、validate.sh unit exit_code 0、密钥扫描通过）与 §7 证据文件名说明（`.log` → `.txt`）；**结论不变，仍为「通过」** |
