@@ -1,8 +1,11 @@
 {
   "order": "DB-021",
   "member": "A",
-  "status": "dispatched",
+  "status": "running",
+  "started_at": "2026-11-06T07:05:41+00:00",
+  "attempts": 1,
+  "dispatches": 1,
   "dispatched_at": "2026-11-06T07:05:25+00:00",
-  "attempts": 0,
-  "dispatches": 1
+  "mode": "RUN",
+  "session": "cse_01GsGoorE3SEgKRiFcxwbzFA"
 }
