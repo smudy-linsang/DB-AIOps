@@ -1,0 +1,108 @@
+{
+ "files": [
+  {
+   "file": "db005r_s1_log.json",
+   "desc": "S-1 阶段日志（建实例/场景A/删索引/场景B/计划采集/API 验收/A-2/G-13）",
+   "bytes": 2086,
+   "masked": false
+  },
+  {
+   "file": "db005r_s1_api.json",
+   "desc": "S-1 API 链路级回归验收结果（慢列表/详情/建议/耗时构成/环比/告警，22 项）",
+   "bytes": 30010,
+   "masked": true
+  },
+  {
+   "file": "db005r_s1_a2.json",
+   "desc": "A-2 专项：索引存在时不重复建议同一索引",
+   "bytes": 4983,
+   "masked": false
+  },
+  {
+   "file": "db005r_g13.json",
+   "desc": "G-13 探针：平台 EXPLAIN digest 在直连实例与 mock proxy 上的失败形态 + 目标库直证",
+   "bytes": 7304,
+   "masked": true
+  },
+  {
+   "file": "s1_run_A_client_summary.txt",
+   "desc": "场景A（索引在位）客户端侧 workload 汇总",
+   "bytes": 1562,
+   "masked": false
+  },
+  {
+   "file": "s1_run_B_client_summary.txt",
+   "desc": "场景B（索引已删）客户端侧 workload 汇总",
+   "bytes": 1575,
+   "masked": false
+  },
+  {
+   "file": "s1_lockwait_injection.txt",
+   "desc": "锁等待注入记录（A 持锁 20s / B 等锁）",
+   "bytes": 95,
+   "masked": false
+  },
+  {
+   "file": "s1_plan_before.json",
+   "desc": "计划采集 before（索引在位）",
+   "bytes": 2253,
+   "masked": true
+  },
+  {
+   "file": "s1_plan_after.json",
+   "desc": "计划采集 after（索引已删）",
+   "bytes": 3652,
+   "masked": true
+  },
+  {
+   "file": "reproduce_s1_run.py",
+   "desc": "S-1 全流程脚本（建实例→场景A→删索引→场景B→计划采集→API 验收→A-2→G-13）",
+   "bytes": 9632,
+   "masked": true
+  },
+  {
+   "file": "reproduce_g13_probe.py",
+   "desc": "G-13 探针脚本",
+   "bytes": 7498,
+   "masked": true
+  },
+  {
+   "file": "reproduce_api_check.py",
+   "desc": "API 链路级验收脚本（22 项检查，DB-005 同一脚本）",
+   "bytes": 30836,
+   "masked": true
+  },
+  {
+   "file": "reproduce_a2_check.py",
+   "desc": "A-2 专项脚本（索引存在时不重复建议）",
+   "bytes": 5209,
+   "masked": true
+  },
+  {
+   "file": "reproduce_reset_pw.py",
+   "desc": "本地开发账号口令轮换脚本（口令只经环境变量传入）",
+   "bytes": 676,
+   "masked": false
+  },
+  {
+   "file": "reproduce_plan_capture.py",
+   "desc": "计划采集脚本（before/after 计划哈希）",
+   "bytes": 4540,
+   "masked": true
+  }
+ ],
+ "scan_hits": 0,
+ "scan_list": [
+  "127.0.0.1",
+  "15002",
+  "13306",
+  "8009",
+  "tdsql_test_2024",
+  "Mteam-Local-",
+  "enc:",
+  "PWD=",
+  "root@",
+  "SYSDBA/",
+  "eyJ"
+ ]
+}

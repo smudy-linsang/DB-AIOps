@@ -1,0 +1,85 @@
+{
+  "label": "after",
+  "base": "http://<local-host>:<platform-port>",
+  "db_config_id": 19,
+  "captured_at_local": "2026-11-06T15:49:46",
+  "plans": [
+    {
+      "name": "pk_lookup",
+      "digest": "d92061db99b87ea3af2c3c20182c7d69",
+      "sql": "UPDATE orders SET status = status WHERE id = 1 AND user_id = 30289",
+      "http": 200,
+      "plan_hash": "1eb7a192f391f434453790384b9da4d2",
+      "cost_total": null,
+      "captured_at": "2026-11-06T07:49:46.628695+00:00",
+      "plan_text": "<not executable by iterator executor>\n",
+      "error": null
+    },
+    {
+      "name": "agg_no_shardkey",
+      "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+      "sql": "SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+      "http": 200,
+      "plan_hash": "5fe8730203a0fbc7c29851f58584c081",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-06T07:37:44.949683+00:00",
+      "plan_text": "-> Table scan on <temporary>\n    -> Aggregate using temporary table\n        -> Table scan on orders  (cost=15258 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "slow_user_sort",
+      "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+      "sql": "SELECT id, amount FROM orders WHERE user_id = 42577 ORDER BY created_at DESC LIMIT 10",
+      "http": 200,
+      "plan_hash": "b3b33cfb6ef878231ebb1b189dd83ac1",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-06T07:49:46.860133+00:00",
+      "plan_text": "-> Limit: 10 row(s)  (cost=15258 rows=10)\n    -> Sort: orders.created_at DESC, limit input to 10 row(s) per chunk  (cost=15258 rows=148488)\n        -> Filter: (orders.user_id = 42577)  (cost=15258 rows=148488)\n            -> Table scan on orders  (cost=15258 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "range_no_key",
+      "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+      "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 3 HOUR",
+      "http": 200,
+      "plan_hash": "a0ccb77b24666bd4fc8f704e2b3d9322",
+      "cost_total": 15257.8,
+      "captured_at": "2026-11-06T07:49:46.961190+00:00",
+      "plan_text": "-> Aggregate: count(0)  (cost=10307 rows=1)\n    -> Filter: (orders.created_at >= <cache>((now() - interval 3 hour)))  (cost=5358 rows=49491)\n        -> Table scan on orders  (cost=5358 rows=148488)\n",
+      "error": null
+    },
+    {
+      "name": "pk_lookup",
+      "digest": "1581b156e40f00f664570a0264cf2532",
+      "sql": "SELECT id FROM orders WHERE id = 91720 AND user_id = 31350",
+      "http": 200,
+      "plan_hash": "4c164406308252ea64efb0879b41b69a",
+      "cost_total": null,
+      "captured_at": "2026-11-06T07:37:45.142009+00:00",
+      "plan_text": "-> Zero rows (no matching row in const table)  (cost=0..0 rows=0)\n",
+      "error": null
+    },
+    {
+      "name": "range_no_key",
+      "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+      "sql": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    },
+    {
+      "name": "range_no_key",
+      "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+      "sql": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+      "http": 502,
+      "plan_hash": null,
+      "cost_total": null,
+      "captured_at": null,
+      "plan_text": null,
+      "error": "{'code': 'EXPLAIN_FAIL', 'message': '计划采集失败(语句不支持或目标库拒绝)'}"
+    }
+  ]
+}

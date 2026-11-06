@@ -1,0 +1,81 @@
+{
+  "log": [
+    {
+      "phase": "P0 建实例(mysql/真实MySQL8.0)+账号复位",
+      "ok": true,
+      "detail": "cid=19 stdout=CID=19 err=",
+      "at": "15:25:40"
+    },
+    {
+      "phase": "P1a 索引补回(idx_user_created)",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:25:43"
+    },
+    {
+      "phase": "P1b 场景A workload(%smin, 有索引)",
+      "ok": true,
+      "detail": "rc=0 window={'from': '2026-11-06T15:25:43+08:00', 'to': '2026-11-06T15:37:44+08:00'}",
+      "at": "15:37:44"
+    },
+    {
+      "phase": "P2 计划采集 before(索引在位)",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:37:45"
+    },
+    {
+      "phase": "P3a 索引删除",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:37:45"
+    },
+    {
+      "phase": "P3b 锁等待注入(场景B窗内)",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:40:05"
+    },
+    {
+      "phase": "P3c 场景B workload(%smin, 索引已删)",
+      "ok": true,
+      "detail": "rc=0 window={'from': '2026-11-06T15:37:45+08:00', 'to': '2026-11-06T15:49:45+08:00'}",
+      "at": "15:49:45"
+    },
+    {
+      "phase": "P4 计划采集 after(索引已删)",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:49:47"
+    },
+    {
+      "phase": "P5 API 链路级回归(慢列表/详情/建议/耗时构成/环比/告警)",
+      "ok": true,
+      "detail": "rc=0 out=C:\\dispatcher\\probe_out\\db005r_s1_api.json",
+      "at": "15:49:48"
+    },
+    {
+      "phase": "P6 A-2 专项(索引存在时不重复建议)",
+      "ok": true,
+      "detail": "rc=0 digest=6171e5b3b12f5cc4016eacc2545f3359",
+      "at": "15:49:49"
+    },
+    {
+      "phase": "P7 G-13 探针(INTERVAL ? HOUR → 502)",
+      "ok": true,
+      "detail": "rc=0",
+      "at": "15:49:51"
+    }
+  ],
+  "started_at": "2026-11-06T15:25:39",
+  "cid": 19,
+  "window_A": {
+    "from": "2026-11-06T15:25:43+08:00",
+    "to": "2026-11-06T15:37:44+08:00"
+  },
+  "window_B": {
+    "from": "2026-11-06T15:37:45+08:00",
+    "to": "2026-11-06T15:49:45+08:00"
+  },
+  "finished_at": "2026-11-06T15:49:51"
+}

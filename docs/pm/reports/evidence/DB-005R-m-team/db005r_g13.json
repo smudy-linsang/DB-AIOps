@@ -1,0 +1,185 @@
+{
+  "captured_at": "2026-11-06T15:49:50",
+  "base": "http://<local-host>:<platform-port>",
+  "targets": {
+    "mysql80_direct": {
+      "cid": 19,
+      "slow_list_http": 200,
+      "slow_count": 27,
+      "candidates": [
+        {
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+          "kind": "platform_explain_digest"
+        }
+      ],
+      "explain": [
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR"
+        }
+      ]
+    },
+    "tdsql_proxy": {
+      "cid": 18,
+      "slow_list_http": 200,
+      "slow_count": 39,
+      "candidates": [
+        {
+          "digest": "94922d524b37705ddc2452b06da20bd5",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "ed4de50f035be12188597ba5c7c730a6",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "0eec58c68977ee942d0dce9ee969850a",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT id, amount FROM orders WHERE user_id = 31794 ORDER BY created_at DESC LIMIT 10",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT id FROM orders WHERE id = 58667 AND user_id = 2047",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT id, amount FROM orders WHERE user_id = 31794 ORDER BY created_at DESC LIMIT 10",
+          "kind": "platform_explain_digest"
+        },
+        {
+          "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT id FROM orders WHERE id = 58667 AND user_id = 2047",
+          "kind": "platform_explain_digest"
+        }
+      ],
+      "explain": [
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "94922d524b37705ddc2452b06da20bd5",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "ed4de50f035be12188597ba5c7c730a6",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=TREE SELECT status, COUNT(*), SUM(amount) FROM orders GROUP BY status"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 47 HOUR"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "0eec58c68977ee942d0dce9ee969850a",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT id, amount FROM orders WHERE user_id = 31794 ORDER BY created_at DESC LIMIT 10"
+        },
+        {
+          "http": 502,
+          "ok": false,
+          "body": {
+            "code": "EXPLAIN_FAIL",
+            "message": "计划采集失败(语句不支持或目标库拒绝)"
+          },
+          "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+          "kind": "platform_explain_digest",
+          "sql_example": "EXPLAIN FORMAT=JSON SELECT id FROM orders WHERE id = 58667 AND user_id = 2047"
+        }
+      ]
+    }
+  },
+  "target_db_direct": {
+    "explain_wrapped": {
+      "ok": false,
+      "sql": "EXPLAIN FORMAT=JSON EXPLAIN FORMAT=JSON SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 21 HOUR",
+      "errno": 1064,
+      "error": "ProgrammingError: (1064, \"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near 'EXPLAIN FORMAT=JSON SELECT COUNT(*) F"
+    },
+    "interval_placeholder": {
+      "ok": false,
+      "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL ? HOUR",
+      "errno": 1064,
+      "error": "ProgrammingError: (1064, \"You have an error in your SQL syntax; check the manual that corresponds to your MySQL server version for the right syntax to use near '? HOUR' at line 1\")"
+    },
+    "interval_literal": {
+      "ok": true,
+      "sql": "SELECT COUNT(*) FROM orders WHERE created_at >= NOW() - INTERVAL 21 HOUR",
+      "sample": [
+        [
+          "354"
+        ]
+      ]
+    }
+  }
+}

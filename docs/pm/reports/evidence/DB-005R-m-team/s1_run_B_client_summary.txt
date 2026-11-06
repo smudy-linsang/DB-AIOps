@@ -1,0 +1,16 @@
+15:38:45 {'slow_user_sort': (34, 23.2), 'agg_no_shardkey': (19, 42.9), 'range_no_key': (13, 18.7), 'pk_lookup': (234, 2.5)}
+15:39:46 {'slow_user_sort': (67, 23.0), 'agg_no_shardkey': (29, 42.4), 'range_no_key': (24, 18.2), 'pk_lookup': (480, 2.6)}
+15:40:46 {'slow_user_sort': (99, 23.1), 'agg_no_shardkey': (40, 43.4), 'range_no_key': (31, 17.8), 'pk_lookup': (730, 2.6)}
+15:41:46 {'slow_user_sort': (138, 23.0), 'agg_no_shardkey': (50, 43.4), 'range_no_key': (40, 18.2), 'pk_lookup': (972, 2.6)}
+15:42:46 {'slow_user_sort': (178, 22.7), 'agg_no_shardkey': (68, 42.2), 'range_no_key': (49, 17.7), 'pk_lookup': (1205, 2.5)}
+15:43:46 {'slow_user_sort': (210, 23.0), 'agg_no_shardkey': (79, 42.0), 'range_no_key': (64, 17.1), 'pk_lookup': (1447, 2.5)}
+15:44:46 {'slow_user_sort': (242, 22.9), 'agg_no_shardkey': (90, 41.6), 'range_no_key': (75, 17.0), 'pk_lookup': (1693, 2.5)}
+15:45:46 {'slow_user_sort': (280, 22.9), 'agg_no_shardkey': (103, 41.3), 'range_no_key': (93, 17.0), 'pk_lookup': (1924, 2.5)}
+15:46:46 {'slow_user_sort': (310, 23.0), 'agg_no_shardkey': (118, 41.3), 'range_no_key': (107, 16.9), 'pk_lookup': (2165, 2.5)}
+15:47:47 {'slow_user_sort': (348, 23.0), 'agg_no_shardkey': (131, 42.0), 'range_no_key': (123, 17.3), 'pk_lookup': (2398, 2.5)}
+15:48:47 {'slow_user_sort': (379, 23.0), 'agg_no_shardkey': (142, 41.7), 'range_no_key': (141, 17.1), 'pk_lookup': (2638, 2.5)}
+客户端侧汇总（次数, 平均 ms）：
+  slow_user_sort      409      23.1
+  agg_no_shardkey     155      41.8
+  range_no_key        152      17.2
+  pk_lookup          2877       2.6
