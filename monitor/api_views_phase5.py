@@ -214,6 +214,7 @@ class InspectionRunListView(_BaseView):
                 'health_score': (r.summary or {}).get('health_score'),
                 'coverage_status': (r.summary or {}).get('coverage_status', 'normal' if r.executed_items > 0 else 'unassessed'),
                 'coverage_rate': (r.summary or {}).get('coverage_rate', 0.0),
+                'conclusion': (r.summary or {}).get('conclusion', ''),
             })
         return self.json_response({'total': len(runs), 'runs': runs})
 
@@ -264,6 +265,7 @@ class InspectionRunTriggerView(_BaseView):
             'health_score': summary.get('health_score'),
             'coverage_status': summary.get('coverage_status', 'normal'),
             'coverage_rate': summary.get('coverage_rate', 0.0),
+            'conclusion': summary.get('conclusion', ''),
         })
 
 
@@ -323,6 +325,7 @@ class InspectionRunDetailView(_BaseView):
                 'health_score': (run.summary or {}).get('health_score'),
                 'coverage_status': (run.summary or {}).get('coverage_status', 'normal' if run.executed_items > 0 else 'unassessed'),
                 'coverage_rate': (run.summary or {}).get('coverage_rate', 0.0),
+                'conclusion': (run.summary or {}).get('conclusion', ''),
             },
             'findings': findings,
         })

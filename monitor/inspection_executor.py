@@ -1578,7 +1578,7 @@ class InspectionExecutor:
         run_id = self.run_for_db(self.db_config, level=self.level, triggered_by=self.triggered_by)
         from monitor.models import InspectionRun
         run = InspectionRun.objects.get(run_id=run_id)
-        return {
+        ret = {
             'run_id': run.run_id,
             'status': run.status,
             'total_items': run.total_items,
@@ -1593,6 +1593,9 @@ class InspectionExecutor:
             'total_risk_score': run.total_risk_score,
             'summary': run.summary or {},
         }
+        if (run.summary or {}).get("conclusion"):
+            ret['conclusion'] = run.summary["conclusion"]
+        return ret
 
     def run_for_db(self, db_config, level: str = "daily",
                    item_ids: Optional[List[str]] = None,
@@ -1732,6 +1735,40 @@ class InspectionExecutor:
             "executed_items": executed,
             "skipped": skip,
         }
+
+        # 针对达梦实例，缺 dmPython 驱动时的可见信号：在巡检结论和 findings 中明确注明
+        if db_config.db_type == "dm":
+            dm_driver_missing = False
+            try:
+                import dmPython
+            except ImportError:
+                dm_driver_missing = True
+
+            if dm_driver_missing:
+                msg = "DM 检测器未注册：缺 dmPython"
+                run.summary["conclusion"] = msg
+                run.summary["warning"] = msg
+                run.summary["driver_status"] = "missing_dmPython"
+                if not run.error_message:
+                    run.error_message = msg
+                InspectionFinding.objects.create(
+                    run=run,
+                    item=None,
+                    item_code="INS-DM-DRIVER-MISSING",
+                    title="DM 检测器未注册",
+                    category="environment",
+                    severity="warning",
+                    risk_score=3.0,
+                    raw_data={"summary": msg, "findings": [], "error": msg},
+                    recommendation="达梦检测器需要 dmPython 原生驱动（需达梦官方授权安装包安装）。请联系管理员获取并安装 dmPython。",
+                    status="warning",
+                )
+                warn += 1
+                total_risk += 3.0
+                run.warn_count = warn
+                run.failed_items = warn + crit
+                run.total_risk_score = round(total_risk, 1)
+
         run.save()
 
         return run.run_id

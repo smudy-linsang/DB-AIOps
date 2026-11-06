@@ -2,11 +2,12 @@
 # 统一使用 5.2 LTS；上界防止 Python 版本不同导致本地/CI 解析到不同大版本。
 Django>=5.2.17,<5.3
 
-# 数据库驱动
+# 数据库驱动与连接层
 pymysql>=1.1.0          # MySQL, Gbase8a, TDSQL
 oracledb>=2.0.0         # Oracle
 psycopg2-binary>=2.9.0  # PostgreSQL
-pyodbc>=5.0.0           # 达梦数据库 (DM8 ODBC Driver)
+pyodbc>=5.0.0           # 达梦数据库连接层驱动 (DM8 ODBC Driver，用于 DbConnector)
+# dmPython              # 达梦检测器依赖 (DM 原生 Python 驱动，需达梦官方授权安装包安装，可选按需加载)
 
 # 任务调度
 APScheduler>=3.10.0

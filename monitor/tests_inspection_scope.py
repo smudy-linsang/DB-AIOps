@@ -406,3 +406,126 @@ class InspectionAliasRegistrationTests(TestCase):
         )
         self.assertEqual(r_zero.status_code, 403)
 
+
+@tag('unit')
+class DamengDriverVisibilityTests(TestCase):
+    """
+    DB-018: DM 检测器静默不注册修复验证套件。
+
+    验证两项核心缺陷修复：
+    1. 依赖声明分层：requirements.txt 区分 pyodbc（连接层）与 dmPython（DM 检测器依赖）；
+    2. 缺驱动可见性：纳管 DM 实例缺 dmPython 时，检测器不注册具备明确可见信号：
+       - 注册/启动日志告警；
+       - start_monitor 采集轮询不再静默跳过，记录告警并生成状态为 DOWN 的 MonitorLog；
+       - Celery 异步任务记录告警并生成 MonitorLog；
+       - 巡检结论与报告中明确注明「DM 检测器未注册：缺 dmPython」，并生成环境维度 Finding；
+       - API 接口透出 conclusion。
+    """
+
+    def setUp(self):
+        self.dm_db = make_db('test-dm-instance', db_type='dm', port=5236)
+        self.user = make_user('dm_user', RoleCode.DBA, [Perm.DATABASES_VIEW], allowed_dbs=[self.dm_db.id])
+        self.client = Client()
+        login(self.client, self.user)
+
+    def test_requirements_declaration_layered(self):
+        """验证 requirements.txt 分层写清连接层与检测器依赖。"""
+        import os
+        req_path = os.path.join(os.path.dirname(__file__), '..', 'requirements.txt')
+        with open(req_path, 'r', encoding='utf-8') as f:
+            content = f.read()
+        self.assertIn('pyodbc>=5.0.0', content)
+        self.assertIn('达梦数据库连接层驱动', content)
+        self.assertIn('dmPython', content)
+        self.assertIn('达梦检测器依赖', content)
+
+    def test_checker_unregistered_visible_signals(self):
+        """验证缺 dmPython 时注册表行为与告警日志。"""
+        from monitor.checkers import CHECKER_MAP, get_checker, is_dm_checker_available
+        self.assertFalse(is_dm_checker_available())
+        self.assertIsNone(CHECKER_MAP.get('dm'))
+
+        with self.assertLogs('monitor.checkers', level='WARNING') as cm:
+            checker = get_checker('dm')
+            self.assertIsNone(checker)
+            self.assertTrue(any('DM 检测器未注册：缺 dmPython' in output for output in cm.output))
+
+    def test_start_monitor_dm_produces_visible_signal(self):
+        """验证 start_monitor 采集轮询达梦实例时不静默跳过，产生 DOWN 日志与明确报错。"""
+        from monitor.management.commands.start_monitor import Command
+        from monitor.models import MonitorLog
+
+        cmd = Command()
+        MonitorLog.objects.filter(config=self.dm_db).delete()
+
+        with self.assertLogs('monitor.management.commands.start_monitor', level='WARNING') as cm:
+            cmd._run_single_check(self.dm_db)
+            self.assertTrue(any('DM 检测器未注册：缺 dmPython' in output for output in cm.output))
+
+        last_log = MonitorLog.objects.filter(config=self.dm_db).order_by('-create_time').first()
+        self.assertIsNotNone(last_log, '纳管 DM 实例采集后未产生 MonitorLog，被静默跳过')
+        self.assertEqual(last_log.status, 'DOWN')
+        self.assertIn('DM 检测器未注册：缺 dmPython', last_log.message)
+
+    def test_celery_task_dm_produces_visible_signal(self):
+        """验证 Celery 异步任务对纳管 DM 实例的可见信号。"""
+        from monitor.models import MonitorLog
+        from monitor.tasks import collect_single_db
+
+        MonitorLog.objects.filter(config=self.dm_db).delete()
+
+        with self.assertLogs('monitor.tasks', level='WARNING') as cm:
+            res = collect_single_db(self.dm_db.id)
+            self.assertEqual(res.get('status'), 'skipped')
+            self.assertEqual(res.get('reason'), 'missing_dmPython')
+            self.assertEqual(res.get('message'), 'DM 检测器未注册：缺 dmPython')
+            self.assertTrue(any('DM 检测器未注册：缺 dmPython' in output for output in cm.output))
+
+        last_log = MonitorLog.objects.filter(config=self.dm_db).order_by('-create_time').first()
+        self.assertIsNotNone(last_log)
+        self.assertEqual(last_log.status, 'DOWN')
+        self.assertIn('DM 检测器未注册：缺 dmPython', last_log.message)
+
+    def test_inspection_executor_and_reports_dm_visibility(self):
+        """验证巡检执行器、报告生成器及 API 对缺驱动的可见性。"""
+        from monitor.inspection_executor import InspectionExecutor
+        from monitor.inspection_report_generator import InspectionReportGenerator
+        from monitor.models import InspectionFinding, InspectionRun
+
+        # 1. 执行器 run()
+        executor = InspectionExecutor(self.dm_db, level='daily')
+        result = executor.run()
+        self.assertEqual(result.get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+        self.assertEqual(result.get('summary', {}).get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+
+        # 2. 检查 Run 与 Finding
+        run = InspectionRun.objects.get(run_id=result['run_id'])
+        self.assertEqual((run.summary or {}).get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+        finding = InspectionFinding.objects.filter(run=run, item_code='INS-DM-DRIVER-MISSING').first()
+        self.assertIsNotNone(finding, '未生成 DM 驱动缺失的巡检发现项')
+        self.assertEqual(finding.severity, 'warning')
+        self.assertIn('DM 检测器未注册：缺 dmPython', finding.raw_data.get('summary', ''))
+
+        # 3. 报告生成器
+        gen = InspectionReportGenerator(run)
+        md_report = gen.to_markdown()
+        self.assertIn('**巡检结论**: **DM 检测器未注册：缺 dmPython**', md_report)
+
+        text_report = gen.to_text()
+        self.assertIn('巡检结论: DM 检测器未注册：缺 dmPython', text_report)
+
+        dict_report = gen.to_dict()
+        self.assertEqual(dict_report['run'].get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+
+        # 4. API 接口透出
+        r_detail = self.client.get(f'/api/v1/inspection/runs/{run.run_id}/')
+        self.assertEqual(r_detail.status_code, 200)
+        self.assertEqual(r_detail.json()['run'].get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+
+        r_list = self.client.get('/api/v1/inspection/runs/')
+        self.assertEqual(r_list.status_code, 200)
+        dm_runs = [item for item in r_list.json()['runs'] if item['run_id'] == run.run_id]
+        self.assertTrue(len(dm_runs) > 0)
+        self.assertEqual(dm_runs[0].get('conclusion'), 'DM 检测器未注册：缺 dmPython')
+
+

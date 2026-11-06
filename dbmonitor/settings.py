@@ -586,8 +586,17 @@ SENTINEL_CONN_MAX_AGE_SEC = int(os.environ.get('SENTINEL_CONN_MAX_AGE_SEC', 1800
 # ============================================================================
 # 日志配置
 # ============================================================================
-LOG_DIR = os.path.join(BASE_DIR, 'logs')
-os.makedirs(LOG_DIR, exist_ok=True)
+LOG_DIR = os.environ.get('LOG_DIR', os.path.join(BASE_DIR, 'logs'))
+try:
+    os.makedirs(LOG_DIR, exist_ok=True)
+    test_file = os.path.join(LOG_DIR, '.write_test')
+    with open(test_file, 'a') as f:
+        pass
+    os.remove(test_file)
+except OSError:
+    import tempfile
+    LOG_DIR = os.path.join(tempfile.gettempdir(), 'dbmonitor_logs')
+    os.makedirs(LOG_DIR, exist_ok=True)
 
 LOGGING = {
     'version': 1,

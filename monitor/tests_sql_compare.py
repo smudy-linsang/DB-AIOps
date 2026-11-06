@@ -121,9 +121,11 @@ class RegressionAndPeriodicApiTests(TestCase):
                 rows_delta BIGINT DEFAULT 0, reads_delta BIGINT DEFAULT 0, sql_text_sample TEXT)""")
             for ddl in TimeseriesStorage._SQLSTAT_EXT_DDL:
                 c.execute(f"ALTER TABLE sql_stat ADD COLUMN IF NOT EXISTS {ddl}")
-            c.execute("""CREATE OR REPLACE FUNCTION time_bucket(i interval, t timestamptz)
-                         RETURNS timestamptz LANGUAGE sql IMMUTABLE AS
-                         $$ SELECT date_bin(i, t, TIMESTAMPTZ '2000-01-01') $$""")
+            c.execute("SELECT 1 FROM pg_proc WHERE proname = 'time_bucket' LIMIT 1")
+            if not c.fetchone():
+                c.execute("""CREATE OR REPLACE FUNCTION time_bucket(i interval, t timestamptz)
+                             RETURNS timestamptz LANGUAGE sql IMMUTABLE AS
+                             $$ SELECT date_bin(i, t, TIMESTAMPTZ '2000-01-01') $$""")
         self.cfg = make_db('cmp-mine', 'tdsql')
         self.other = make_db('cmp-other', 'tdsql')
         user = make_user('cmp-user', 'cmp_role', [Perm.SQL_MONITORING_VIEW], allowed_dbs=[self.cfg.id])

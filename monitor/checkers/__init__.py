@@ -30,11 +30,21 @@ from monitor.checkers.oracle import OracleChecker
 from monitor.checkers.mysql import MySQLChecker
 from monitor.checkers.pgsql import PostgreSQLChecker
 
+import logging
+
+logger = logging.getLogger(__name__)
+
 # 达梦 DM8 驱动为可选依赖（需官方授权安装 dmPython）
+DM_DRIVER_AVAILABLE = False
+DM_DRIVER_ERROR = None
+
 try:
     from monitor.checkers.dm import DamengChecker
-except ImportError:
+    DM_DRIVER_AVAILABLE = True
+except ImportError as e:
     DamengChecker = None
+    DM_DRIVER_ERROR = str(e)
+    logger.warning("DM 检测器未注册：缺 dmPython（需官方授权安装）: %s", e)
 
 from monitor.checkers.gbase import GbaseChecker
 from monitor.checkers.tdsql import TDSQLChecker
@@ -54,6 +64,11 @@ if DamengChecker is not None:
     CHECKER_MAP['dm'] = DamengChecker
 
 
+def is_dm_checker_available() -> bool:
+    """返回达梦检测器是否已成功注册（dmPython 驱动是否可用）"""
+    return DamengChecker is not None
+
+
 def get_checker(db_type: str):
     """
     工厂函数：根据数据库类型字符串返回对应的 Checker 类。
@@ -66,7 +81,11 @@ def get_checker(db_type: str):
     """
     if not db_type:
         return None
-    return CHECKER_MAP.get(db_type.lower())
+    db_type_lower = db_type.lower()
+    checker = CHECKER_MAP.get(db_type_lower)
+    if checker is None and db_type_lower == 'dm':
+        logger.warning("获取达梦检查器失败：DM 检测器未注册：缺 dmPython（需官方授权安装）")
+    return checker
 
 
 __all__ = [
@@ -78,6 +97,9 @@ __all__ = [
     'GbaseChecker',
     'TDSQLChecker',
     'CHECKER_MAP',
+    'is_dm_checker_available',
+    'DM_DRIVER_AVAILABLE',
+    'DM_DRIVER_ERROR',
     'get_checker',
     'COLLECT_TIMEOUT_SEC',
     'COLLECT_WORKERS',

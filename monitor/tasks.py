@@ -33,6 +33,19 @@ def collect_single_db(self, config_id):
 
     checker_class = CHECKER_MAP.get(config.db_type)
     if not checker_class:
+        if config.db_type == 'dm':
+            msg = "DM 检测器未注册：缺 dmPython"
+            logger.warning(f"[Celery] 达梦实例 {config.name} (ID: {config_id}) 采集跳过：{msg}")
+            MonitorLog.objects.create(
+                config=config,
+                status='DOWN',
+                message=json.dumps({
+                    'error': msg,
+                    'status': 'missing_driver',
+                    'detail': '需达梦官方授权安装包安装 dmPython 原生驱动'
+                }, ensure_ascii=False)
+            )
+            return {'status': 'skipped', 'config_id': config_id, 'reason': 'missing_dmPython', 'message': msg}
         logger.warning(f"[Celery] 不支持的数据库类型: {config.db_type}")
         return {'status': 'skipped', 'config_id': config_id, 'reason': 'unsupported_type'}
 

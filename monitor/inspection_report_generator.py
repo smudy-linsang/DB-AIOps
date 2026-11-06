@@ -51,18 +51,28 @@ class InspectionReportGenerator:
         """报告结构化数据"""
         findings = []
         for f in self.run.findings.all().order_by("-severity", "item_code"):
+            raw = f.raw_data or {}
             findings.append({
-                "finding_id": f.finding_id,
+                "finding_id": getattr(f, 'finding_id', str(f.id)),
                 "item_code": f.item_code,
-                "item_title": f.item_title,
+                "item_title": getattr(f, 'item_title', getattr(f, 'title', '')),
                 "status": f.status,
                 "severity": f.severity,
-                "summary": f.summary,
-                "details": f.details,
-                "detection_method": f.detection_method,
-                "duration_ms": f.duration_ms,
-                "confidence": f.confidence,
+                "summary": raw.get("summary") or getattr(f, 'summary', ''),
+                "details": raw,
+                "detection_method": raw.get("detection_method") or getattr(f, 'detection_method', ''),
+                "duration_ms": raw.get("duration_ms") or getattr(f, 'duration_ms', 0),
+                "confidence": raw.get("confidence") or getattr(f, 'confidence', 1.0),
             })
+        finished_at = getattr(self.run, 'finished_at', getattr(self.run, 'completed_at', None))
+        health_score = getattr(self.run, 'health_score', None)
+        if health_score is None:
+            health_score = (self.run.summary or {}).get('health_score', 0)
+        ok_count = getattr(self.run, 'passed_items', getattr(self.run, 'ok_count', 0))
+        warning_count = getattr(self.run, 'warn_count', getattr(self.run, 'warning_count', 0))
+        critical_count = getattr(self.run, 'critical_count', 0)
+        error_count = getattr(self.run, 'error_count', getattr(self.run, 'error_items', 0))
+
         return {
             "report_id": f"RPT-{self.run.run_id}",
             "generated_at": datetime.now().isoformat(),
@@ -71,14 +81,15 @@ class InspectionReportGenerator:
                 "level": self.run.level,
                 "status": self.run.status,
                 "started_at": self.run.started_at.isoformat() if self.run.started_at else None,
-                "completed_at": self.run.completed_at.isoformat() if self.run.completed_at else None,
+                "completed_at": finished_at.isoformat() if finished_at else None,
                 "duration_sec": self.run.duration_sec,
-                "health_score": self.run.health_score,
+                "health_score": health_score,
                 "total_items": self.run.total_items,
-                "ok_count": self.run.ok_count,
-                "warning_count": self.run.warning_count,
-                "critical_count": self.run.critical_count,
-                "error_count": self.run.error_count,
+                "ok_count": ok_count,
+                "warning_count": warning_count,
+                "critical_count": critical_count,
+                "error_count": error_count,
+                "conclusion": (self.run.summary or {}).get("conclusion", ""),
             },
             "database": {
                 "id": self.run.db_config.id,
@@ -106,6 +117,9 @@ class InspectionReportGenerator:
         md.append(f"- **巡检级别**: {d['run']['level']}")
         md.append(f"- **耗时**: {d['run']['duration_sec']}s")
         md.append(f"- **数据库**: {d['database']['db_type']} @ {d['database']['host']}:{d['database']['port']}")
+        conclusion = (self.run.summary or {}).get("conclusion")
+        if conclusion:
+            md.append(f"- **巡检结论**: **{conclusion}**")
         md.append("")
         md.append("## 健康度评分")
         score = d['run']['health_score']
@@ -212,6 +226,9 @@ class InspectionReportGenerator:
         html.append(f"<div class='meta-item'><b>数据库:</b> {d['database']['db_type']} @ {d['database']['host']}:{d['database']['port']}</div>")
         html.append(f"<div class='meta-item'><b>巡检级别:</b> {d['run']['level']}</div>")
         html.append(f"<div class='meta-item'><b>耗时:</b> {d['run']['duration_sec']}s</div>")
+        conclusion = (self.run.summary or {}).get("conclusion")
+        if conclusion:
+            html.append(f"<div class='meta-item'><b>巡检结论:</b> <span style='color:#dc3545;font-weight:bold;'>{conclusion}</span></div>")
         html.append("</div>")
         html.append(f"<h2>健康度评分 <span class='badge' style='background:{badge_color}'>{score} - {badge_text}</span></h2>")
         html.append("<div class='summary'>")
@@ -255,6 +272,9 @@ class InspectionReportGenerator:
         lines.append(f"巡检时间: {d['run']['started_at']} ~ {d['run']['completed_at']}")
         lines.append(f"数据库: {d['database']['db_type']} @ {d['database']['host']}:{d['database']['port']}")
         lines.append(f"巡检级别: {d['run']['level']}  耗时: {d['run']['duration_sec']}s")
+        conclusion = (self.run.summary or {}).get("conclusion")
+        if conclusion:
+            lines.append(f"巡检结论: {conclusion}")
         lines.append("")
         lines.append(f"健康度: {d['run']['health_score']} / 100")
         lines.append(f"正常 {d['run']['ok_count']}  警告 {d['run']['warning_count']}  严重 {d['run']['critical_count']}  错误 {d['run']['error_count']}")

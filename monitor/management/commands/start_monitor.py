@@ -13,6 +13,7 @@ from concurrent.futures import ThreadPoolExecutor, TimeoutError as FuturesTimeou
 import datetime
 import json
 import logging
+import threading
 import time
 
 from apscheduler.schedulers.blocking import BlockingScheduler
@@ -110,6 +111,20 @@ class Command(BaseCommand):
             raise CommandError(str(exc)) from exc
 
     def _handle(self, *args, **options):
+        # 达梦驱动可用性检查（缺 dmPython 时显式告警）
+        try:
+            from monitor.models import DatabaseConfig
+            dm_configs = DatabaseConfig.objects.filter(db_type='dm', is_active=True)
+            if dm_configs.exists() and self.CHECKER_MAP.get('dm') is None:
+                dm_names = list(dm_configs.values_list('name', flat=True))
+                logger.warning(
+                    "[ALERT-OPS] 发现已纳管 DM 实例 %s，但 DM 检测器未注册：缺 dmPython（需官方授权安装）",
+                    dm_names
+                )
+                print(f"  [WARN] 发现已纳管达梦实例 {dm_names}，但 DM 检测器未注册：缺 dmPython")
+        except Exception as e:
+            logger.debug("启动时检查 DM 配置异常: %s", e)
+
         if options.get('once'):
             print(f"[{datetime.datetime.now()}] 单轮采集模式 (--once)")
             self.monitor_job()
@@ -166,12 +181,23 @@ class Command(BaseCommand):
     def _run_single_check(self, config):
         """在独立线程中执行单个数据库的采集，超时后自动记录 DOWN"""
         # 每个线程需要独立关闭复用的 Django DB 连接，避免跨线程复用问题
-        connection.close_if_unusable_or_obsolete()
+        is_worker_thread = threading.current_thread() is not threading.main_thread()
+        if is_worker_thread:
+            connection.close_if_unusable_or_obsolete()
         try:
             checker_class = self.CHECKER_MAP.get(config.db_type)
             if checker_class:
                 checker = checker_class(self)
                 checker.check(config)
+            elif config.db_type == 'dm':
+                msg = "DM 检测器未注册：缺 dmPython"
+                logger.warning("[DM] 达梦实例 %s 采集跳过：%s", config.name, msg)
+                print(f"  -- 警告：达梦实例 {config.name} ({msg})")
+                self.process_result(config, 'DOWN', {
+                    'error': msg,
+                    'status': 'missing_driver',
+                    'detail': '需达梦官方授权安装包安装 dmPython 原生驱动'
+                })
             elif config.db_type == 'mongo':
                 print(f"  -- 跳过暂不支持的类型：{config.name} (MongoDB)")
             else:
@@ -182,7 +208,8 @@ class Command(BaseCommand):
             # CONN_MAX_AGE 的连接, 关不掉本轮刚建的; 线程随执行器销毁后连接残留,
             # 逐轮累积会耗尽 PostgreSQL 连接 (too many clients)。connection 为
             # 线程本地对象, close() 只影响当前线程, 不会误伤其他线程/主线程。
-            connection.close()
+            if is_worker_thread:
+                connection.close()
 
     def _celery_dispatch_job(self, configs):
         """使用 Celery 异步分发采集任务（v3.0 推荐模式）"""
