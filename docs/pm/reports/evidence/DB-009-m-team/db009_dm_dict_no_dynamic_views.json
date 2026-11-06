@@ -1,0 +1,69 @@
+{
+ "captured_at": "2026-11-06T17:37:17",
+ "note": "DB-009 桌面端实测：DM8 的数据字典不列 V$ 动态视图。查 ALL_TAB_COLUMNS 对下列 14 个 V$ 视图全部返回 0 列，所以列结构只能靠 SELECT * ... WHERE 1=0 + cursor.description 取（见 db009_dm_viewcols.json）。本文件同时记录了同一轮实测的几个关键取值。",
+ "dict_probe_query": "SELECT COLUMN_NAME, DATA_TYPE FROM ALL_TAB_COLUMNS WHERE TABLE_NAME = '<view>' ORDER BY COLUMN_ID",
+ "views": {
+  "V$BUFFERPOOL": {"columns": []},
+  "V$TRX": {"columns": []},
+  "V$LOCK": {"columns": []},
+  "V$ARCH_STATUS": {"columns": []},
+  "V$SESSIONS": {"columns": []},
+  "V$WAIT_HISTORY": {"columns": []},
+  "V$RLOG": {"columns": []},
+  "V$PARAMETER": {"columns": []},
+  "V$ARCH_FILE": {"columns": []},
+  "V$SYSSTAT": {"columns": []}
+ },
+ "trx_status_distinct": {
+  "ok": true,
+  "rows": 1,
+  "sample": ["('ACTIVE', 1)"],
+  "note": "V$TRX.STATUS 实测取值含 ACTIVE —— long_transactions 用 STATUS='ACTIVE' 过滤的依据"
+ },
+ "lock_blocked_sample": {
+  "ok": true,
+  "rows": 1,
+  "sample": ["(0, 0)"],
+  "note": "SELECT COUNT(*), COUNT(DISTINCT TRX_ID) FROM V$LOCK WHERE BLOCKED = 1 -> 0 行被阻塞"
+ },
+ "lock_columns_probe": {
+  "ok": true,
+  "rows": 1,
+  "sample": ["(8,)"],
+  "note": "V$LOCK 实际 8 行锁"
+ },
+ "rlog_sample": {
+  "ok": true,
+  "rows": 1,
+  "sample": ["(2147483647, 0, 222695424, 8589926400, 8589905920, 'SAFE')"],
+  "note": "V$RLOG = (DB_MAGIC, CUR_FILE, CUR_OFFSET, TOTAL_SPACE, FREE_SPACE, ALMOST_FULL_STATUS)；CUR_OFFSET 是字节偏移、ALMOST_FULL_STATUS 是日志空间水位，两者都不是主备同步进度 —— 故 rlog_sync_status 改用 V$ARCH_STATUS"
+ },
+ "bufferpool_sample": {
+  "ok": true,
+  "rows": 28,
+  "sample": [
+   "(0, 'KEEP', 16384, 512, 512, 0, 0, 0)",
+   "(1, 'RECYCLE', 16384, 3200, 3021, 179, 0, 180)",
+   "(2, 'FAST', 16384, 3000, 1155, 1, 67973, 12)",
+   "(3, 'NORMAL', 16384, 26789, 26782, 0, 133, 22)"
+  ],
+  "note": "V$BUFFERPOOL = (ID, NAME, PAGE_SIZE, N_TOTAL_PAGES, FREE, N_DIRTY, N_LOGIC_READS, N_PHY_READS)；没有「活跃页」列 —— 老实现 V$BUFFER.ACTIVE_COUNT 在 DM8 不存在，故 active_count 置 0"
+ },
+ "archstatus_sample": {
+  "ok": false,
+  "error": "ProgrammingError('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[ARCH_SEQ] (-2111) (SQLExecDirectW)')",
+  "note": "V$ARCH_STATUS 只有 4 列（ARCH_TYPE / ARCH_DEST / ARCH_STATUS / ARCH_SRC），无 ARCH_SEQ"
+ },
+ "archfile_sample": {
+  "ok": true,
+  "rows": 0,
+  "sample": [],
+  "note": "V$ARCH_FILE 列存在但当前实例无归档文件行（0 行）"
+ },
+ "sessions_cols": {
+  "ok": true,
+  "rows": 1,
+  "sample": ["(352328576, '<dm-admin>', 'ACTIVE', '<local-host>:<ephemeral-port>', '<client-host>', 'python.exe', 495, 458306, datetime.datetime(2026, 11, 6, 17, 37, 18))"],
+  "note": "V$SESSIONS 取 (SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME, SQL_ID, TRX_ID, CREATE_TIME)"
+ }
+}

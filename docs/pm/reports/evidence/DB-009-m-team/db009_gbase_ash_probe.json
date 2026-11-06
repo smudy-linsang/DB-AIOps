@@ -1,0 +1,41 @@
+{
+  "captured_at": "2026-11-06T17:25:48",
+  "target": {
+    "id": 11,
+    "name": "<gbase-instance>",
+    "host": "<local-host>",
+    "port": "<gbase-port>",
+    "db_type": "gbase",
+    "password": "len=4,head=***"
+  },
+  "connect": "ok",
+  "server_version": "8.6.2.43-R7-free.110605",
+  "ash": {
+    "ok": true,
+    "rows": 0,
+    "sample": []
+  },
+  "golden_metrics": {
+    "ok": true,
+    "value": {
+      "threads_connected": 1,
+      "max_connections": 100,
+      "conn_usage_pct": 1.0
+    }
+  },
+  "collect_metrics": {
+    "ok": true,
+    "total_keys": 50,
+    "core": {
+      "active_connections": null,
+      "max_connections": 100,
+      "conn_usage_pct": 1.0,
+      "threads_connected": 1,
+      "threads_running": 1,
+      "qps": 2.33
+    },
+    "none_core": [
+      "active_connections"
+    ]
+  }
+}

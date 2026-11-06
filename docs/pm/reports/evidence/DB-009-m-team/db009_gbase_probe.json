@@ -1,0 +1,124 @@
+{
+  "captured_at": "2026-11-06T17:02:02",
+  "instances": [
+    {
+      "id": 11,
+      "name": "<gbase-instance>",
+      "host": "<local-host>",
+      "port": "<gbase-port>",
+      "user": "<account>",
+      "is_active": true,
+      "tcp_connect": true
+    },
+    {
+      "id": 15,
+      "name": "probe-gbase",
+      "host": "<local-host>",
+      "port": "<gbase-port>",
+      "user": "<account>",
+      "is_active": true,
+      "tcp_connect": true
+    }
+  ],
+  "probes": [
+    {
+      "name": "select_1",
+      "sql": "SELECT 1",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "version",
+      "sql": "SELECT VERSION()",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "8.6.2.43-R7-free.110605"
+        ]
+      ]
+    },
+    {
+      "name": "current_db",
+      "sql": "SELECT DATABASE()",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "None"
+        ]
+      ]
+    },
+    {
+      "name": "show_databases",
+      "sql": "SHOW DATABASES",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "information_schema"
+        ],
+        [
+          "performance_schema"
+        ],
+        [
+          "gbase"
+        ]
+      ]
+    },
+    {
+      "name": "perf_schema_available",
+      "sql": "SELECT COUNT(*) FROM performance_schema.events_statements_summary_by_digest",
+      "ok": false,
+      "error": "(1109, \"Unknown table 'events_statements_summary_by_digest' in performance_schema\")"
+    },
+    {
+      "name": "perf_schema_digest_cols",
+      "sql": "SELECT DIGEST, COUNT_STAR, SUM_TIMER_WAIT, SUM_ROWS_EXAMINED, LEFT(DIGEST_TEXT,200) FROM performance_schema.events_statements_summary_by_digest ORDER BY SUM_TIMER_WAIT DESC LIMIT 5",
+      "ok": false,
+      "error": "(1109, \"Unknown table 'events_statements_summary_by_digest' in performance_schema\")"
+    },
+    {
+      "name": "information_schema_tables",
+      "sql": "SELECT COUNT(*) FROM information_schema.tables",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "86"
+        ]
+      ]
+    },
+    {
+      "name": "session_list",
+      "sql": "SELECT COUNT(*) FROM information_schema.processlist",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "innodb_status",
+      "sql": "SHOW ENGINE INNODB STATUS",
+      "ok": false,
+      "error": "(1286, \"Unknown table engine 'INNODB'\")"
+    }
+  ],
+  "connected_instance": 11,
+  "server_version": "8.6.2.43-R7-free.110605",
+  "summary": {
+    "instances": 2,
+    "tcp_up": 2,
+    "connected": true,
+    "probe_ok": 6,
+    "probe_fail": 3
+  }
+}

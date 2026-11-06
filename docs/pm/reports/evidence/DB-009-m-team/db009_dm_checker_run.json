@@ -1,0 +1,45 @@
+{
+  "captured_at": "2026-11-06T17:27:26",
+  "dm_driver_available": true,
+  "dm_driver_error": null,
+  "target": {
+    "id": 9,
+    "name": "DM_测试库",
+    "host": "<local-host>",
+    "port": "<dm-port>",
+    "db_type": "dm",
+    "password": "len=9,head=***"
+  },
+  "total_keys": 67,
+  "core": {
+    "active_connections": 1,
+    "max_connections": 10000,
+    "conn_usage_pct": 0.01,
+    "version": "DM Database Server 64 V8...",
+    "db_mode": "NORMAL",
+    "uptime_seconds": 269616,
+    "cache_hit_ratio": 11.66,
+    "sql_count": 5700,
+    "tran_count": 52
+  },
+  "none_scalar_keys": [
+    "login_count"
+  ],
+  "none_scalar_count": 1,
+  "empty_list_keys": [
+    "archive_dest",
+    "buffer_pools",
+    "dest_pending",
+    "dsc_cluster_issues",
+    "dsc_global_latches",
+    "dsc_instances",
+    "dw_replication_issues",
+    "failed_logins",
+    "locks",
+    "long_transactions",
+    "realtime_archive_dest",
+    "wait_events"
+  ],
+  "empty_list_count": 12,
+  "result": "OK"
+}

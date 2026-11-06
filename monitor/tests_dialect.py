@@ -702,3 +702,105 @@ class DamengDialectTests(TransactionTestCase):
         from monitor.auto_remediation_engine import AutoRemediationEngine
         ok, _ = AutoRemediationEngine._validate_sql_safety("DROP TABLE t")
         self.assertFalse(ok, '危险语句必须被白名单拦住')
+
+
+@tag('dialect')
+@unittest.skipUnless(os.environ.get('DIALECT_GBASE_DSN'), 'DIALECT_GBASE_DSN 未设置')
+class GbaseDialectTests(TransactionTestCase):
+    """GBase 8a 方言测试（DB-009 新增）。
+
+    为什么必须补：DB-017 §四.6.3 实测发现 GBase 上
+      ① `sample_sessions` 曾因 `information_schema.innodb_trx` 不存在而**整段抛错**；
+      ② `active_connections` 采不到（None）。
+    两者长期无人发现，根因是**仓库里根本没有 GBase 测试类** —— 环境可用、
+    库能连，但没有任何一条用例能在 GBase 上跑。这是**覆盖缺口**而非环境缺口，
+    所以只能用「补用例」来闭合，不能靠换环境。
+
+    GBase 8a 的能力边界（实测 8.6.2.43-R7-free.110605）：
+      - 无 `information_schema.innodb_trx`（无 InnoDB 事务表）
+      - `performance_schema` 只有 GBase 自有表，**没有** MySQL 的
+        `events_statements_current` / `events_statements_summary_by_digest`
+      - 无 `SHOW ENGINE INNODB STATUS`（无 InnoDB 引擎）
+    因此用例断言的是「**在 GBase 能力边界内仍能产出正确结果**」，
+    而非强求 MySQL 全量能力。
+    """
+
+    def setUp(self):
+        self.cfg = _cfg_from_dsn(os.environ['DIALECT_GBASE_DSN'], 'gbase',
+                                  'dialect-gbase')
+
+    def _conn(self, readonly=True):
+        from monitor.db_connector import DbConnector
+        return DbConnector.get_connection(self.cfg, statement_timeout_ms=8000,
+                                          readonly=readonly)
+
+    def test_connection_succeeds_on_real_gbase(self):
+        """能连上，且连的是真 GBase 8a（版本号特征）而不是 MySQL 模拟端点。"""
+        conn = self._conn()
+        try:
+            cur = conn.cursor()
+            cur.execute('SELECT VERSION()')
+            row = cur.fetchone()
+            version = str(list(row.values())[0])
+        finally:
+            conn.close()
+        self.assertTrue(version, 'VERSION() 不应为空')
+        self.assertIn('8.6.2', version,
+                      f'版本号 {version} 不像 GBase 8a，请确认不是 MySQL 端点')
+
+    def test_ash_sampling_does_not_raise(self):
+        """DB-017 §四.6.3 问题 ① 的回归：ASH 采样在 GBase 上**不得抛异常**。
+
+        GBase 没有 `information_schema.innodb_trx`，哨兵的实现应降级为
+        只采 `information_schema.processlist`，而不是整段失败。
+        """
+        from monitor.sentinel import sample_sessions
+        conn = self._conn()
+        try:
+            rows = sample_sessions(conn.cursor(), 'gbase', config_id=self.cfg.id)
+        finally:
+            conn.close()
+        self.assertIsInstance(rows, list, 'ASH 采样必须返回 list 而不是抛错')
+
+    def test_collect_metrics_returns_core_contract(self):
+        """DB-017 §四.6.3 问题 ② 的回归：核心契约字段不得缺失或为 None。"""
+        from monitor.checkers.gbase import GbaseChecker
+        from monitor.db_connector import DbConnector
+        conn = DbConnector.get_connection(self.cfg, statement_timeout_ms=15000)
+        try:
+            data = GbaseChecker(_FakeCommand()).collect_metrics(self.cfg, conn)
+        finally:
+            conn.close()
+        self.assertIsInstance(data, dict)
+        self.assertTrue(data, '采集结果不能为空')
+        for key in ('active_connections', 'max_connections'):
+            self.assertIn(key, data, f'采集结果缺少核心指标 {key}')
+            self.assertIsNotNone(data.get(key), f'{key} 为 None')
+        self.assertGreater(data['max_connections'], 0)
+
+    def test_connection_usage_is_consistent(self):
+        """conn_usage_pct 必须与 connected/max 自洽。"""
+        from monitor.checkers.gbase import GbaseChecker
+        from monitor.db_connector import DbConnector
+        conn = DbConnector.get_connection(self.cfg, statement_timeout_ms=15000)
+        try:
+            data = GbaseChecker(_FakeCommand()).collect_metrics(self.cfg, conn)
+        finally:
+            conn.close()
+        if 'conn_usage_pct' not in data:
+            self.skipTest('该版本未产出 conn_usage_pct')
+        expected = (data['threads_connected'] / data['max_connections']) * 100
+        self.assertAlmostEqual(data['conn_usage_pct'], expected, delta=1.0)
+
+    def test_golden_metrics_available(self):
+        """哨兵的连接数派生指标在 GBase 上必须可得。"""
+        from monitor import sentinel
+        conn = self._conn()
+        try:
+            gm = sentinel.golden_metrics(conn.cursor(), 'gbase')
+        finally:
+            conn.close()
+        self.assertIn('threads_connected', gm)
+        self.assertIn('max_connections', gm)
+        self.assertGreater(gm['max_connections'], 0)
+

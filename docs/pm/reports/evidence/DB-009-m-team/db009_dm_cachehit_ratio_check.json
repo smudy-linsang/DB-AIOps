@@ -1,0 +1,207 @@
+{
+ "captured_at": "2026-11-06T17:49:10",
+ "pools": [
+  {
+   "id": 0,
+   "name": "KEEP",
+   "n_logic_reads": 0,
+   "n_phy_reads": 0,
+   "rat_hit": null
+  },
+  {
+   "id": 1,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 180,
+   "rat_hit": null
+  },
+  {
+   "id": 2,
+   "name": "FAST",
+   "n_logic_reads": 81534,
+   "n_phy_reads": 12,
+   "rat_hit": 0.999852843793687
+  },
+  {
+   "id": 3,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 22,
+   "rat_hit": 0.8835978835978836
+  },
+  {
+   "id": 4,
+   "name": "ROLL",
+   "n_logic_reads": 0,
+   "n_phy_reads": 0,
+   "rat_hit": null
+  },
+  {
+   "id": 5,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 22,
+   "rat_hit": 0.8835978835978836
+  },
+  {
+   "id": 6,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 22,
+   "rat_hit": 0.8835978835978836
+  },
+  {
+   "id": 7,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 23,
+   "rat_hit": 0.8789473684210526
+  },
+  {
+   "id": 8,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 28,
+   "rat_hit": 0.8564102564102564
+  },
+  {
+   "id": 9,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 22,
+   "rat_hit": 0.8835978835978836
+  },
+  {
+   "id": 10,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 22,
+   "rat_hit": 0.8835978835978836
+  },
+  {
+   "id": 11,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 24,
+   "rat_hit": 0.8743455497382199
+  },
+  {
+   "id": 12,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 17,
+   "rat_hit": 0.907608695652174
+  },
+  {
+   "id": 13,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 21,
+   "rat_hit": 0.8882978723404256
+  },
+  {
+   "id": 14,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 20,
+   "rat_hit": 0.893048128342246
+  },
+  {
+   "id": 15,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 17,
+   "rat_hit": 0.907608695652174
+  },
+  {
+   "id": 16,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 19,
+   "rat_hit": 0.8978494623655914
+  },
+  {
+   "id": 17,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 15,
+   "rat_hit": 0.9175824175824175
+  },
+  {
+   "id": 18,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 14,
+   "rat_hit": 0.9226519337016574
+  },
+  {
+   "id": 19,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 19,
+   "rat_hit": 0.8978494623655914
+  },
+  {
+   "id": 20,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 20,
+   "rat_hit": 0.893048128342246
+  },
+  {
+   "id": 21,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 18,
+   "rat_hit": 0.9027027027027027
+  },
+  {
+   "id": 22,
+   "name": "NORMAL",
+   "n_logic_reads": 167,
+   "n_phy_reads": 20,
+   "rat_hit": 0.893048128342246
+  },
+  {
+   "id": 23,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 180,
+   "rat_hit": null
+  },
+  {
+   "id": 24,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 181,
+   "rat_hit": null
+  },
+  {
+   "id": 25,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 179,
+   "rat_hit": null
+  },
+  {
+   "id": 26,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 178,
+   "rat_hit": null
+  },
+  {
+   "id": 27,
+   "name": "RECYCLE",
+   "n_logic_reads": 0,
+   "n_phy_reads": 178,
+   "rat_hit": null
+  }
+ ],
+ "pool_count": 28,
+ "total_n_logic_reads": 84707,
+ "total_n_phy_reads": 1473,
+ "formula_1_minus_phy_over_logic_plus_phy_pct": 98.29,
+ "rat_hit_weighted_overall": 0.9829,
+ "note": "RAT_HIT 是 DM8 自带的命中率真值列；本方实现用 1 - N_PHY_READS/(N_LOGIC_READS+N_PHY_READS)。两者对照即可判定口径。"
+}

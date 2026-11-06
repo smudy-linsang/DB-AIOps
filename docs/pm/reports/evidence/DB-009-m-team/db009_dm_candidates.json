@@ -1,0 +1,481 @@
+{
+  "captured_at": "2026-11-06T16:56:11",
+  "target": {
+    "id": 9,
+    "host": "<local-host>",
+    "port": "<dm-port>"
+  },
+  "candidates": [
+    {
+      "name": "c01_instance_mode",
+      "sql": "SELECT MODE$ FROM V$INSTANCE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "NORMAL"
+        ]
+      ]
+    },
+    {
+      "name": "c02_instance_status",
+      "sql": "SELECT STATUS$ FROM V$INSTANCE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "OPEN"
+        ]
+      ]
+    },
+    {
+      "name": "c03_dsc_role",
+      "sql": "SELECT DSC_ROLE FROM V$INSTANCE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "None"
+        ]
+      ]
+    },
+    {
+      "name": "c04_db_role",
+      "sql": "SELECT ROLE$ FROM V$DATABASE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c05_db_arch",
+      "sql": "SELECT ARCH_MODE FROM V$DATABASE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "N"
+        ]
+      ]
+    },
+    {
+      "name": "c06_dsc_nodes",
+      "sql": "SELECT DSC_NODES FROM V$DATABASE",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "c07_temp_space_type",
+      "sql": "SELECT NAME, TYPE$ FROM V$TABLESPACE",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "SYSTEM",
+          "1"
+        ],
+        [
+          "ROLL",
+          "1"
+        ],
+        [
+          "TEMP",
+          "2"
+        ]
+      ]
+    },
+    {
+      "name": "c08_temp_space_usage",
+      "sql": "SELECT NAME, ROUND(TOTAL_SIZE * PAGE / 1024.0 / 1024.0, 2) as TOTAL_MB, ROUND(USED_SIZE * PAGE / 1024.0 / 1024.0, 2) as USED_MB FROM V$TABLESPACE WHERE TYPE$='TEMP'",
+      "ok": false,
+      "error": "('HY000', '[HY000] 无效的数字 (-6128) (SQLExecDirectW)')"
+    },
+    {
+      "name": "c09_sysstat_sql",
+      "sql": "SELECT NAME, STAT_VAL FROM V$SYSSTAT WHERE UPPER(NAME) LIKE '%SQL%'",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "sql get total count",
+          "146"
+        ],
+        [
+          "sql cache hit count",
+          "3"
+        ],
+        [
+          "sql executed count",
+          "1700"
+        ]
+      ]
+    },
+    {
+      "name": "c10_sysstat_cache",
+      "sql": "SELECT NAME, STAT_VAL FROM V$SYSSTAT WHERE UPPER(NAME) LIKE '%CACHE%' OR UPPER(NAME) LIKE '%SORT%'",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "plan cache hit count",
+          "30"
+        ],
+        [
+          "rowset cache hit count",
+          "0"
+        ],
+        [
+          "sql cache hit count",
+          "3"
+        ]
+      ]
+    },
+    {
+      "name": "c11_io_stat",
+      "sql": "SELECT TYPE, COUNT, PAGES, COST FROM V$IO_STAT",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "READ",
+          "335",
+          "335",
+          "83741"
+        ],
+        [
+          "WRITE",
+          "155",
+          "155",
+          "100948"
+        ],
+        [
+          "READ MERGE",
+          "0",
+          "0",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c12_sql_history_top",
+      "sql": "SELECT TOP_SQL_TEXT, TIME_USED, AFFECTED_ROWS, N_LOGIC_READ, N_PHY_READ FROM V$SQL_HISTORY WHERE TIME_USED IS NOT NULL ORDER BY TIME_USED DESC",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "SELECT NAME, STAT_VAL FROM V$SYS",
+          "10141",
+          "0",
+          "0",
+          "0"
+        ],
+        [
+          "SELECT COUNT(*) FROM DBA_TABLES ",
+          "8374",
+          "0",
+          "669",
+          "0"
+        ],
+        [
+          "SELECT NAME, ROUND(TOTAL_SIZE * ",
+          "7036",
+          "0",
+          "8",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c13_sql_history_group",
+      "sql": "SELECT SQL_ID, SUBSTR(TOP_SQL_TEXT, 1, 200) as SQL_TEXT, COUNT(*) as EXECUTE_COUNT, SUM(TIME_USED) as ELAPSED_TIME, SUM(AFFECTED_ROWS) as ROWS_PROCESSED, SUM(N_LOGIC_READ + N_PHY_READ) as BUFFER_GETS FROM V$SQL_HISTORY GROUP BY SQL_ID, TOP_SQL_TEXT ORDER BY EXECUTE_COUNT DESC",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "11",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "731",
+          "0",
+          "6"
+        ],
+        [
+          "6",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "4325",
+          "0",
+          "6"
+        ],
+        [
+          "10",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "889",
+          "0",
+          "6"
+        ]
+      ]
+    },
+    {
+      "name": "c14_sql_history_rownum",
+      "sql": "SELECT * FROM (SELECT SQL_ID, SUBSTR(TOP_SQL_TEXT,1,200) as SQL_TEXT, COUNT(*) as EXECUTE_COUNT, SUM(TIME_USED) as AVG_TIME FROM V$SQL_HISTORY GROUP BY SQL_ID, TOP_SQL_TEXT ORDER BY EXECUTE_COUNT DESC) WHERE ROWNUM <= 10",
+      "ok": true,
+      "rows": 3,
+      "sample": [
+        [
+          "12",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "716"
+        ],
+        [
+          "11",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "731"
+        ],
+        [
+          "10",
+          "SELECT TYPE_NAME, DATA_TYPE,    ",
+          "6",
+          "889"
+        ]
+      ]
+    },
+    {
+      "name": "c15_lock_join",
+      "sql": "SELECT t.SESS_ID, s.USER_NAME, t.ID as TRANSACTION_ID, SUBSTR(s.SQL_TEXT,1,200) as SQL_TEXT, l.LMODE, l.BLOCKED FROM V$LOCK l LEFT JOIN V$TRX t ON l.TRX_ID = t.ID LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID WHERE l.BLOCKED = 1",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c16_lock_count_blocked",
+      "sql": "SELECT COUNT(*) FROM V$LOCK WHERE BLOCKED = 1",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c17_session_detail",
+      "sql": "SELECT SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME, SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT, TRX_ID FROM V$SESSIONS WHERE USER_NAME IS NOT NULL ORDER BY STATE, SESS_ID LIMIT 100",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "352328576",
+          "<dm-admin>",
+          "ACTIVE",
+          "<local-host>:<ephemeral-port>",
+          "<client-host>",
+          "python.exe",
+          "SELECT SESS_ID, USER_NAME, STATE",
+          "458254"
+        ]
+      ]
+    },
+    {
+      "name": "c18_session_limit_only",
+      "sql": "SELECT SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME, SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT, TRX_ID FROM V$SESSIONS WHERE USER_NAME IS NOT NULL AND ROWNUM <= 100 ORDER BY STATE, SESS_ID",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "352328576",
+          "<dm-admin>",
+          "ACTIVE",
+          "<local-host>:<ephemeral-port>",
+          "<client-host>",
+          "python.exe",
+          "SELECT SESS_ID, USER_NAME, STATE",
+          "458254"
+        ]
+      ]
+    },
+    {
+      "name": "c19_session_run_status",
+      "sql": "SELECT RUN_STATUS, COUNT(*) FROM V$SESSIONS GROUP BY RUN_STATUS",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "RUNNING",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "c20_long_trx",
+      "sql": "SELECT t.ID as TRX_ID, t.SESS_ID, t.STATUS, (SYSDATE - s.CREATE_TIME) * 86400 as DURATION_SEC, SUBSTR(s.SQL_TEXT, 1, 200) as SQL_TEXT FROM V$TRX t LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID WHERE (SYSDATE - s.CREATE_TIME) * 86400 > 60 ORDER BY DURATION_SEC DESC",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c21_trx_cols",
+      "sql": "SELECT ID, SESS_ID, STATUS, LOCK_CNT FROM V$TRX",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "458254",
+          "352328576",
+          "ACTIVE",
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c22_deadlock",
+      "sql": "SELECT * FROM (SELECT SESS_ID, TRX_ID, SQL_TEXT, HAPPEN_TIME FROM V$DEADLOCK_HISTORY ORDER BY HAPPEN_TIME DESC) WHERE ROWNUM <= 5",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c23_buffer_group",
+      "sql": "SELECT POOL_ID, SPACE_ID, FILE_ID, COUNT(*) as BUFFER_COUNT, SUM(ACCESS_CNT) as ACCESS_CNT FROM V$BUFFER GROUP BY POOL_ID, SPACE_ID, FILE_ID",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c24_buffer_pagetype",
+      "sql": "SELECT PAGETYPE, COUNT(*) FROM V$BUFFER GROUP BY PAGETYPE",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c25_buffer_status",
+      "sql": "SELECT STATUS, COUNT(*) FROM V$BUFFER GROUP BY STATUS",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c26_rlog_almost_full",
+      "sql": "SELECT ALMOST_FULL_STATUS, COUNT(*) FROM V$RLOG GROUP BY ALMOST_FULL_STATUS",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "SAFE",
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "c27_rlog_basic",
+      "sql": "SELECT CUR_FILE, CUR_OFFSET, TOTAL_SPACE, FREE_SPACE FROM V$RLOG",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "0",
+          "222322688",
+          "8589926400",
+          "8589914112"
+        ]
+      ]
+    },
+    {
+      "name": "c28_arch_file_status",
+      "sql": "SELECT STATUS, COUNT(*) FROM V$ARCH_FILE GROUP BY STATUS",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c29_arch_file_path",
+      "sql": "SELECT PATH, STATUS, CREATE_TIME FROM V$ARCH_FILE",
+      "ok": true,
+      "rows": 0,
+      "sample": []
+    },
+    {
+      "name": "c30_top20_fixed",
+      "sql": "SELECT * FROM (SELECT OWNER, TABLE_NAME, NUM_ROWS FROM DBA_TABLES WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO') ORDER BY NUM_ROWS DESC) WHERE ROWNUM <= 20",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "CTISYS",
+          "SYSCONTEXTINDEXES",
+          "None"
+        ]
+      ]
+    },
+    {
+      "name": "c31_top20_with_size",
+      "sql": "SELECT * FROM (SELECT OWNER, TABLE_NAME, NUM_ROWS, (SELECT ROUND(SUM(USED_SIZE * PAGE) / 1024 / 1024, 2) FROM V$TABLESPACE WHERE NAME = t.TABLESPACE_NAME) as SIZE_MB FROM DBA_TABLES t WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO') ORDER BY NUM_ROWS DESC) WHERE ROWNUM <= 20",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "CTISYS",
+          "SYSCONTEXTINDEXES",
+          "None",
+          "59.0"
+        ]
+      ]
+    },
+    {
+      "name": "c32_dba_users_count",
+      "sql": "SELECT COUNT(*) FROM DBA_USERS",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "4"
+        ]
+      ]
+    },
+    {
+      "name": "c33_sentinel_dm_sessions",
+      "sql": "SELECT count(*) FROM V$SESSIONS WHERE TYPE='USER'",
+      "ok": false,
+      "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[TYPE] (-2111) (SQLExecDirectW)')"
+    },
+    {
+      "name": "c34_sessions_type_col",
+      "sql": "SELECT count(*) FROM V$SESSIONS WHERE CLNT_TYPE='USER'",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "c35_ash_dm",
+      "sql": "SELECT SESS_ID, USER_NAME, STATE, CLNT_IP, APPNAME, SUBSTR(SQL_TEXT,1,200) as SQL_TEXT FROM V$SESSIONS WHERE USER_NAME IS NOT NULL AND ROWNUM <= 100",
+      "ok": true,
+      "rows": 1,
+      "sample": [
+        [
+          "352328576",
+          "<dm-admin>",
+          "ACTIVE",
+          "<local-host>:<ephemeral-port>",
+          "python.exe",
+          "SELECT SESS_ID, USER_NAME, STATE"
+        ]
+      ]
+    }
+  ]
+}

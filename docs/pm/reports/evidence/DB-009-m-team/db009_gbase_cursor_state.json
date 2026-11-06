@@ -1,0 +1,61 @@
+{
+ "captured_at": "2026-11-06T17:42:53",
+ "trials": [
+  {
+   "order": [
+    "ash",
+    "golden"
+   ],
+   "steps": {
+    "sample_sessions": {
+     "ok": true,
+     "count": 0
+    },
+    "golden_metrics": {
+     "ok": true,
+     "value": {
+      "threads_connected": 1,
+      "max_connections": 100,
+      "conn_usage_pct": 1.0
+     }
+    }
+   }
+  },
+  {
+   "order": [
+    "golden",
+    "ash"
+   ],
+   "steps": {
+    "golden_metrics": {
+     "ok": true,
+     "value": {
+      "threads_connected": 1,
+      "max_connections": 100,
+      "conn_usage_pct": 1.0
+     }
+    },
+    "sample_sessions": {
+     "ok": true,
+     "count": 0
+    }
+   }
+  },
+  {
+   "order": [
+    "ash",
+    "raw"
+   ],
+   "steps": {
+    "sample_sessions": {
+     "ok": true,
+     "count": 0
+    },
+    "raw_status": {
+     "ok": true,
+     "row": "{'Variable_name': 'Threads_connected', 'Value': '1'}"
+    }
+   }
+  }
+ ]
+}

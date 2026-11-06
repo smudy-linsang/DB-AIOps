@@ -1,0 +1,125 @@
+{
+  "captured_at": "2026-11-06T17:27:58",
+  "probes": [
+    {
+      "name": "buffer_pools",
+      "sql": "SELECT COUNT(*) FROM V$BUFFER",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "archive_dest",
+      "sql": "SELECT COUNT(*) FROM V$ARCH_FILE",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "realtime_archive_dest",
+      "sql": "SELECT COUNT(*) FROM V$ARCH_FILE",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "dest_pending",
+      "sql": "SELECT COUNT(*) FROM V$ARCH_FILE WHERE 1=0",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "dsc_instances",
+      "sql": "SELECT COUNT(*) FROM V$ARCH_FILE WHERE 1=0",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "dsc_global_latches",
+      "sql": "SELECT COUNT(*) FROM V$ARCH_FILE WHERE 1=0",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "locks",
+      "sql": "SELECT COUNT(*) FROM V$LOCK WHERE BLOCKED = 1",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "wait_events",
+      "sql": "SELECT COUNT(*) FROM V$LOCK WHERE BLOCKED = 1",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "long_transactions",
+      "sql": "SELECT COUNT(*) FROM V$TRX t LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID WHERE (SYSDATE - s.CREATE_TIME) * 86400 > 60",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "failed_logins",
+      "sql": "SELECT COUNT(*) FROM V$SESSIONS WHERE 1=0",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "dw_replication_issues",
+      "sql": "SELECT COUNT(*) FROM V$RLOG WHERE ALMOST_FULL_STATUS <> 'SAFE'",
+      "rows": 1,
+      "sample": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "dsc_cluster_issues",
+      "sql": "SELECT COUNT(*) FROM V$INSTANCE",
+      "rows": 1,
+      "sample": [
+        [
+          "1"
+        ]
+      ]
+    }
+  ]
+}

@@ -47,7 +47,7 @@ class DamengChecker(BaseDBChecker):
             startup_time = 'N/A'
 
         try:
-            cur.execute("SELECT MODE FROM V$INSTANCE")
+            cur.execute("SELECT MODE$ FROM V$INSTANCE")
             db_mode = cur.fetchone()[0]
         except Exception:
             db_mode = 'N/A'
@@ -80,9 +80,12 @@ class DamengChecker(BaseDBChecker):
         ) if max_sessions > 0 else 0
 
         try:
-            cur.execute(
-                "SELECT count(*) FROM V$SESSION_WAIT WHERE EVENT != 'Idle'"
-            )
+            # DM8 无 V$SESSION_WAIT 视图（DB-009 实测 -2106）→ 改用锁等待口径。
+            # 该指标在告警模板里的语义是「等待会话数」（init_alert_templates:
+            # '达梦 等待会话数'），所以按 **等待事务** 去重，而不是数锁条数 ——
+            # 同一会话可能同时持有多把被阻塞的锁，按锁条数会把等待会话数放大。
+            # V$LOCK 没有 SESS_ID 列，关联键是 TRX_ID（DB-009 实测列结构）。
+            cur.execute("SELECT COUNT(DISTINCT TRX_ID) FROM V$LOCK WHERE BLOCKED = 1")
             session_wait_count = int(cur.fetchone()[0])
         except Exception:
             session_wait_count = 0
@@ -123,8 +126,16 @@ class DamengChecker(BaseDBChecker):
         # 临时表空间
         try:
             cur.execute("""
-                SELECT NAME, ROUND(TOTAL_SIZE * PAGE / 1024.0 / 1024.0, 2) as TOTAL_MB
-                FROM V$TEMP_SPACE_USAGE
+                SELECT 
+                    NAME,
+                    ROUND(TOTAL_SIZE * PAGE / 1024.0 / 1024.0, 2) as TOTAL_MB
+                FROM (
+                    SELECT 
+                        t.NAME,
+                        t.TOTAL_SIZE,
+                        (SELECT CAST(VALUE AS INT) FROM V$PARAMETER WHERE NAME = 'GLOBAL_PAGE_SIZE') as PAGE
+                    FROM V$TABLESPACE t WHERE t.TYPE$ = 2
+                )
             """)
             temp_tablespaces = []
             for row in cur.fetchall():
@@ -159,17 +170,17 @@ class DamengChecker(BaseDBChecker):
 
         try:
             cur.execute(
-                "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='SQL_COUNT'"
+                "SELECT STAT_VAL FROM V$SYSSTAT WHERE NAME='sql executed count'"
             )
-            sql_count = int(cur.fetchone()[0])
+            sql_count = int(cur.fetchone()[0] or 0)
         except Exception:
             sql_count = 0
 
         try:
             cur.execute(
-                "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='TRAN_COUNT'"
+                "SELECT STAT_VAL FROM V$SYSSTAT WHERE NAME='transaction total count'"
             )
-            tran_count = int(cur.fetchone()[0])
+            tran_count = int(cur.fetchone()[0] or 0)
         except Exception:
             tran_count = 0
 
@@ -178,16 +189,18 @@ class DamengChecker(BaseDBChecker):
 
         # 缓冲池命中率
         try:
-            cur.execute("""
-                SELECT 
-                    ROUND((1 - A.CACHE_R_SORT / A.REQUEST_R_SORT) * 100, 2) as CACHE_HIT_RATIO
-                FROM (
-                    SELECT 
-                        SUM(REQUEST_R_SORT) as REQUEST_R_SORT,
-                        SUM(CACHE_R_SORT) as CACHE_R_SORT
-                    FROM V$BUFFER
-                ) A
-            """)
+            # DM8 的 V$BUFFER 无 REQUEST_R_SORT/CACHE_R_SORT 列（DB-009 实测 -2111）
+            # → 口径不变：仍是「缓冲池命中率」，改用 DM8 的缓冲池视图 V$BUFFERPOOL
+            #   （逻辑读 N_LOGIC_READS / 物理读 N_PHY_READS），乘 1.0 防整除截断
+            cur.execute(
+                """
+                SELECT CASE WHEN SUM(N_LOGIC_READS + N_PHY_READS) > 0
+                            THEN ROUND((1 - SUM(N_PHY_READS) * 1.0
+                                        / SUM(N_LOGIC_READS + N_PHY_READS)) * 100, 2)
+                            ELSE 0 END as CACHE_HIT_RATIO
+                FROM V$BUFFERPOOL
+                """
+            )
             cache_hit_ratio = float(cur.fetchone()[0])
         except Exception:
             cache_hit_ratio = 0
@@ -200,14 +213,15 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("""
                 SELECT 
-                    s.SESS_ID,
+                    t.SESS_ID,
                     s.USER_NAME,
-                    s.TRANSACTION_ID,
-                    s.SQL_TEXT,
+                    t.ID as TRANSACTION_ID,
+                    SUBSTR(s.SQL_TEXT, 1, 200) as SQL_TEXT,
                     l.LMODE,
                     l.BLOCKED
                 FROM V$LOCK l
-                LEFT JOIN V$SESSIONS s ON l.SESS_ID = s.SESS_ID
+                LEFT JOIN V$TRX t ON l.TRX_ID = t.ID
+                LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID
                 WHERE l.BLOCKED = 1
             """)
             for row in cur.fetchall():
@@ -225,11 +239,12 @@ class DamengChecker(BaseDBChecker):
 
         # 等待事件
         try:
+            # DM8 无 V$SESSION_WAIT（实测 -2106）→ 等待事件口径取 V$WAIT_HISTORY(WAIT_CLASS)
             cur.execute("""
-                SELECT EVENT, COUNT(*) as CNT
-                FROM V$SESSION_WAIT
-                WHERE EVENT != 'Idle'
-                GROUP BY EVENT
+                SELECT WAIT_CLASS, COUNT(*) as CNT
+                FROM V$WAIT_HISTORY
+                WHERE WAIT_CLASS != 'Idle'
+                GROUP BY WAIT_CLASS
                 ORDER BY CNT DESC
                 LIMIT 10
             """)
@@ -249,9 +264,9 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("""
                 SELECT 
-                    SESS_ID, USER_NAME, STATE, PROGRAM, IP, HOST,
+                    SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME,
                     SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT,
-                    TRX_ID, TRANSACTION_ID
+                    TRX_ID
                 FROM V$SESSIONS
                 WHERE USER_NAME IS NOT NULL
                 ORDER BY STATE, SESS_ID
@@ -262,12 +277,12 @@ class DamengChecker(BaseDBChecker):
                     "sess_id": str(row[0]),
                     "user_name": row[1] or 'N/A',
                     "state": row[2] or 'N/A',
-                    "program": row[3] or 'N/A',
-                    "ip": row[4] or 'N/A',
-                    "host": row[5] or 'N/A',
+                    "program": row[5] or 'N/A',
+                    "ip": row[3] or 'N/A',
+                    "host": row[4] or 'N/A',
                     "sql_text": (row[6] or 'N/A')[:200],
                     "trx_id": str(row[7]) if row[7] else 'N/A',
-                    "transaction_id": str(row[8]) if row[8] else 'N/A'
+                    "transaction_id": str(row[7]) if row[7] else 'N/A'
                 })
         except Exception:
             pass
@@ -278,19 +293,21 @@ class DamengChecker(BaseDBChecker):
         slow_queries = []
         try:
             cur.execute("""
-                SELECT SQL_TEXT, EXECUTE_COUNT, AVG_TIME
-                FROM (
-                    SELECT SQL_TEXT, EXECUTE_COUNT, AVG_TIME
+                SELECT * FROM (
+                    SELECT SQL_ID, SUBSTR(TOP_SQL_TEXT, 1, 200) as SQL_TEXT,
+                           COUNT(*) as EXECUTE_COUNT, AVG(TIME_USED) as AVG_TIME
                     FROM V$SQL_HISTORY
+                    GROUP BY SQL_ID, TOP_SQL_TEXT
                     ORDER BY EXECUTE_COUNT DESC
                 )
                 WHERE ROWNUM <= 10
             """)
             for row in cur.fetchall():
                 slow_queries.append({
-                    "sql_text": (row[0] or 'N/A')[:200],
-                    "execute_count": int(row[1]),
-                    "avg_time": int(row[2]) if row[2] else 0
+                    "sql_id": str(row[0]),
+                    "sql_text": (row[1] or 'N/A')[:200],
+                    "execute_count": int(row[2] or 0),
+                    "avg_time": int(row[3]) if row[3] else 0
                 })
         except Exception:
             pass
@@ -298,15 +315,20 @@ class DamengChecker(BaseDBChecker):
         top_sql = []
         try:
             cur.execute("""
-                SELECT SQL_TEXT, EXECUTE_COUNT
-                FROM V$SQLSTATS
-                ORDER BY EXECUTE_COUNT DESC
-                LIMIT 10
+                SELECT * FROM (
+                    SELECT SQL_ID, SUBSTR(TOP_SQL_TEXT, 1, 200) as SQL_TEXT,
+                           COUNT(*) as EXECUTE_COUNT
+                    FROM V$SQL_HISTORY
+                    GROUP BY SQL_ID, TOP_SQL_TEXT
+                    ORDER BY EXECUTE_COUNT DESC
+                )
+                WHERE ROWNUM <= 10
             """)
             for row in cur.fetchall():
                 top_sql.append({
-                    "sql_text": (row[0] or 'N/A')[:200],
-                    "execute_count": int(row[1])
+                    "sql_id": str(row[0]),
+                    "sql_text": (row[1] or 'N/A')[:200],
+                    "execute_count": int(row[2] or 0)
                 })
         except Exception:
             pass
@@ -317,20 +339,26 @@ class DamengChecker(BaseDBChecker):
         buffer_pools = []
         try:
             cur.execute("""
-                SELECT GROUP_ID, GROUP_NAME, NODE_NUM, BUFFER_SIZE, BUFFER_COUNT,
-                       FREE_COUNT, ACTIVE_COUNT, DIRTY_COUNT
-                FROM V$BUFFER
+                SELECT ID, NAME, PAGE_SIZE, N_TOTAL_PAGES,
+                       FREE, N_DIRTY, N_PHY_READS
+                FROM V$BUFFERPOOL
             """)
             for row in cur.fetchall():
                 buffer_pools.append({
-                    "group_id": int(row[0]),
-                    "group_name": row[1],
-                    "node_num": int(row[2]),
-                    "buffer_size": int(row[3]),
-                    "buffer_count": int(row[4]),
-                    "free_count": int(row[5]),
-                    "active_count": int(row[6]),
-                    "dirty_count": int(row[7])
+                    "group_id": int(row[0] or 0),
+                    "group_name": str(row[1] or 'N/A'),
+                    # DM8 池视图无 node 概念（DSC 才有）；buffer_size 以字节计
+                    "node_num": 0,
+                    "buffer_size": int((row[2] or 0) * (row[3] or 0)),
+                    "buffer_count": int(row[3] or 0),
+                    "free_count": int(row[4] or 0),
+                    # DM8 的 V$BUFFERPOOL 没有「活跃页」列 —— 老实现用的
+                    # V$BUFFER.ACTIVE_COUNT 在 DM8 根本不存在（实测 -2111）。
+                    # N_LOGIC_READS 是**逻辑读次数**，拿它冒充活跃页数属于
+                    # 指标含义偷换（冻结输入语义纪律），故置 0 并在此留痕。
+                    "active_count": 0,
+                    "dirty_count": int(row[5] or 0),
+                    "phy_read_count": int(row[6] or 0)
                 })
         except Exception:
             pass
@@ -357,21 +385,24 @@ class DamengChecker(BaseDBChecker):
         # 10. 复制与集群 (replication) - P1 增强
         # =============================================
         try:
-            cur.execute("SELECT ARCHIVE_MODE FROM V$DATABASE")
+            cur.execute("SELECT ARCH_MODE FROM V$DATABASE")
             archive_mode = cur.fetchone()[0]
         except Exception:
             archive_mode = 'N/A'
 
         try:
+            # DM8 无 V$ARCH_DEST（实测 -2106）→ 归档目的地在 V$ARCH_STATUS
             cur.execute(
-                "SELECT DEST_ID, STATUS, DEST_NAME FROM V$ARCH_DEST"
+                "SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS"
             )
             archive_dest = []
             for row in cur.fetchall():
                 archive_dest.append({
-                    "dest_id": int(row[0]),
-                    "status": row[1] or 'N/A',
-                    "dest_name": row[2] or 'N/A'
+                    "dest_id": 0,
+                    "status": row[2] or 'N/A',
+                    "dest_name": row[1] or 'N/A',
+                    "arch_type": row[0] or 'N/A',
+                    "arch_src": row[3] or 'N/A'
                 })
         except Exception:
             archive_dest = []
@@ -387,69 +418,78 @@ class DamengChecker(BaseDBChecker):
         # =============================================
         # 数据库角色和模式
         try:
-            cur.execute("SELECT MODE FROM V$INSTANCE")
+            cur.execute("SELECT MODE$ FROM V$INSTANCE")
             dm_instance_mode = cur.fetchone()[0]
         except Exception:
             dm_instance_mode = 'N/A'
 
         try:
-            cur.execute("SELECT MODE$ FROM V$DATABASE")
-            dm_database_mode = cur.fetchone()[0]
+            cur.execute("SELECT ROLE$ FROM V$DATABASE")
+            _db_role = cur.fetchone()[0]
+            # DM8 用 ROLE$ 表达库角色（0 = PRIMARY），V$DATABASE 无 MODE$ 列
+            dm_database_mode = ('PRIMARY' if str(_db_role) in ('0', 'PRIMARY')
+                                else str(_db_role))
         except Exception:
             dm_database_mode = 'N/A'
 
         # 实时归档状态
         try:
+            # 归档目的地口径统一到 V$ARCH_STATUS（ARCH_TYPE/ARCH_DEST/ARCH_STATUS/ARCH_SRC）
             cur.execute("""
-                SELECT DEST_ID, DEST_NAME, STATUS, ARCH_TYPE, ARCH_SEQ, ARCH_SPACE, 
-                       ARCH_FILE, ARCH_TIMELY, IS_LOGICAL, SYNCHRONIZED
-                FROM V$ARCH_DEST WHERE STATUS != 'INACTIVE'
+                SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC
+                FROM V$ARCH_STATUS
             """)
             realtime_archive_dest = []
             for row in cur.fetchall():
                 realtime_archive_dest.append({
-                    "dest_id": int(row[0]) if row[0] else 0,
+                    "dest_id": 0,
                     "dest_name": row[1] or 'N/A',
                     "status": row[2] or 'N/A',
-                    "arch_type": row[3] or 'N/A',
-                    "arch_seq": int(row[4]) if row[4] else 0,
-                    "arch_space": int(row[5]) if row[5] else 0,
-                    "arch_file": row[6] or 'N/A',
-                    "arch_timely": row[7] or 'N/A',
-                    "is_logical": row[8] or 'N/A',
-                    "synchronized": row[9] or 'N/A'
+                    "arch_type": row[0] or 'N/A',
+                    "arch_seq": 0,
+                    "arch_space": 0,
+                    "arch_file": row[1] or 'N/A',
+                    "arch_timely": 'N/A',
+                    "is_logical": 'N/A',
+                    "synchronized": row[3] or 'N/A'
                 })
         except Exception:
             realtime_archive_dest = []
 
         # 实时日志同步状态
         try:
+            # DB-009 桌面端复核订正：老实现在这里查 V$RLOG，然后把 CUR_OFFSET
+            # 塞进 apply_seq、把 ALMOST_FULL_STATUS 塞进 sync_status —— 前者是
+            # **归档日志字节偏移**、后者是**日志空间水位**，都不是"主备同步进度"，
+            # 属于指标含义偷换。DM8 单实例本身没有主备同步真值，
+            # 但归档同步状态在 V$ARCH_STATUS.ARCH_STATUS 上有真值列（实测 4 列）。
             cur.execute("""
-                SELECT SRC_INSTANCE, DEST_INSTANCE, ARCH_DEST, ARCH_SEQ, ARCH_SEQ_ALL,
-                       APPLY_SEQ, APPLY_SEQ_ALL, SYNC_STATUS
-                FROM V$RLOG
+                SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC
+                FROM V$ARCH_STATUS
             """)
             rlog_sync_status = []
             for row in cur.fetchall():
                 rlog_sync_status.append({
-                    "src_instance": row[0] or 'N/A',
-                    "dest_instance": row[1] or 'N/A',
-                    "arch_dest": row[2] or 'N/A',
-                    "arch_seq": int(row[3]) if row[3] else 0,
-                    "arch_seq_all": int(row[4]) if row[4] else 0,
-                    "apply_seq": int(row[5]) if row[5] else 0,
-                    "apply_seq_all": int(row[6]) if row[6] else 0,
-                    "sync_status": row[7] or 'N/A'
+                    "src_instance": str(row[3] or 'N/A'),
+                    "dest_instance": str(row[1] or 'N/A'),
+                    "arch_dest": str(row[1] or 'N/A'),
+                    # DM8 单实例无归档序号/回放序号真值列，不伪造
+                    "arch_seq": 0,
+                    "arch_seq_all": 0,
+                    "apply_seq": 0,
+                    "apply_seq_all": 0,
+                    "sync_status": row[2] or 'N/A'
                 })
         except Exception:
             rlog_sync_status = []
 
         # 主备延迟
         try:
+            # DM8 单实例无 V$DEST_PENDING（DW 主备专用，实测 -2106）
+            # → 合法空集查询占位，不伪造备库延迟数据
             cur.execute("""
-                SELECT DST_INST_NAME, APPLY_STATUS, APPLY_DELAY, APPLY_RST_SEQ, 
-                       APPLY_RST_TIME, LAST_ARCH_SEQ
-                FROM V$DEST_PENDING
+                SELECT PATH, STATUS, CREATE_TIME, CLOSE_TIME, ARCH_SEQ, DB_MAGIC
+                FROM V$ARCH_FILE WHERE 1=0
             """)
             dest_pending = []
             apply_delay_total = 0
@@ -491,15 +531,14 @@ class DamengChecker(BaseDBChecker):
         # DSC 集群信息
         try:
             cur.execute("""
-                SELECT INSTANCE_NAME, INSTANCE_ID, HOST_NAME, PORT_NUM, 
-                       STATUS, IS_PRIMARY, UPTIME
-                FROM V$CLUSTER
+                SELECT INSTANCE_NAME, INSTANCE_NUMBER, HOST_NAME, NULL as PORT_NUM,
+                       STATUS$, NULL as IS_PRIMARY, NULL as UPTIME
+                FROM V$INSTANCE
             """)
             dsc_cluster_info = []
             dsc_node_count = 0
             dsc_primary_node = 'N/A'
             for row in cur.fetchall():
-                dsc_node_count += 1
                 if row[5] == 1:  # IS_PRIMARY
                     dsc_primary_node = row[0]
                 dsc_cluster_info.append({
@@ -511,6 +550,12 @@ class DamengChecker(BaseDBChecker):
                     "is_primary": int(row[5]) if row[5] else 0,
                     "uptime": int(row[6]) if row[6] else 0
                 })
+            # 节点数取 V$DATABASE.DSC_NODES 真值（DB-009 实测列存在，
+            # DM8 单实例为 0）。不能用 len(dsc_cluster_info)：V$INSTANCE 恒有
+            # 本实例一行，按行数算会把单机报成「DSC 1 节点集群」。
+            cur.execute("SELECT DSC_NODES FROM V$DATABASE")
+            _dsn_row = cur.fetchone()
+            dsc_node_count = int(_dsn_row[0] or 0) if _dsn_row else 0
         except Exception:
             dsc_cluster_info = []
             dsc_node_count = 0
@@ -518,10 +563,10 @@ class DamengChecker(BaseDBChecker):
 
         # DSC 实例详情
         try:
+            # DM8 无 V$DSC_INSTANCES（实测 -2106）→ 合法空集，不伪造节点明细
             cur.execute("""
-                SELECT INST_ID, INST_NAME, CLUSTER_STATE, DB_MAGIC, 
-                       RLOG_SEND_OFFSET, RLOG_PKG_SND_COUNT
-                FROM V$DSC_INSTANCES
+                SELECT ARCH_SEQ, PATH, STATUS, CREATE_TIME, CLOSE_TIME, DB_MAGIC
+                FROM V$ARCH_FILE WHERE 1=0
             """)
             dsc_instances = []
             for row in cur.fetchall():
@@ -538,10 +583,10 @@ class DamengChecker(BaseDBChecker):
 
         # DSC 全局锁
         try:
+            # DM8 无 V$GLOBAL_LATCH（实测 -2106）→ 合法空集
             cur.execute("""
-                SELECT LOCK_ID, LOCK_TYPE, OWNER_INST, OWNER_LRU,
-                       BLOCKING_LRU, BLOCKING_INST
-                FROM V$GLOBAL_LATCH
+                SELECT PATH, STATUS, CREATE_TIME, CLOSE_TIME, ARCH_SEQ, DB_MAGIC
+                FROM V$ARCH_FILE WHERE 1=0
             """)
             dsc_global_latches = []
             for row in cur.fetchall():
@@ -559,7 +604,7 @@ class DamengChecker(BaseDBChecker):
         # DSC 锁状态统计
         try:
             cur.execute(
-                "SELECT COUNT(*) FROM V$GLOBAL_LATCH WHERE BLOCKING_LRU > 0"
+                "SELECT COUNT(*) FROM V$LOCK WHERE BLOCKED = 1"
             )
             dsc_lock_contention_count = int(cur.fetchone()[0])
         except Exception:
@@ -603,27 +648,31 @@ class DamengChecker(BaseDBChecker):
         # 12. 日志统计 (log) - P1
         # =============================================
         try:
-            cur.execute("SELECT count(*) FROM V$LOG")
+            # DM8 无 V$LOG 视图（实测 -2106）→ 归档日志文件数口径
+            cur.execute("SELECT count(*) FROM V$ARCH_FILE")
             log_count = int(cur.fetchone()[0])
         except Exception:
             log_count = 0
 
         try:
-            cur.execute("SELECT LOG_SIZE FROM V$INSTANCE")
-            log_size = int(cur.fetchone()[0])
+            cur.execute("SELECT TOTAL_SPACE FROM V$RLOG")
+            log_size = int(cur.fetchone()[0] or 0)
         except Exception:
             log_size = 0
 
         # =============================================
         # 13. 安全审计 (security) - P2
         # =============================================
-        try:
-            cur.execute("SELECT count(*) FROM V$LOGIN")
-            login_count = int(cur.fetchone()[0])
-        except Exception:
-            login_count = 0
+        # DM8 无 V$LOGIN 视图（DB-009 实测 -2106）→ 登录计数不可得。
+        # 给 None（不可得）而不是 0（真的没有登录过），避免把"查不到"
+        # 渲染成"登录数为 0"。V$SESSION_HISTORY 虽有登录记录，但那是历史
+        # 会话流水，不能等同"当前登录数"，口径不同，不拿它顶替。
+        login_count = None
 
         try:
+            # DM8 的 V$SESSIONS.STATE 实测取值只有 ACTIVE，没有 FAILED
+            # （失败登录不落在会话视图里），所以这里恒为空 —— 是"该维度
+            # 不可得"，不是"没有失败登录"。
             cur.execute("""
                 SELECT USER_NAME, COUNT(*) as CNT
                 FROM V$SESSIONS
@@ -661,12 +710,19 @@ class DamengChecker(BaseDBChecker):
         # =============================================
         long_transactions = []
         try:
+            # DB-009 桌面端复核订正：
+            # ① DM8 的 V$TRX 实测 25 列里**没有事务开始时间**（只有 START_LSN，
+            #    是日志序列号不是时间戳），所以 DURATION_SEC 只能用会话
+            #    CREATE_TIME 近似 —— 它是**会话年龄**而非事务年龄，此处明确留痕。
+            # ② 必须按 t.STATUS='ACTIVE' 过滤：V$TRX.STATUS 实测取值含 ACTIVE，
+            #    不加这个条件会把所有跑超过 60 秒的**空闲会话**当成"长事务"。
             cur.execute("""
-                SELECT TRX_ID, SESS_ID, STATE,
-                       (SYSDATE - TRX_START_TIME) * 86400 as DURATION_SEC,
-                       SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT
+                SELECT t.ID as TRX_ID, t.SESS_ID, t.STATUS,
+                       (SYSDATE - s.CREATE_TIME) * 86400 as DURATION_SEC,
+                       SUBSTR(s.SQL_TEXT, 1, 200) as SQL_TEXT
                 FROM V$TRX t LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID
-                WHERE (SYSDATE - TRX_START_TIME) * 86400 > 60
+                WHERE t.STATUS = 'ACTIVE'
+                  AND (SYSDATE - s.CREATE_TIME) * 86400 > 60
                 ORDER BY DURATION_SEC DESC
             """)
             for row in cur.fetchall():
@@ -687,9 +743,9 @@ class DamengChecker(BaseDBChecker):
         try:
             cur.execute("""
                 SELECT * FROM (
-                    SELECT SESS_ID, TRX_ID, SQL_TEXT, DEADLOCK_TIME
+                    SELECT SESS_ID, TRX_ID, SQL_TEXT, HAPPEN_TIME
                     FROM V$DEADLOCK_HISTORY
-                    ORDER BY DEADLOCK_TIME DESC
+                    ORDER BY HAPPEN_TIME DESC
                 ) WHERE ROWNUM <= 5
             """)
             deadlock_rows = []
@@ -714,7 +770,7 @@ class DamengChecker(BaseDBChecker):
         except Exception:
             redo_log_stats['rlog_count'] = 0
         try:
-            cur.execute("SELECT COUNT(*) FROM V$RLOG WHERE STATUS='ACTIVE'")
+            cur.execute("SELECT COUNT(*) FROM V$RLOG WHERE ALMOST_FULL_STATUS <> 'SAFE'")
             redo_log_stats['active_rlog_count'] = int(cur.fetchone()[0] or 0)
         except Exception:
             redo_log_stats['active_rlog_count'] = 0
@@ -735,13 +791,14 @@ class DamengChecker(BaseDBChecker):
         table_size_top20 = []
         try:
             cur.execute("""
-                SELECT OWNER, TABLE_NAME, NUM_ROWS,
-                       (SELECT ROUND(SUM(USED_SIZE * PAGE) / 1024 / 1024, 2)
-                        FROM V$TABLESPACE WHERE NAME = t.TABLESPACE_NAME) as SIZE_MB
-                FROM DBA_TABLES t
-                WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO')
-                ORDER BY NUM_ROWS DESC
-                WHERE ROWNUM <= 20
+                SELECT * FROM (
+                    SELECT OWNER, TABLE_NAME, NUM_ROWS,
+                           (SELECT ROUND(SUM(USED_SIZE * PAGE) / 1024 / 1024, 2)
+                            FROM V$TABLESPACE WHERE NAME = t.TABLESPACE_NAME) as SIZE_MB
+                    FROM DBA_TABLES t
+                    WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO')
+                    ORDER BY NUM_ROWS DESC
+                ) WHERE ROWNUM <= 20
             """)
             for row in cur.fetchall():
                 table_size_top20.append({

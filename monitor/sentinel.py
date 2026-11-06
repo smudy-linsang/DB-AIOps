@@ -362,6 +362,67 @@ def _ash_oracle(cur, db_type='oracle', config_id=None):
     return out
 
 
+def _ash_dm(cur, config_id=None):
+    """达梦 DM8 ASH 采样。
+
+    DB-009 实测（127.0.0.1:5236 DM8）：DM8 无 v$session（单数）视图，也无
+    V$SESSIONS.USER_ID 列；实际会话视图为 V$SESSIONS，列为
+    SESS_ID / USER_NAME / STATE / CLNT_IP / CLNT_HOST / APPNAME /
+    SQL_TEXT / SQL_ID / TRX_ID / CREATE_TIME。
+
+    桌面端复核补强（2026-11-06）：
+      * V$SESSIONS 无阻塞列 ⇒ 阻塞判定改由 V$LOCK.BLOCKED 得出，
+        关联键是 **TRX_ID**（V$LOCK 没有 SESS_ID 列）；
+      * 会话存活时长用 (SYSDATE - CREATE_TIME)*86400，不再恒为 0。
+    两条均已在 DM8 实库直连实测通过。
+    """
+    cur.execute(
+        "SELECT SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME, "
+        "SUBSTR(SQL_TEXT, 1, 500) as SQL_TEXT, SQL_ID, TRX_ID, CREATE_TIME, "
+        "ROUND((SYSDATE - CREATE_TIME) * 86400, 1) as ACTIVE_SECS "
+        "FROM V$SESSIONS WHERE USER_NAME IS NOT NULL")
+    cols = [d[0].lower() for d in cur.description]
+    raw_rows = [dict(zip(cols, row)) for row in cur.fetchall()]
+
+    # 阻塞判定：V$LOCK.BLOCKED = 1 表示该事务的锁正被别的会话等待
+    blocked_trx = {}
+    try:
+        cur.execute(
+            "SELECT TRX_ID, COUNT(*), MAX(LMODE), MAX(LTYPE) FROM V$LOCK "
+            "WHERE BLOCKED > 0 GROUP BY TRX_ID")
+        for trx_id, cnt, lmode, ltype in cur.fetchall():
+            blocked_trx[str(trx_id)] = (int(cnt or 0), lmode, ltype)
+    except Exception as e:  # noqa: BLE001
+        logger.debug("[ASH] DM 阻塞判定补查失败: %s", e)
+        from monitor import degrade
+        degrade.note('ash.dm_block_detail', exc=e)
+
+    out = []
+    for r in raw_rows:
+        b = blocked_trx.get(str(r.get('trx_id')))
+        active = r.get('active_secs') or 0
+        row = {
+            'session_id': str(r.get('sess_id')), 'user_name': r.get('user_name'),
+            'client_host': r.get('clnt_host'), 'db_name': None,
+            'command': r.get('state'), 'state': r.get('state'),
+            'raw_wait_class': None,
+            'wait_event': None, 'active_secs': active,
+            'is_blocked': bool(b),
+            'blocker_id': None,
+            'sql_text': r.get('sql_text'),
+            'sql_id': r.get('sql_id'), 'program': r.get('appname'), 'module': None,
+            'lock_type': b[2] if b else None,
+            'lock_mode': b[1] if b else None,
+            'lock_object': None,
+            'wait_secs': active if b else None,
+            'trx_age_secs': None,
+        }
+        row['sql_digest'] = unified_digest('dm', row['sql_id'], row['sql_text'])
+        row['wait_class'] = classify('dm', row)
+        out.append(row)
+    return out
+
+
 def sample_sessions(cur, db_type: str, config_id=None) -> list:
     """采样一次会话快照。
 
@@ -372,8 +433,10 @@ def sample_sessions(cur, db_type: str, config_id=None) -> list:
         return _ash_mysql_family(cur, db_type)
     if db_type in ('pgsql', 'postgresql'):
         return _ash_pg(cur)
-    if db_type in ('oracle', 'dm'):
+    if db_type == 'oracle':
         return _ash_oracle(cur, db_type, config_id=config_id)
+    if db_type == 'dm':
+        return _ash_dm(cur, config_id=config_id)
     return []
 
 
@@ -399,10 +462,20 @@ def golden_metrics(cur, db_type: str) -> dict:
             m['threads_connected'] = tc
             m['max_connections'] = mc
             m['conn_usage_pct'] = round(tc / mc * 100, 2) if mc else 0
-        elif db_type in ('oracle', 'dm'):
+        elif db_type == 'oracle':
             cur.execute("SELECT count(*) FROM v$session WHERE type='USER'")
             tc = cur.fetchone()[0]
             cur.execute("SELECT value FROM v$parameter WHERE name='sessions'")
+            row = cur.fetchone()
+            mc = int(row[0]) if row and row[0] else 0
+            m['threads_connected'] = tc
+            m['max_connections'] = mc
+            m['conn_usage_pct'] = round(tc / mc * 100, 2) if mc else 0
+        elif db_type == 'dm':
+            # DM8 会话视图为 V$SESSIONS（复数），上限参数名为 MAX_SESSIONS
+            cur.execute("SELECT count(*) FROM V$SESSIONS")
+            tc = cur.fetchone()[0]
+            cur.execute("SELECT value FROM v$parameter WHERE name='MAX_SESSIONS'")
             row = cur.fetchone()
             mc = int(row[0]) if row and row[0] else 0
             m['threads_connected'] = tc

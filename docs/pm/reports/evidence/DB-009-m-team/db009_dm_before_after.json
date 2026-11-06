@@ -1,0 +1,201 @@
+{
+ "captured_at": "2026-11-06T17:50:39",
+ "target": {
+  "id": 9,
+  "name": "DM_测试库",
+  "host": "<local-host>",
+  "port": "<dm-port>",
+  "password": "len=9,head=***"
+ },
+ "before": {
+  "source": "git show HEAD:monitor/checkers/dm.py",
+  "total": 52,
+  "ok": 23,
+  "fail": 29,
+  "failed_lines": [
+   50,
+   84,
+   125,
+   162,
+   170,
+   181,
+   201,
+   228,
+   250,
+   280,
+   300,
+   319,
+   360,
+   367,
+   396,
+   403,
+   427,
+   449,
+   493,
+   521,
+   541,
+   562,
+   606,
+   612,
+   621,
+   664,
+   688,
+   717,
+   737
+  ],
+  "failed_detail": [
+   {
+    "line": 50,
+    "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[MODE] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT MODE FROM V$INSTANCE"
+   },
+   {
+    "line": 84,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$SESSION_WAIT] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT count(*) FROM V$SESSION_WAIT WHERE EVENT != 'Idle'"
+   },
+   {
+    "line": 125,
+    "error": "('42S02', '[42S02] 第4 行附近出现错误:\\n无效的表或视图名[V$TEMP_SPACE_USAGE] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT NAME, ROUND(TOTAL_SIZE * PAGE / 1024.0 / 1024.0, 2) as TOTAL_MB FROM V$TEMP_SPACE_USAGE"
+   },
+   {
+    "line": 162,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$SYSTEM_INFO] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='SQL_COUNT'"
+   },
+   {
+    "line": 170,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$SYSTEM_INFO] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT VALUE FROM V$SYSTEM_INFO WHERE NAME='TRAN_COUNT'"
+   },
+   {
+    "line": 181,
+    "error": "('42S22', '[42S22] 第10 行附近出现错误:\\n无效的列名[REQUEST_R_SORT] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT ROUND((1 - A.CACHE_R_SORT / A.REQUEST_R_SORT) * 100, 2) as CACHE_HIT_RATIO FROM ( SELECT SUM(REQUEST_R_SORT) as REQUEST_R_SORT, SUM(CACHE_R_SORT) as CACHE_R_SORT FROM V$BUFFER ) A"
+   },
+   {
+    "line": 201,
+    "error": "('HY000', '[HY000] 第12 行附近出现错误:\\n无法解析的成员访问表达式[l.SESS_ID] (-2207) (SQLExecDirectW)')",
+    "sql": "SELECT s.SESS_ID, s.USER_NAME, s.TRANSACTION_ID, s.SQL_TEXT, l.LMODE, l.BLOCKED FROM V$LOCK l LEFT JOIN V$SESSIONS s ON l.SESS_ID = s.SESS_ID WHERE l.BLOCKED = 1"
+   },
+   {
+    "line": 228,
+    "error": "('42S02', '[42S02] 第8 行附近出现错误:\\n无效的表或视图名[V$SESSION_WAIT] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT EVENT, COUNT(*) as CNT FROM V$SESSION_WAIT WHERE EVENT != 'Idle' GROUP BY EVENT ORDER BY CNT DESC LIMIT 10"
+   },
+   {
+    "line": 250,
+    "error": "('42S22', '[42S22] 第10 行附近出现错误:\\n无效的列名[PROGRAM] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT SESS_ID, USER_NAME, STATE, PROGRAM, IP, HOST, SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT, TRX_ID, TRANSACTION_ID FROM V$SESSIONS WHERE USER_NAME IS NOT NULL ORDER BY STATE, SESS_ID LIMIT 100"
+   },
+   {
+    "line": 280,
+    "error": "('42S22', '[42S22] 第9 行附近出现错误:\\n无效的列名[SQL_TEXT] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT SQL_TEXT, EXECUTE_COUNT, AVG_TIME FROM ( SELECT SQL_TEXT, EXECUTE_COUNT, AVG_TIME FROM V$SQL_HISTORY ORDER BY EXECUTE_COUNT DESC ) WHERE ROWNUM <= 10"
+   },
+   {
+    "line": 300,
+    "error": "('42S02', '[42S02] 第6 行附近出现错误:\\n无效的表或视图名[V$SQLSTATS] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT SQL_TEXT, EXECUTE_COUNT FROM V$SQLSTATS ORDER BY EXECUTE_COUNT DESC LIMIT 10"
+   },
+   {
+    "line": 319,
+    "error": "('42S22', '[42S22] 第5 行附近出现错误:\\n无效的列名[GROUP_ID] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT GROUP_ID, GROUP_NAME, NODE_NUM, BUFFER_SIZE, BUFFER_COUNT, FREE_COUNT, ACTIVE_COUNT, DIRTY_COUNT FROM V$BUFFER"
+   },
+   {
+    "line": 360,
+    "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[ARCHIVE_MODE] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT ARCHIVE_MODE FROM V$DATABASE"
+   },
+   {
+    "line": 367,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$ARCH_DEST] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT DEST_ID, STATUS, DEST_NAME FROM V$ARCH_DEST"
+   },
+   {
+    "line": 396,
+    "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[MODE$] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT MODE$ FROM V$DATABASE"
+   },
+   {
+    "line": 403,
+    "error": "('42S02', '[42S02] 第5 行附近出现错误:\\n无效的表或视图名[V$ARCH_DEST] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT DEST_ID, DEST_NAME, STATUS, ARCH_TYPE, ARCH_SEQ, ARCH_SPACE, ARCH_FILE, ARCH_TIMELY, IS_LOGICAL, SYNCHRONIZED FROM V$ARCH_DEST WHERE STATUS != 'INACTIVE'"
+   },
+   {
+    "line": 427,
+    "error": "('42S22', '[42S22] 第5 行附近出现错误:\\n无效的列名[SRC_INSTANCE] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT SRC_INSTANCE, DEST_INSTANCE, ARCH_DEST, ARCH_SEQ, ARCH_SEQ_ALL, APPLY_SEQ, APPLY_SEQ_ALL, SYNC_STATUS FROM V$RLOG"
+   },
+   {
+    "line": 449,
+    "error": "('42S02', '[42S02] 第5 行附近出现错误:\\n无效的表或视图名[V$DEST_PENDING] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT DST_INST_NAME, APPLY_STATUS, APPLY_DELAY, APPLY_RST_SEQ, APPLY_RST_TIME, LAST_ARCH_SEQ FROM V$DEST_PENDING"
+   },
+   {
+    "line": 493,
+    "error": "('42S02', '[42S02] 第5 行附近出现错误:\\n无效的表或视图名[V$CLUSTER] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT INSTANCE_NAME, INSTANCE_ID, HOST_NAME, PORT_NUM, STATUS, IS_PRIMARY, UPTIME FROM V$CLUSTER"
+   },
+   {
+    "line": 521,
+    "error": "('42S02', '[42S02] 第5 行附近出现错误:\\n无效的表或视图名[V$DSC_INSTANCES] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT INST_ID, INST_NAME, CLUSTER_STATE, DB_MAGIC, RLOG_SEND_OFFSET, RLOG_PKG_SND_COUNT FROM V$DSC_INSTANCES"
+   },
+   {
+    "line": 541,
+    "error": "('42S02', '[42S02] 第5 行附近出现错误:\\n无效的表或视图名[V$GLOBAL_LATCH] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT LOCK_ID, LOCK_TYPE, OWNER_INST, OWNER_LRU, BLOCKING_LRU, BLOCKING_INST FROM V$GLOBAL_LATCH"
+   },
+   {
+    "line": 562,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$GLOBAL_LATCH] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT COUNT(*) FROM V$GLOBAL_LATCH WHERE BLOCKING_LRU > 0"
+   },
+   {
+    "line": 606,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$LOG] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT count(*) FROM V$LOG"
+   },
+   {
+    "line": 612,
+    "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[LOG_SIZE] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT LOG_SIZE FROM V$INSTANCE"
+   },
+   {
+    "line": 621,
+    "error": "('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$LOGIN] (-2106) (SQLExecDirectW)')",
+    "sql": "SELECT count(*) FROM V$LOGIN"
+   },
+   {
+    "line": 664,
+    "error": "('42S22', '[42S22] 第8 行附近出现错误:\\n无效的列名[TRX_START_TIME] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT TRX_ID, SESS_ID, STATE, (SYSDATE - TRX_START_TIME) * 86400 as DURATION_SEC, SUBSTR(SQL_TEXT, 1, 200) as SQL_TEXT FROM V$TRX t LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID WHERE (SYSDATE - TRX_START_TIME) * 86400 > 60 ORDER BY DURATION_SEC DESC"
+   },
+   {
+    "line": 688,
+    "error": "('42S22', '[42S22] 第7 行附近出现错误:\\n无效的列名[DEADLOCK_TIME] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT * FROM ( SELECT SESS_ID, TRX_ID, SQL_TEXT, DEADLOCK_TIME FROM V$DEADLOCK_HISTORY ORDER BY DEADLOCK_TIME DESC ) WHERE ROWNUM <= 5"
+   },
+   {
+    "line": 717,
+    "error": "('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')",
+    "sql": "SELECT COUNT(*) FROM V$RLOG WHERE STATUS='ACTIVE'"
+   },
+   {
+    "line": 737,
+    "error": "('42000', '[42000] 第 8 行, 第 17 列[WHERE]附近出现错误: \\n语法分析出错 (-2007) (SQLExecDirectW)')",
+    "sql": "SELECT OWNER, TABLE_NAME, NUM_ROWS, (SELECT ROUND(SUM(USED_SIZE * PAGE) / 1024 / 1024, 2) FROM V$TABLESPACE WHERE NAME = t.TABLESPACE_NAME) as SIZE_MB FROM DBA_TABLES t WHERE OWNER NOT IN ('SYS', 'SYSTEM', 'SYSDBA', 'SYSAUDITOR', 'SYSSSO') ORDER BY NUM_ROWS DESC WHERE ROWNUM <= 20"
+   }
+  ]
+ },
+ "after": {
+  "source": "working tree monitor/checkers/dm.py",
+  "total": 47,
+  "ok": 47,
+  "fail": 0,
+  "failed_detail": []
+ }
+}

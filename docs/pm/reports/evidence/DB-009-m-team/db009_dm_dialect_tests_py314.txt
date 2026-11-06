@@ -1,0 +1,74 @@
+exit_code=0
+Found 2 test(s).
+Operations to perform:
+  Synchronize unmigrated apps: messages, staticfiles
+  Apply all migrations: admin, auth, contenttypes, monitor, sessions
+Synchronizing apps without migrations:
+  Creating tables...
+    Running deferred SQL...
+Running migrations:
+  Applying contenttypes.0001_initial... OK
+  Applying auth.0001_initial... OK
+  Applying admin.0001_initial... OK
+  Applying admin.0002_logentry_remove_auto_add... OK
+  Applying admin.0003_logentry_add_action_flag_choices... OK
+  Applying contenttypes.0002_remove_content_type_name... OK
+  Applying auth.0002_alter_permission_name_max_length... OK
+  Applying auth.0003_alter_user_email_max_length... OK
+  Applying auth.0004_alter_user_username_opts... OK
+  Applying auth.0005_alter_user_last_login_null... OK
+  Applying auth.0006_require_contenttypes_0002... OK
+  Applying auth.0007_alter_validators_add_error_messages... OK
+  Applying auth.0008_alter_user_username_max_length... OK
+  Applying auth.0009_alter_user_last_name_max_length... OK
+  Applying auth.0010_alter_group_name_max_length... OK
+  Applying auth.0011_update_proxy_permissions... OK
+  Applying auth.0012_alter_user_first_name_max_length... OK
+  Applying monitor.0001_initial... OK
+  Applying monitor.0002_monitorlog... OK
+  Applying monitor.0003_databaseconfig_service_name... OK
+  Applying monitor.0004_alter_databaseconfig_db_type_auditlog... OK
+  Applying monitor.0005_alter_databaseconfig_password_alertlog... OK
+  Applying monitor.0006_alertlog_related_ticket_auditlog_execution_context_and_more... OK
+  Applying monitor.0007_metricdefinition_alertnotificationlog_and_more... OK
+  Applying monitor.0008_alertthresholdtemplate_databasealertoverride... OK
+  Applying monitor.0009_multi_template_support... OK
+  Applying monitor.0010_reportrecord_databasetopology_notificationrule... OK
+  Applying monitor.0011_databaseconfig_password_changed_at_and_more... OK
+  Applying monitor.0012_role_alter_userprofile_role_rolepermission... OK
+  Applying monitor.0013_alertcase_businessimpactassessment_and_more... OK
+  Applying monitor.0014_problem_incident_event_and_more... OK
+  Applying monitor.0015_oncallschedule_playbook_playbookrun... OK
+  Applying monitor.0016_databaseconfig_cpu_cores_sqlplan... OK
+  Applying monitor.0017_llmcalllog_rulestat_alertcase_embedding_indexed_and_more... OK
+  Applying monitor.0018_remove_agenttrace_steps_and_more... OK
+  Applying monitor.0019_userprofiledatabase_config_fk... OK
+  Applying monitor.0020_auditlog_config_nullable... OK
+  Applying monitor.0021_sqlplan_unique_current... OK
+  Applying monitor.0022_componentheartbeat... OK
+  Applying monitor.0023_playbooktemplate_databasemetricprofile_and_more... OK
+  Applying monitor.0024_llmprovidercredential_llmsceneroutingrule... OK
+  Applying monitor.0025_llmprovidercredential_proxy_url... OK
+  Applying monitor.0026_copilotskill_copilotmemory... OK
+  Applying monitor.0027_databaseconfig_collect_interval_sec_and_more... OK
+  Applying monitor.0028_dbcollecttemplate... OK
+  Applying monitor.0029_processlease... OK
+  Applying monitor.0030_v25_review_hardening... OK
+  Applying monitor.0031_oam_v3_foundation... OK
+  Applying monitor.0032_oam_bench_run... OK
+  Applying monitor.0033_oam_case_source_config... OK
+  Applying monitor.0034_oam_case_json_blank... OK
+  Applying sessions.0001_initial... OK
+System check identified no issues (0 silenced).
+Creating test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+
+test_ash_sampling_runs (monitor.tests_dialect.DamengDialectTests.test_ash_sampling_runs) ... ok
+test_dry_run_never_executes_raw_sql (monitor.tests_dialect.DamengDialectTests.test_dry_run_never_executes_raw_sql)
+BUG-102 回归：达梦的工单预执行必须走 EXPLAIN PLAN FOR， ... ok
+
+----------------------------------------------------------------------
+Ran 2 tests in 0.160s
+
+OK
+Destroying test database for alias 'default' ('file:memorydb_default?mode=memory&cache=shared')...
+

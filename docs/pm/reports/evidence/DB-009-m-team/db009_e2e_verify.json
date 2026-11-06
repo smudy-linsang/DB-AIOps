@@ -1,0 +1,112 @@
+{
+ "captured_at": "2026-11-06T17:42:49",
+ "dm": {
+  "cursor_type": "Cursor",
+  "sql_from_source": {
+   "ok": true,
+   "rows": 20,
+   "sample": [
+    "(12, 36, 4290, 0, 36, \"SELECT TYPE_NAME, DATA_TYPE,                      COLUMN_SIZE,                      LITERAL_PREFIX, LITERAL_SUFFIX, CREATE_PARAMS,       ",
+    "(11, 36, 4257, 0, 36, \"SELECT TYPE_NAME, DATA_TYPE,                      COLUMN_SIZE,                      LITERAL_PREFIX, LITERAL_SUFFIX, CREATE_PARAMS,       ",
+    "(10, 36, 4645, 0, 36, \"SELECT TYPE_NAME, DATA_TYPE,                      COLUMN_SIZE,                      LITERAL_PREFIX, LITERAL_SUFFIX, CREATE_PARAMS,       "
+   ]
+  },
+  "platform_method": {
+   "ok": true,
+   "delta_rows": 0,
+   "note": "首轮差分无增量属预期（DeltaTracker 进程内状态）"
+  },
+  "sample_sessions": {
+   "ok": true,
+   "count": 1,
+   "first": {
+    "session_id": "352328576",
+    "user_name": "<dm-admin>",
+    "client_host": "<client-host>",
+    "db_name": null,
+    "command": "ACTIVE",
+    "state": "ACTIVE",
+    "raw_wait_class": null,
+    "wait_event": null,
+    "active_secs": "0",
+    "is_blocked": "False",
+    "blocker_id": null,
+    "sql_text": "SELECT SESS_ID, USER_NAME, STATE, CLNT_IP, CLNT_HOST, APPNAME, SUBSTR(",
+    "sql_id": "477",
+    "program": "python.exe",
+    "module": null,
+    "lock_type": null,
+    "lock_mode": null,
+    "lock_object": null,
+    "wait_secs": null,
+    "trx_age_secs": null,
+    "sql_digest": "477",
+    "wait_class": "on_cpu"
+   }
+  },
+  "golden_metrics": {
+   "ok": true,
+   "value": {
+    "threads_connected": 1,
+    "max_connections": 10000,
+    "conn_usage_pct": 0.01
+   }
+  }
+ },
+ "gbase": {
+  "cursor_type": "DictCursor",
+  "instance": {
+   "id": 11,
+   "name": "<gbase-instance>",
+   "host": "<local-host>",
+   "port": "<gbase-port>"
+  },
+  "steps": {
+   "status_threads_connected": {
+    "ok": true,
+    "row": "{'Variable_name': 'Threads_connected', 'Value': '1'}",
+    "row_type": "dict",
+    "keys": [
+     "Value",
+     "Variable_name"
+    ]
+   },
+   "variables_max_connections": {
+    "ok": true,
+    "row": "{'Variable_name': 'max_connections', 'Value': '100'}",
+    "row_type": "dict",
+    "keys": [
+     "Value",
+     "Variable_name"
+    ]
+   },
+   "processlist": {
+    "ok": true,
+    "row": "{'id': 212, 'user': '<account>', 'host': 'gateway:<ephemeral-port>', 'db': None, 'command': 'Query', 'state': 'checking permissions', 'time': 0}",
+    "row_type": "dict",
+    "keys": [
+     "command",
+     "db",
+     "host",
+     "id",
+     "state",
+     "time",
+     "user"
+    ]
+   }
+  },
+  "sample_sessions": {
+   "ok": true,
+   "count": 0,
+   "note": "不抛错即达 DB-017 回归点（本机仅探针连接且空闲，故 0 行属预期；真实会话采样见 db009_gbase_ash_live.json）"
+  },
+  "golden_metrics": {
+   "ok": true,
+   "value": {
+    "threads_connected": 1,
+    "max_connections": 100,
+    "conn_usage_pct": 1.0
+   }
+  }
+ }
+}

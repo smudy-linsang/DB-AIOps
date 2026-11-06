@@ -1,0 +1,126 @@
+{
+ "captured_at": "2026-11-06T17:48:46",
+ "dm_python_stub": true,
+ "dm_python_note": "进程内桩，仅绕过 import gate；connect() 显式抛错，不提供任何假连接。真连接走平台连接器。",
+ "dm": {
+  "target": {
+   "id": 9,
+   "name": "DM_测试库",
+   "host": "<local-host>",
+   "port": "<dm-port>",
+   "db_type": "dm"
+  },
+  "password": "len=9,head=***",
+  "snapshot": {
+   "total_keys": 67,
+   "core": {
+    "active_connections": 2,
+    "max_connections": 10000,
+    "conn_usage_pct": 0.02,
+    "version": "DM Database Server 64 V8...",
+    "db_mode": "NORMAL",
+    "uptime_seconds": 270895,
+    "cache_hit_ratio": 98.19,
+    "sql_count": 8100,
+    "tran_count": 76,
+    "threads_connected": null,
+    "threads_running": null,
+    "session_wait_count": 0,
+    "lock_wait_count": 0,
+    "qps": 0.03,
+    "tps": 0.0,
+    "buffer_size_mb": 7.81,
+    "arch_mode": "N",
+    "login_count": null,
+    "dsc_node_count": 1
+   },
+   "none_scalar_keys": [
+    "login_count"
+   ],
+   "none_scalar_count": 1,
+   "empty_list_keys": [
+    "archive_dest",
+    "dest_pending",
+    "dsc_cluster_issues",
+    "dsc_global_latches",
+    "dsc_instances",
+    "dw_replication_issues",
+    "failed_logins",
+    "locks",
+    "long_transactions",
+    "realtime_archive_dest",
+    "rlog_sync_status",
+    "wait_events"
+   ],
+   "empty_list_count": 12,
+   "result": "OK"
+  },
+  "corrected_fields": {
+   "session_wait_count": 0,
+   "login_count": null,
+   "dsc_node_count": 1,
+   "buffer_pools_len": 28,
+   "buffer_pools_first": {
+    "group_id": 0,
+    "group_name": "KEEP",
+    "node_num": 0,
+    "buffer_size": 8388608,
+    "buffer_count": 512,
+    "free_count": 512,
+    "active_count": 0,
+    "dirty_count": 0,
+    "phy_read_count": 0
+   },
+   "rlog_sync_status": [],
+   "long_transactions_len": 0,
+   "cache_hit_ratio": 98.19
+  }
+ },
+ "gbase": {
+  "target": {
+   "id": 11,
+   "name": "<gbase-instance>",
+   "host": "<local-host>",
+   "port": "<gbase-port>",
+   "db_type": "gbase"
+  },
+  "password": "len=4,head=***",
+  "snapshot": {
+   "total_keys": 51,
+   "core": {
+    "active_connections": 1,
+    "max_connections": 100,
+    "conn_usage_pct": 1.0,
+    "version": "8.6.2.43-R7-free.110605...",
+    "db_mode": null,
+    "uptime_seconds": 3094,
+    "cache_hit_ratio": null,
+    "sql_count": null,
+    "tran_count": null,
+    "threads_connected": 1,
+    "threads_running": 1,
+    "session_wait_count": null,
+    "lock_wait_count": null,
+    "qps": 3.23,
+    "tps": 0.0,
+    "buffer_size_mb": null,
+    "arch_mode": null,
+    "login_count": null,
+    "dsc_node_count": null
+   },
+   "none_scalar_keys": [],
+   "none_scalar_count": 0,
+   "empty_list_keys": [
+    "cluster_nodes",
+    "gbase_cm_nodes",
+    "gbase_dn_nodes",
+    "gbase_replica_info",
+    "locks",
+    "top_sql_by_latency"
+   ],
+   "empty_list_count": 6,
+   "result": "OK"
+  },
+  "active_connections": 1
+ }
+}

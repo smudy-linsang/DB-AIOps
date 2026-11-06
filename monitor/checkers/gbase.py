@@ -682,6 +682,11 @@ class GbaseChecker(BaseDBChecker):
             # 连接会话
             "threads_connected": threads_connected,
             "threads_running": threads_running,
+            # DB-009：GBase 原先只产出 threads_running，缺核心契约字段
+            # `active_connections`（MySQL 采集器的口径是 active=threads_running），
+            # 导致下游 detectors 拿不到该指标时只能判 None（DB-017 §四.6.3 问题 2）。
+            # 这里补齐，口径与 mysql.py:1346 保持一致。
+            "active_connections": threads_running,
             "max_connections": max_connections,
             "conn_usage_pct": conn_usage_pct,
 

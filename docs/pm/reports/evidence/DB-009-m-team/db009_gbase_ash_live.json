@@ -1,0 +1,46 @@
+{
+ "captured_at": "2026-11-06T17:42:50",
+ "instance": {
+  "id": 11,
+  "name": "<gbase-instance>",
+  "host": "<local-host>",
+  "port": "<gbase-port>"
+ },
+ "sample_sessions": {
+  "ok": true,
+  "count": 1,
+  "rows": [
+   {
+    "session_id": "213",
+    "user_name": "<account>",
+    "client_host": "gateway:<ephemeral-port>",
+    "db_name": null,
+    "command": "Query",
+    "state": "checking permissions",
+    "wait_event": "checking permissions",
+    "active_secs": "0",
+    "is_blocked": "False",
+    "blocker_id": null,
+    "sql_text": "SELECT COUNT(*) FROM information_schema.tables",
+    "sql_id": null,
+    "program": null,
+    "module": null,
+    "lock_type": null,
+    "lock_mode": null,
+    "lock_object": null,
+    "wait_secs": null,
+    "trx_age_secs": null,
+    "sql_digest": "6070a46b31509f6a5ff4f738d478db4c",
+    "wait_class": "on_cpu"
+   }
+  ]
+ },
+ "golden_metrics_after": {
+  "ok": true,
+  "value": {
+   "threads_connected": 1,
+   "max_connections": 100,
+   "conn_usage_pct": 1.0
+  }
+ }
+}

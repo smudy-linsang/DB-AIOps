@@ -1,0 +1,58 @@
+{
+  "captured_at": "2026-11-06T17:12:24",
+  "target": {
+    "id": 9,
+    "host": "<local-host>",
+    "port": "<dm-port>",
+    "driver": "DM8 ODBC DRIVER"
+  },
+  "views": {
+    "all_v_dollar": [
+      "V$OPEN_CURSOR",
+      "V$PKGPROCINFOS",
+      "V$PKGPROCPARAMS",
+      "V$PKGPROCS",
+      "V$RESOURCE_LIMIT"
+    ],
+    "candidates": [
+      "SYS.ALL_MVIEW_LOGS",
+      "SYS.DBA_ADVISOR_LOG",
+      "SYS.DBA_HIST_SQL_PLAN",
+      "SYS.DBA_MVIEW_LOGS",
+      "SYS.DBA_SQL_PROFILES",
+      "SYS.SESSION_PRIVS",
+      "SYS.SESSION_ROLES",
+      "SYS.USER_ADVISOR_LOG",
+      "SYS.USER_MVIEW_LOGS",
+      "SYS.VSYSSQLPROFILE"
+    ]
+  },
+  "columns": {
+    "V$SESSIONS": [],
+    "V$TRX": [],
+    "V$LOCK": [],
+    "V$RLOG": [],
+    "V$DEADLOCK_HISTORY": [],
+    "V$ARCH_FILE": [],
+    "V$TABLESPACE": [],
+    "V$PARAMETER": [],
+    "V$DATABASE": [],
+    "V$INSTANCE": [],
+    "V$VERSION": [],
+    "V$SQL_HISTORY": [],
+    "V$SQLSTATS": [],
+    "V$BUFFER": [],
+    "V$SESSION_WAIT": [],
+    "V$TEMP_SPACE_USAGE": [],
+    "V$SYSTEM_INFO": [],
+    "V$LOG": [],
+    "V$ARCH_DEST": [],
+    "V$DEST_PENDING": [],
+    "V$CLUSTER": [],
+    "V$DSC_INSTANCES": [],
+    "V$GLOBAL_LATCH": [],
+    "V$LOGIN": [],
+    "V$DM_INI": []
+  },
+  "errors": {}
+}

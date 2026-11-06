@@ -645,13 +645,27 @@ class Command(BaseCommand):
                 except Exception:
                     pass
                 return []
-        elif config.db_type in ('oracle', 'dm'):
+        elif config.db_type == 'oracle':
             cur.execute(
                 "SELECT sql_id, executions, elapsed_time, rows_processed, buffer_gets, "
                 "sql_text FROM v$sqlstats "
                 f"ORDER BY elapsed_time DESC FETCH FIRST {self._SQLSTAT_TOPN} ROWS ONLY")
             for sql_id, execs, us, rows_, reads, txt in cur.fetchall():
                 snap[str(sql_id)] = (int(execs or 0), int(us or 0) // 1000,
+                                     int(rows_ or 0), int(reads or 0),
+                                     (txt or '')[:500], None)
+        elif config.db_type == 'dm':
+            # DM8 无 v$sqlstats（DB-009 实测 -2106）→ 改用 V$SQL_HISTORY 按 SQL_ID 聚合
+            cur.execute(
+                "SELECT * FROM ("
+                "SELECT SQL_ID, COUNT(*) as EXECUTIONS, SUM(TIME_USED) as ELAPSED_TIME, "
+                "SUM(AFFECTED_ROWS) as ROWS_PROCESSED, "
+                "SUM(N_LOGIC_READ + N_PHY_READ) as BUFFER_GETS, "
+                "SUBSTR(TOP_SQL_TEXT, 1, 500) as SQL_TEXT "
+                "FROM V$SQL_HISTORY GROUP BY SQL_ID, TOP_SQL_TEXT "
+                f"ORDER BY EXECUTIONS DESC) WHERE ROWNUM <= {self._SQLSTAT_TOPN}")
+            for sql_id, execs, us, rows_, reads, txt in cur.fetchall():
+                snap[str(sql_id)] = (int(execs or 0), int(us or 0),
                                      int(rows_ or 0), int(reads or 0),
                                      (txt or '')[:500], None)
         if not snap:
