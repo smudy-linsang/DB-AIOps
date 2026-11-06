@@ -2,7 +2,7 @@
   "order": "DB-TEST-001",
   "member": "A",
   "status": "dispatched",
-  "dispatched_at": "2026-11-06T00:53:44+00:00",
+  "dispatched_at": "2026-11-06T01:12:28+00:00",
   "attempts": 0,
-  "dispatches": 1
+  "dispatches": 2
 }
