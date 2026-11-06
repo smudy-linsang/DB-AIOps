@@ -1,9 +1,9 @@
-# DB-016 010B 首批——8 项同名未注册别名接入交付报告
+# DB-016 010B 首批——8 项同名未注册别名接入交付报告 (v1.2)
 
-- **任务单**：`docs/pm/orders/DB-016-010B首批别名接入.md`
+- **任务单**：`docs/pm/orders/DB-016-010B首批别名接入.md` / `docs/pm/orders/DB-016-补充-backend验证证据.md`
 - **执行人**：GG
-- **交付时间**：2026-11-06
-- **结论**：**通过**（8 项同名未注册别名全部接入注册表、全链路打通、双闸严格闭合、方言不匹配优雅 skip、82 项矩阵同步更新）
+- **交付时间**：2026-11-06 (v1.2 补齐 backend 验证证据)
+- **结论**：**通过**（8 项同名未注册别名全部接入注册表、全链路打通、双闸严格闭合、方言不匹配优雅 skip、82 项矩阵同步更新、unit 与 backend 双门禁 exit 0 证据完备）
 
 ---
 
@@ -133,3 +133,29 @@ Ran 20 tests in 0.331s
 OK
 Destroying test database for alias 'default'...
 ```
+
+### 4. `scripts/validate.sh backend --json` 验证输出（DB-016 补充）
+依据任务单 `docs/pm/orders/DB-016-补充-backend验证证据.md`，在包含 DB-016 修复提交（`09551336`）的工作树上执行完整 backend 验证门禁，全量通过（exit code 0）：
+```json
+{
+  "mode": "backend",
+  "exit_code": 0,
+  "stages": [
+    {"name": "语法编译", "status": "pass", "duration_ms": 1134},
+    {"name": "Django 系统检查", "status": "pass", "duration_ms": 660},
+    {"name": "迁移漂移检查", "status": "pass", "duration_ms": 880},
+    {"name": "依赖完整性", "status": "pass", "duration_ms": 654},
+    {"name": "文档版本一致", "status": "pass", "duration_ms": 39},
+    {"name": "全量测试", "status": "pass", "duration_ms": 83700}
+  ],
+  "git_rev": "6d70789"
+}
+```
+
+- **验证基准与提交对应**：DB-016 核心代码与单测落库提交号为 `09551336`。本次 backend 验证在包含该提交的最新 main 分支工作树（`6d70789`）上全阶段执行，包含编译、Django 检查、迁移漂移检查、依赖完整性、文档版本及全量 598 项集成测试套件，用时 83.7s，零失败零报错。
+- **前端验证说明**：DB-016 纯属后端检测器注册、适配器与巡检单测补全，未改动任何前端代码，按任务单规范注明**不适用**。
+- **版本记录**：
+  - v1.0 (2026-11-06): DB-016 交付报告，附 unit 验证证据；
+  - v1.1 (2026-11-06): 订正任务单文件名路径引用；
+  - v1.2 (2026-11-06): 依据 DB-016 补充任务单，补齐 `scripts/validate.sh backend --json` 全阶段 exit 0 证据与说明，条件①闭环。
+
