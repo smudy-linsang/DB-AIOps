@@ -67,3 +67,4 @@ DB-AIOps 侧的 A 自动领单链已建好并推上 main，Xinchuang 侧零改�
   - 清理了 DB-012 的残留占用 `claims/DB-012-A.json`（DB-012 已有报告，判定为 done）。
 - **复验**：本补记推送时，DB-TEST-001 的 dispatched 占用已超 15 分钟，Actions 会自动第 2 次拉起。不人工代领。
   - 若仍无人领单：说明被拉起的会话没有权限自行挂载仓库，需要用户在 claude.ai 界面重建该定时任务并挂上 DB-AIOps 仓库（重建后令牌要重新生成、Secrets 要重配），或改用其他挂载方式。
+  - 复验触发：2026-11-06 01:12Z 推送本条（reports/ 变更），此时 DB-TEST-001 的 dispatched 占用已 18 分钟，超过 15 分钟门槛，由 a-autorun 自动第 2 次拉起。
