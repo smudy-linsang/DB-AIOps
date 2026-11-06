@@ -270,3 +270,139 @@ class InspectionCoveragePresentationTests(TestCase):
         score = InspectionExecutor._calc_health_score(8, 2, 0, 0, skip=2)
         # (8 * 1.0 + 2 * 0.6) / 10 * 100 = 92.0
         self.assertEqual(score, 92.0)
+
+
+@tag('unit')
+class InspectionAliasRegistrationTests(TestCase):
+    """DB-016: 010B 首批 8 项同名可调用未注册别名接入与调度验证。"""
+
+    def setUp(self):
+        self.mine = make_db('insp-alias-mine', port=3306, db_type='mysql')
+        self.others = make_db('insp-alias-others', port=3307, db_type='oracle')
+        all_perms = [v for k, v in vars(Perm).items() if not k.startswith('_') and isinstance(v, str)]
+        self.user = make_user('alias_dba', RoleCode.DBA, all_perms, allowed_dbs=[self.mine.id])
+        self.zero_user = make_user('alias_zero', RoleCode.READONLY, [], allowed_dbs=[self.mine.id])
+        self.client = Client()
+
+    def test_registry_contains_all_8_aliases(self):
+        """验证 8 项别名均已进入 DETECTOR_REGISTRY 且总注册键数达到 34。"""
+        from monitor.inspection_executor import DETECTOR_REGISTRY
+        expected_aliases = [
+            'INS-COM-INVALID-OBJ',
+            'INS-COM-RECYCLEBIN',
+            'INS-COM-LONG-TXN',
+            'INS-COM-FK-NO-INDEX',
+            'INS-COM-STAT-STALE',
+            'INS-COM-BACKUP',
+            'INS-COM-FAILED-LOGIN',
+            'INS-ORA-SCN-HEADROOM',
+        ]
+        for item_id in expected_aliases:
+            self.assertIn(item_id, DETECTOR_REGISTRY, f'别名 {item_id} 未在 DETECTOR_REGISTRY 中登记')
+            self.assertTrue(callable(DETECTOR_REGISTRY[item_id]), f'别名 {item_id} 对应的注册项不可调用')
+        self.assertGreaterEqual(len(DETECTOR_REGISTRY), 34)
+
+    def test_non_db_detectors_execute_cleanly(self):
+        """验证 INS-COM-BACKUP 与 INS-COM-FAILED-LOGIN 在平台内部数据模型上正常执行。"""
+        from monitor.inspection_executor import InspectionExecutor
+        from monitor.models import AuditLog, MonitorLog
+
+        executor = InspectionExecutor()
+
+        # 1) INS-COM-FAILED-LOGIN
+        login_item = {'item_id': 'INS-COM-FAILED-LOGIN', 'title': '失败登录异常'}
+        res_login = executor._run_single(self.mine, login_item, 'daily')
+        self.assertEqual(res_login.status, 'ok')
+        self.assertIn('24h 登录失败 0 次', res_login.summary)
+
+        # 模拟产生失败登录审计日志
+        AuditLog.objects.create(
+            config=self.mine,
+            action_type='API_CREATE',
+            description='login failed for test user',
+            status='failed',
+        )
+        res_login2 = executor._run_single(self.mine, login_item, 'daily')
+        self.assertEqual(res_login2.metrics.get('failed_logins_24h'), 1)
+
+        # 2) INS-COM-BACKUP
+        backup_item = {'item_id': 'INS-COM-BACKUP', 'title': '备份状态'}
+        res_bk = executor._run_single(self.mine, backup_item, 'daily')
+        self.assertEqual(res_bk.status, 'warning')
+        self.assertEqual(res_bk.summary, '无备份记录')
+
+        # 模拟添加备份记录
+        MonitorLog.objects.create(
+            config=self.mine,
+            status='UP',
+            message='backup snapshot completed successfully',
+        )
+        res_bk2 = executor._run_single(self.mine, backup_item, 'daily')
+        self.assertEqual(res_bk2.status, 'ok')
+
+    def test_dialect_aware_detectors_graceful_skip(self):
+        """验证方言不匹配时的优雅 skip 行为与清晰原因呈现。"""
+        from monitor.inspection_executor import InspectionExecutor
+        executor = InspectionExecutor()
+
+        # INS-ORA-SCN-HEADROOM 在 mysql 实例上应优雅 skip
+        scn_item = {'item_id': 'INS-ORA-SCN-HEADROOM', 'title': 'SCN Headroom'}
+        res_scn = executor._run_single(self.mine, scn_item, 'daily')
+        self.assertEqual(res_scn.status, 'skip')
+
+        # INS-COM-RECYCLEBIN 在 mysql 实例上应优雅 skip
+        rb_item = {'item_id': 'INS-COM-RECYCLEBIN', 'title': '回收站清理检查'}
+        res_rb = executor._run_single(self.mine, rb_item, 'weekly')
+        self.assertEqual(res_rb.status, 'skip')
+
+        # INS-COM-INVALID-OBJ 在 mysql 实例上应优雅 skip
+        inv_item = {'item_id': 'INS-COM-INVALID-OBJ', 'title': '无效对象检查'}
+        res_inv = executor._run_single(self.mine, inv_item, 'daily')
+        self.assertEqual(res_inv.status, 'skip')
+
+        # INS-COM-FK-NO-INDEX 在 mysql 实例上应优雅 skip
+        fk_item = {'item_id': 'INS-COM-FK-NO-INDEX', 'title': '外键无索引'}
+        res_fk = executor._run_single(self.mine, fk_item, 'weekly')
+        self.assertEqual(res_fk.status, 'skip')
+
+    def test_run_for_db_with_8_items_full_chain(self):
+        """验证指定 8 项别名时 run_for_db 及 API 触发全链路贯通，并遵循双闸校验。"""
+        from monitor.inspection_executor import InspectionExecutor
+        from monitor.models import InspectionFinding, InspectionRun
+
+        login(self.client, self.user)
+        # 1. 触发范围内实例并执行
+        alias_ids = ['INS-COM-BACKUP', 'INS-COM-FAILED-LOGIN']
+        executor = InspectionExecutor()
+        run_id = executor.run_for_db(self.mine, level='daily', item_ids=alias_ids)
+        run = InspectionRun.objects.get(run_id=run_id)
+        self.assertEqual(run.status, 'completed')
+        self.assertEqual(run.total_items, 2)
+        self.assertEqual(run.executed_items, 2)
+        self.assertGreaterEqual(InspectionFinding.objects.filter(run=run).count(), 1)
+
+        # 2. 详情接口全链路校验
+        r_detail = self.client.get(f'/api/v1/inspection/runs/{run.run_id}/')
+        self.assertEqual(r_detail.status_code, 200)
+        detail_data = r_detail.json()
+        self.assertEqual(detail_data['run']['run_id'], run.run_id)
+        self.assertEqual(detail_data['run']['executed_items'], 2)
+
+        # 3. 双闸校验：范围外实例被拒绝（404）且无记录生成
+        r_other = self.client.post(
+            '/api/v1/inspection/runs/trigger/',
+            data=json.dumps({'config_id': self.others.id, 'level': 'daily'}),
+            content_type='application/json'
+        )
+        self.assertEqual(r_other.status_code, 404)
+
+        # 4. 双闸校验：零权限账号被拒绝（403）
+        client_zero = Client()
+        login(client_zero, self.zero_user)
+        r_zero = client_zero.post(
+            '/api/v1/inspection/runs/trigger/',
+            data=json.dumps({'config_id': self.mine.id, 'level': 'daily'}),
+            content_type='application/json'
+        )
+        self.assertEqual(r_zero.status_code, 403)
+

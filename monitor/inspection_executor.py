@@ -187,7 +187,7 @@ class GenericDetector:
                     WHERE SYSTIMESTAMP - t.start_date > INTERVAL '5' MINUTE
                     ORDER BY t.start_date
                 """
-            elif ctx.db_type == "mysql":
+            elif ctx.db_type in ("mysql", "tdsql"):
                 sql = """
                     SELECT trx_id, trx_state, trx_started,
                            TIMESTAMPDIFF(SECOND, trx_started, NOW()) AS duration_sec,
@@ -355,12 +355,15 @@ class GenericDetector:
         )
         try:
             from monitor.models import AuditLog
+            from django.db.models import Q
             since = timezone.now() - timedelta(hours=24)
+            # 兼容 AuditLog 字段：关联配置字段为 config，时间为 create_time
             failed = AuditLog.objects.filter(
-                db_config=ctx.db_config,
-                action__icontains="login",
-                result="failure",
-                created_at__gte=since
+                config=ctx.db_config,
+                status="failed",
+                create_time__gte=since
+            ).filter(
+                Q(action_type__icontains="login") | Q(description__icontains="login")
             ).count()
             result.metrics["failed_logins_24h"] = failed
             if failed >= 50:
@@ -395,10 +398,11 @@ class GenericDetector:
         )
         try:
             from monitor.models import MonitorLog
+            # MonitorLog 字段为 config, message, create_time
             last = MonitorLog.objects.filter(
-                db_config=ctx.db_config,
-                metric_key__icontains="backup"
-            ).order_by("-collected_at").first()
+                config=ctx.db_config,
+                message__icontains="backup"
+            ).order_by("-create_time").first()
             if not last:
                 result.status = "warning"
                 result.severity = "warning"
@@ -408,7 +412,7 @@ class GenericDetector:
                 })
                 result.summary = "无备份记录"
                 return result
-            age_hours = (timezone.now() - last.collected_at).total_seconds() / 3600
+            age_hours = (timezone.now() - last.create_time).total_seconds() / 3600
             result.metrics["last_backup_age_hours"] = round(age_hours, 1)
             if age_hours > 48:
                 result.status = "critical"
@@ -419,7 +423,7 @@ class GenericDetector:
             result.findings.append({
                 "type": "backup_age",
                 "age_hours": round(age_hours, 1),
-                "last_at": last.collected_at.isoformat(),
+                "last_at": last.create_time.isoformat(),
                 "message": f"距离最近备份 {age_hours:.1f} 小时"
             })
             result.summary = f"距最近备份 {age_hours:.1f}h"
@@ -690,6 +694,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", ""),
             detection_method="stale_statistics"
         )
+        if ctx.db_type not in ("oracle", "mysql", "tdsql", "pgsql"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, mysql, tdsql, pgsql)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -707,7 +715,7 @@ class GenericDetector:
                         ORDER BY last_analyzed NULLS FIRST
                         FETCH FIRST 20 ROWS ONLY
                     """)
-                elif ctx.db_type == "mysql":
+                elif ctx.db_type in ("mysql", "tdsql"):
                     cur.execute("""
                         SELECT table_schema, table_name,
                                update_time, table_rows
@@ -755,6 +763,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", ""),
             detection_method="invalid_object_count"
         )
+        if ctx.db_type not in ("oracle", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, dm)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -779,6 +791,7 @@ class GenericDetector:
                     """)
                 else:
                     result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
                     return result
                 cols = [c[0].lower() for c in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -813,6 +826,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", ""),
             detection_method="recyclebin_scan"
         )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -829,6 +846,7 @@ class GenericDetector:
                     """)
                 else:
                     result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
                     return result
                 cols = [c[0].lower() for c in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -857,6 +875,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", ""),
             detection_method="scn_headroom"
         )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -873,6 +895,7 @@ class GenericDetector:
                     """)
                 else:
                     result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
                     return result
                 row = cur.fetchone()
                 if row:
@@ -1091,6 +1114,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", ""),
             detection_method="fk_no_index_scan"
         )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -1116,6 +1143,7 @@ class GenericDetector:
                     """)
                 else:
                     result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
                     return result
                 cols = [c[0].lower() for c in cur.description]
                 rows = [dict(zip(cols, r)) for r in cur.fetchall()]
@@ -1489,6 +1517,16 @@ DETECTOR_REGISTRY: Dict[str, Callable] = {
     "INS-TDSQL-SHARD": TDSQLDetector.detect_tdsql_set_health,
     "INS-TDSQL-PROXY": TDSQLDetector.detect_tdsql_proxy,
     "INS-TDSQL-SHARDKEY": TDSQLDetector.detect_tdsql_shardkey,
+
+    # DB-016 010B 首批别名接入 (8 项同名未注册方法接入)
+    "INS-COM-INVALID-OBJ": GenericDetector.detect_invalid_objects,
+    "INS-COM-RECYCLEBIN": GenericDetector.detect_recyclebin,
+    "INS-COM-LONG-TXN": GenericDetector.detect_long_transactions,
+    "INS-COM-FK-NO-INDEX": GenericDetector.detect_fk_no_index,
+    "INS-COM-STAT-STALE": GenericDetector.detect_stale_stats,
+    "INS-COM-BACKUP": GenericDetector.detect_backup_status,
+    "INS-COM-FAILED-LOGIN": GenericDetector.detect_failed_logins,
+    "INS-ORA-SCN-HEADROOM": GenericDetector.detect_scn_headroom,
 }
 
 

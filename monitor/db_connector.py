@@ -361,3 +361,29 @@ def test_db_connection(config) -> dict:
 def close_db_connection(conn) -> None:
     """关闭数据库连接的便捷函数"""
     return DbConnector.close_connection(conn)
+
+
+class DbConnectorAdapter:
+    """供巡检检测器使用的连接器适配器包装"""
+
+    def __init__(self, db_config):
+        self.db_config = db_config
+        self.conn = None
+
+    def connect(self):
+        if not self.conn:
+            self.conn = DbConnector.get_connection(self.db_config, readonly=True)
+        return self.conn
+
+    def close(self):
+        if self.conn:
+            try:
+                DbConnector.close_connection(self.conn)
+            finally:
+                self.conn = None
+
+
+def get_connector(config) -> DbConnectorAdapter:
+    """获取巡检检测器使用的连接器适配器"""
+    return DbConnectorAdapter(config)
+

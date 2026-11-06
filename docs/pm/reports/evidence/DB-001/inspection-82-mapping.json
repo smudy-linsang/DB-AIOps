@@ -1,12 +1,12 @@
 {
  "summary": {
   "total": 82,
-  "registry_keys": 26,
+  "registry_keys": 34,
   "declared_methods": 33,
-  "direct": 3,
-  "alias": 8,
+  "direct": 11,
+  "alias": 0,
   "missing": 71,
-  "tested": 0
+  "tested": 8
  },
  "rows": [
   {
@@ -16,8 +16,8 @@
    "dbs": "oracle,dm,gbase",
    "detect": "detect_invalid_objects",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-RECYCLEBIN",
@@ -26,8 +26,8 @@
    "dbs": "oracle,dm",
    "detect": "detect_recyclebin",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-USER-LOCKED",
@@ -86,8 +86,8 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_long_transactions",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-DEADLOCK-24H",
@@ -136,8 +136,8 @@
    "dbs": "oracle,mysql,pgsql,dm",
    "detect": "detect_fk_no_index",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-PART-NEEDED",
@@ -156,8 +156,8 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_stale_stats",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-SPARSE-INDEX",
@@ -216,8 +216,8 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_backup_status",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-COM-ARCH-GAP",
@@ -306,8 +306,8 @@
    "dbs": "oracle,mysql,pgsql,dm",
    "detect": "detect_failed_logins",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-ORA-AWR-SNAP",
@@ -356,8 +356,8 @@
    "dbs": "oracle",
    "detect": "detect_scn_headroom",
    "class": "GenericDetector",
-   "kind": "同名可调用未注册",
-   "tested": "无测试引用"
+   "kind": "直接命中",
+   "tested": "tests_inspection_scope.py"
   },
   {
    "item_id": "INS-ORA-STA-OUTPUT",
