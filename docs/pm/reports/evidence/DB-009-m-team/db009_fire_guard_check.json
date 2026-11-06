@@ -1,0 +1,69 @@
+{
+ "captured_at": "2026-11-06T18:31:05",
+ "fire_health": {
+  "ok": true,
+  "service": "mman-fire",
+  "running_runs": 0
+ },
+ "fire_health_url": "http://<local-host>:<ephemeral-port>/health",
+ "worktree": {
+  "status_porcelain_all": [
+   "?? docs/pm/reports/evidence/DB-009-m-team/db009_fire_guard_check.json",
+   "?? docs/pm/reports/evidence/DB-009-m-team/db009_fire_guard_check.py",
+   "?? scripts/_validate_tmp.sh"
+  ],
+  "status_porcelain_tracked_only": [],
+  "old_guard_would_say_dirty": true,
+  "new_guard_says_dirty": false
+ },
+ "guards": {
+  "worktree_dirty": false,
+  "order_already_delivered_DB009": true,
+  "order_already_delivered_unknown": false
+ },
+ "fire_runs": [
+  {
+   "runId": "fire_cb605dc0604c",
+   "order": "docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md",
+   "started_at": "2026-11-06T02:39:31.640232+00:00",
+   "exit_code": 0,
+   "status": "succeeded",
+   "attempts": 1
+  },
+  {
+   "runId": "fire_3827e2119ae5",
+   "order": "docs/pm/orders/DB-009-DM-GBase实库矩阵.md",
+   "started_at": "2026-11-06T08:54:07.685454+00:00",
+   "exit_code": null,
+   "status": "retrying",
+   "attempts": 2
+  },
+  {
+   "runId": "fire_697743931e6a",
+   "order": "docs/pm/orders/DB-009-DM-GBase实库矩阵.md",
+   "started_at": "2026-11-06T09:10:48.172049+00:00",
+   "exit_code": null,
+   "status": "retrying",
+   "attempts": 2
+  },
+  {
+   "runId": "fire_5a44aadfe2b9",
+   "order": "docs/pm/orders/DB-009-DM-GBase实库矩阵.md",
+   "started_at": "2026-11-06T09:22:29.790486+00:00",
+   "exit_code": null,
+   "status": "running",
+   "attempts": 1
+  }
+ ],
+ "fire_state_keys": [
+  "by_order",
+  "runs",
+  "saved_at"
+ ],
+ "keepalive_task": {
+  "LastRunTime": "/Date(1793960796000)/",
+  "LastTaskResult": 0,
+  "NextRunTime": "/Date(1793961095000)/"
+ },
+ "conclusion": "Fire 出口本身健康（health ok、保活任务 LastTaskResult=0）；DB-009 早期确被 Fire 叫醒并连续 4 次 exit=7 跑飞。交付完成后「未覆盖」的根因是守卫判据过严：worktree_dirty() 把未跟踪文件也算脏 ⇒ 恒为真 ⇒ 拒绝叫醒任何新单。已改为 --untracked-files=no。"
+}

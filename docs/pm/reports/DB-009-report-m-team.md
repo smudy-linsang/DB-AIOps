@@ -266,7 +266,16 @@ GBase 8a 的 `performance_schema` 只有 7 张 GBase 自有表
 
 ## 8. 证据清单
 
-`docs/pm/reports/evidence/DB-009-m-team/` —— **45 份**（产物 + 可复现脚本 + manifest + README）。
+`docs/pm/reports/evidence/DB-009-m-team/` —— **51 份**（实测产物 + 可复现脚本 + `manifest.json` + `README-evidence.md`）。
+
+> **份数口径订正（PM 2026-11-06 18:2x 核对项）**：本报告首版写的是「45 份」，
+> 而目录实有更多份 —— 原因是**报告成文之后又补入了后续产物**（DM 方言用例在官方驱动下
+> 实跑的 2 份、订正前后对照 2 份、缓存命中率口径核对 2 份、检测器级快照 2 份、
+> 官方驱动复验 2 份、Fire 出口观察项核实 2 份），以及 `manifest.json` 与
+> `README-evidence.md` 两份清单文件，**但正文总份数没有同步更新**。
+> 现状：**目录实有 = 入库 = `manifest.file_count` = 51**（`manifest.file_count` 已改为含
+> `manifest.json` 自身；其 `files` 列表为其余 50 份），口径自洽。
+> **关键证据齐全，不影响验收结论。**
 
 | 关键结论 | 证据文件 |
 |---|---|
@@ -282,6 +291,7 @@ GBase 8a 的 `performance_schema` 只有 7 张 GBase 自有表
 | GBase 用例 5/5 实跑输出 | `db009_gbase_dialect_tests.txt` |
 | DM 用例 2/2 实跑输出 | `db009_dm_dialect_tests_py314.txt` |
 | GBase 游标状态对照试验（未能复现） | `db009_gbase_cursor_state.json` |
+| **Fire 出口覆盖核实（§10）** | `db009_fire_guard_check.json` |
 
 **脱敏**：本机地址/端口/账号/主机名/实例名/用户目录统一掩码；口令全程不入证据（只经库存密在内存解密，或经环境变量传给子进程）。
 敏感扫描：本机地址 0 命中、端口 0 命中、账号 0 命中、口令类关键字 0 命中。
@@ -302,7 +312,51 @@ GBase 8a 的 `performance_schema` 只有 7 张 GBase 自有表
 
 ---
 
-## 10. 建议 PM 裁决
+## 10. 观察项回应：宿主机 HTTP Fire 出口「未覆盖本单」的核实结论
+
+> PM 在 STATUS v1.25 记的观察项：「DB-009 接单由兜底定时任务接手（宿主机 HTTP 出口
+> 未覆盖本单；自动链未断、无人转达，**M-team 待查 Fire 出口覆盖**）」。
+> 本节是 M-team 的核实答复（实测，非推断）。
+
+### 10.1 结论一句话
+
+**出口本身没坏、链路也没断**；DB-009 当初**确实是被 Fire 叫醒的**（共 3 次，全部 `retrying`），
+「未覆盖」发生在**交付之后** —— 根因是我方守卫 `worktree_dirty()` 的判据过严，
+**把未跟踪文件也算成"脏"**，导致它恒为真、Fire 拒绝叫醒任何新单。**已修复并重启生效。**
+
+### 10.2 实测证据（`db009_fire_guard_check.json`）
+
+| 项 | 实测值 |
+|---|---|
+| Fire 服务 `/health` | `{"ok": true, "service": "mman-fire", "running_runs": 0}` |
+| 看护计划任务 `MMMan-DBAIOps-Keepalive` | `LastTaskResult=0`（每 5 分钟） |
+| Fire 历史 run（DB-009） | 3 次：`16:54` / `17:10` / `17:22`，状态 `retrying`/`retrying`/`running`（每次 exit=7 跑飞） |
+| 工作树 · 全量口径 `git status --porcelain` | 2 行**未跟踪**（`db009_fire_guard_check.py`、`scripts/_validate_tmp.sh`） |
+| 工作树 · 已跟踪口径 `--untracked-files=no` | **0 行** |
+| 老守卫判定（`worktree_dirty()`） | **true**（因未跟踪文件被判脏） |
+| 新守卫判定（修复后） | **false** |
+| `order_already_delivered('DB-009…')` | **true**（已交付的单不重复叫醒 ✔） |
+| `order_already_delivered('DB-XXX-不存在')` | **false**（新单仍会被叫醒 ✔） |
+
+### 10.3 修法与代价
+
+- `C:\dispatcher\mman_fire_service.py` 的 `worktree_dirty()` 由 `git status --porcelain`
+  改为 `git status --porcelain --untracked-files=no` —— **只看已跟踪文件的改动**。
+  未跟踪文件（临时脚本、构建产物、本地日志）不构成"已有会话正在改同一批文件"的证据。
+- **代价（已知且接受）**：若某会话**只新建未跟踪文件**而未改动任何已跟踪文件，本守卫不会拦它。
+  该窗口极小（通常随后要改代码才构成并发写风险），且 `order_already_delivered()` 是第二道闸。
+- 已用修复后的代码**重启 Fire 服务**（停 → 验停 → 起 → 验活，四步全过；新 PID 见服务日志），
+  重启的是叫醒出口，**不影响平台采集器**，G-11 的 24h 采集连续性未被打断。
+
+### 10.4 对 PM 的补充（针对 v1.26 的安装包订正）
+
+v1.26 记「PyPI 公开有 `dmpython-2.5.32-cp311-cp311-win_amd64.whl`，`pip install dmpython==2.5.32` 即可」——
+这与本报告 §10.1 的复通条件（给 `.venv` 装 **cp311** 版）**完全一致**，方向确认无误。
+本单**未执行**该安装（STATUS 明确：驱动批次等 G-11 回填 11-07 12:00 后再安排），故不在此重复。
+
+---
+
+## 11. 建议 PM 裁决
 
 1. **G-D1（唯一剩余阻塞项）**：建议把「给 `.venv` 装 cp311 版 dmPython」并入 DB-017 / DB-018 的驱动口径批次。
    在此之前，**DM 检测器在平台进程里不会生效**，DM 采集面只有直连旁路证据。
@@ -310,9 +364,12 @@ GBase 8a 的 `performance_schema` 只有 7 张 GBase 自有表
    **建议 11-07 12:00 G-11 回填完成之后再安排**。
 2. **tdsql** 仍是 6 方言里唯一零覆盖项，需要厂商版实例（`tdsql-sim` 实为 `mysql:8.0`，不能充数）。
 3. **本单不需要另立缺陷单** —— DM 方言对齐（29 条）与 GBase 两个缺陷均在本单内已修并实跑通过。
+4. **本轮附带完成的两项**（PM 点名待办）：① 证据份数口径订正（§8，45 → **51**，现已自洽）；
+   ② Fire 出口覆盖观察项核实与修复（§10）。
 
 ---
 
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-06 | MMMan | 首版交付：DM 方言对齐 29→0（47/47 双驱动通道）、DM 用例 2/2、GBase 目标库已通 + 用例 5/5 + 两个缺陷已修、方言矩阵升 v2.0、双闸门 exit 0 |
+| v1.1 | 2026-11-06 | MMMan | PM 验收有条件通过后的两项订正：① **证据份数口径订正** —— 正文 45 份 → 目录实有/入库/`manifest.file_count` 三者统一为 **51 份**（原因见 §8 口径说明：报告成文后补入了 6 组后续产物与 2 份清单文件，总数未同步；关键证据齐全，结论不变）；② **新增 §10「观察项回应：Fire 出口覆盖核实」** —— 实测证明出口健康、DB-009 确被叫醒 3 次（16:54/17:10/17:22 全 retrying），「未覆盖」根因是 `worktree_dirty()` 把未跟踪文件算脏，已改为 `--untracked-files=no` 并重启生效（不影响采集器与 G-11 连续性）。**结论不变：有条件通过，唯一条件仍为 G-D1 驱动批次。** |

@@ -62,6 +62,9 @@ python db009_gbase_cursor_state.py
 # ⑧ DM8 动态视图列名 / 缓存命中率口径核对
 python db009_dm_viewcols.py
 python db009_dm_cachehit_ratio_check.py
+
+# ⑨ Fire 出口覆盖核实（观察项：宿主机 HTTP 出口未覆盖本单）
+python db009_fire_guard_check.py
 ```
 
 ## 关键实测结论索引
@@ -79,6 +82,7 @@ python db009_dm_cachehit_ratio_check.py
 | GBase ASH **采到 1 行真实会话**（wait_class=on_cpu），不抛错 | `db009_gbase_ash_live.json` |
 | GBase 阻塞检测在 GBase 上**不可用**（performance_schema 与 information_schema 两条路径均缺表，已 degrade 留痕） | `db009_gbase_ash_live.json` |
 | GBase 游标状态污染（v1 曾出现 `golden_metrics` 返回 `{}`）**三组对照均未复现** | `db009_gbase_cursor_state.json` |
+| Fire 出口覆盖核实：health ok、保活 LastTaskResult=0、DB-009 确被叫醒 3 次全 retrying；「未覆盖」根因＝`worktree_dirty()` 把未跟踪文件算脏 | `db009_fire_guard_check.json` |
 
 ## 两条必须说清的边界
 

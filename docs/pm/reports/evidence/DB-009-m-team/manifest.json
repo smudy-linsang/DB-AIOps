@@ -2,37 +2,38 @@
  "order": "DB-009",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/主机名/实例名/用户目录统一掩码为 <local-host> / <dm-port> / <gbase-port> / <account> / <dm-admin> / <client-host> / <gbase-instance> / <user-home>；口令全程不入证据（只经 DatabaseConfig.get_password() 在内存解密，或经环境变量传给子进程）。DM8 的系统 schema 名作为 SQL 字面量**原样保留、未掩码** —— 它出现在 OWNER NOT IN ('SYS','SYSTEM',<系统 schema 名>,'SYSAUDITOR','SYSSSO') 这类查询固定字面量里，是方言证据的一部分，掩码会破坏 SQL 证据的可复现性；会话数据里的账号取值则已掩码为 <dm-admin>。",
- "file_count": 48,
- "total_bytes": 260710,
+ "file_count": 51,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 50 份。目录实有文件数 = file_count。",
+ "total_bytes": 273764,
  "files": [
   {
    "file": "README-evidence.md",
    "desc": "证据清单说明：脱敏口径、复现前提与命令、关键结论索引、两条必须说清的边界",
-   "bytes": 5118,
+   "bytes": 5540,
    "masked": false
   },
   {
    "file": "db009_apply_dialect_fixes.py",
    "desc": "【过程脚本】CLI 会话一次性代码改写脚本（记录 29 条 SQL 的改法）；非验收脚本，结论不依赖它",
-   "bytes": 31353,
+   "bytes": 32025,
    "masked": false
   },
   {
    "file": "db009_checker_run_final.json",
    "desc": "订正后的检测器级指标快照：DM 67 keys / GBase 51 keys（含 6 处订正字段的明文取值）",
-   "bytes": 2872,
+   "bytes": 2997,
    "masked": true
   },
   {
    "file": "db009_checker_run_final.py",
    "desc": "检测器级快照脚本（dmPython 进程内桩只绕过 import gate，不提供假连接）",
-   "bytes": 7192,
+   "bytes": 7362,
    "masked": false
   },
   {
    "file": "db009_diag.py",
    "desc": "诊断脚本",
-   "bytes": 546,
+   "bytes": 562,
    "masked": false
   },
   {
@@ -44,7 +45,7 @@
   {
    "file": "db009_dm_before_after.py",
    "desc": "订正前后对照脚本",
-   "bytes": 4729,
+   "bytes": 4852,
    "masked": false
   },
   {
@@ -56,7 +57,7 @@
   {
    "file": "db009_dm_cachehit_ratio_check.py",
    "desc": "缓存命中率口径核对脚本（可复现）",
-   "bytes": 2947,
+   "bytes": 3022,
    "masked": false
   },
   {
@@ -68,25 +69,25 @@
   {
    "file": "db009_dm_candidates.py",
    "desc": "候选集采集脚本（可复现）",
-   "bytes": 7430,
+   "bytes": 7577,
    "masked": false
   },
   {
    "file": "db009_dm_checker_run.json",
    "desc": "【订正前】DM 检测器级快照（67 keys / none_scalar=1 / empty_list=12）—— 保留作前后对照",
-   "bytes": 979,
+   "bytes": 1023,
    "masked": true
   },
   {
    "file": "db009_dm_checker_run.py",
    "desc": "【订正前】检测器级快照脚本（CLI 会话那份）",
-   "bytes": 3257,
+   "bytes": 3344,
    "masked": false
   },
   {
    "file": "db009_dm_dialect_tests.py",
    "desc": "DM 方言检测器级用例跑批脚本（需 DIALECT_DM_DSN；受 dmPython ABI 限制未跑通）",
-   "bytes": 1869,
+   "bytes": 1920,
    "masked": false
   },
   {
@@ -98,31 +99,31 @@
   {
    "file": "db009_dm_dialect_tests_py314.py",
    "desc": "DM 方言用例级实跑脚本：在用户级 Python 3.14 + 官方 dmPython 2.5.32 下跑 DamengDialectTests（口令只经 DIALECT_DM_DSN 环境变量传给子进程）",
-   "bytes": 2730,
+   "bytes": 2800,
    "masked": false
   },
   {
    "file": "db009_dm_dialect_tests_py314.txt",
    "desc": "DM 方言用例实跑输出：Ran 2 tests, OK（exit_code=0）—— 闭合 DB-017 §8 B 批",
-   "bytes": 3969,
+   "bytes": 4043,
    "masked": true
   },
   {
    "file": "db009_dm_dict_no_dynamic_views.json",
    "desc": "数据字典不列 V$ 动态视图的实测 + 关键取值（RLOG/BUFFERPOOL/ARCH_STATUS/SESSIONS）",
-   "bytes": 2954,
+   "bytes": 3023,
    "masked": true
   },
   {
    "file": "db009_dm_discovery.json",
    "desc": "DM8 视图发现结果",
-   "bytes": 1237,
+   "bytes": 1294,
    "masked": true
   },
   {
    "file": "db009_dm_discovery.py",
    "desc": "视图发现脚本（可复现）",
-   "bytes": 4308,
+   "bytes": 4408,
    "masked": false
   },
   {
@@ -134,25 +135,25 @@
   {
    "file": "db009_dm_empty_semantics.py",
    "desc": "【订正前】空语义对照脚本",
-   "bytes": 2831,
+   "bytes": 2900,
    "masked": false
   },
   {
    "file": "db009_dm_facts.py",
    "desc": "DM8 事实采集脚本（可复现）",
-   "bytes": 1395,
+   "bytes": 1430,
    "masked": false
   },
   {
    "file": "db009_dm_inventory.json",
    "desc": "DM8 视图清单：存在/不存在的 V$ 视图逐个实测（22 个 -2106 不存在），含真实列名",
-   "bytes": 19860,
+   "bytes": 20762,
    "masked": true
   },
   {
    "file": "db009_dm_inventory.py",
    "desc": "DM8 视图清单采集脚本（可复现）",
-   "bytes": 4436,
+   "bytes": 4542,
    "masked": false
   },
   {
@@ -164,7 +165,7 @@
   {
    "file": "db009_dm_sql_audit.py",
    "desc": "AST SQL 审计脚本（可复现）",
-   "bytes": 3640,
+   "bytes": 3736,
    "masked": false
   },
   {
@@ -176,7 +177,7 @@
   {
    "file": "db009_dm_sql_audit_dmpython.py",
    "desc": "官方驱动直连复验脚本（口令只经环境变量传给子进程）",
-   "bytes": 5992,
+   "bytes": 6151,
    "masked": false
   },
   {
@@ -188,7 +189,7 @@
   {
    "file": "db009_dm_verify.py",
    "desc": "checker 全量 SQL 审计脚本（可复现）",
-   "bytes": 4899,
+   "bytes": 5030,
    "masked": false
   },
   {
@@ -200,55 +201,67 @@
   {
    "file": "db009_dm_viewcols.py",
    "desc": "动态视图列名采集脚本（可复现）",
-   "bytes": 2250,
+   "bytes": 2312,
    "masked": false
   },
   {
    "file": "db009_dm_views.json",
    "desc": "DM8 视图逐个探测结果（含列名与样例行）",
-   "bytes": 15643,
+   "bytes": 16277,
    "masked": true
   },
   {
    "file": "db009_dm_views.py",
    "desc": "DM8 视图探测脚本（可复现）",
-   "bytes": 3433,
+   "bytes": 3521,
    "masked": false
   },
   {
    "file": "db009_e2e_verify.json",
    "desc": "端到端验收：AST 取源码 DM sql_stat SQL + 平台真实方法 _snapshot_sqlstat + sentinel DM/GBase 双分支 + GBase 逐句定位",
-   "bytes": 2927,
+   "bytes": 3038,
    "masked": true
   },
   {
    "file": "db009_e2e_verify.py",
    "desc": "端到端验收脚本（可复现）",
-   "bytes": 8653,
+   "bytes": 8858,
+   "masked": false
+  },
+  {
+   "file": "db009_fire_guard_check.json",
+   "desc": "观察项核实结果：出口健康（health ok、保活 LastTaskResult=0）；DB-009 确被叫醒 3 次且全 retrying；「未覆盖」根因＝worktree_dirty() 把未跟踪文件算脏，已改为 --untracked-files=no",
+   "bytes": 2109,
+   "masked": true
+  },
+  {
+   "file": "db009_fire_guard_check.py",
+   "desc": "观察项核实脚本：Fire 出口健康度 + 两道守卫判定 + 工作树两种口径 + 看护任务状态",
+   "bytes": 5354,
    "masked": false
   },
   {
    "file": "db009_gbase_ash_live.json",
    "desc": "GBase 真实会话并发采样：另开连接制造活跃会话，ASH 采到 1 行真实会话（wait_class=on_cpu）",
-   "bytes": 1003,
+   "bytes": 1048,
    "masked": true
   },
   {
    "file": "db009_gbase_ash_live.py",
    "desc": "GBase 并发采样脚本（可复现）",
-   "bytes": 3599,
+   "bytes": 3701,
    "masked": false
   },
   {
    "file": "db009_gbase_ash_probe.json",
    "desc": "【订正前】GBase ASH/黄金状态量/检测器快照（active_connections 当时为 null）",
-   "bytes": 810,
+   "bytes": 850,
    "masked": true
   },
   {
    "file": "db009_gbase_ash_probe.py",
    "desc": "【订正前】GBase 探测脚本",
-   "bytes": 3846,
+   "bytes": 3951,
    "masked": false
   },
   {
@@ -260,13 +273,13 @@
   {
    "file": "db009_gbase_cursor_state.py",
    "desc": "游标状态对照试验脚本（可复现）",
-   "bytes": 3405,
+   "bytes": 3494,
    "masked": false
   },
   {
    "file": "db009_gbase_dialect_tests.py",
    "desc": "GBase 方言用例跑批脚本（需 DIALECT_GBASE_DSN）",
-   "bytes": 1871,
+   "bytes": 1922,
    "masked": false
   },
   {
@@ -278,19 +291,19 @@
   {
    "file": "db009_gbase_probe.json",
    "desc": "GBase 目标库探测：2 个实例 TCP 可达、连接成功、6 项探测通过 / 3 项失败（performance_schema 缺表）",
-   "bytes": 2695,
+   "bytes": 2818,
    "masked": true
   },
   {
    "file": "db009_gbase_probe.py",
    "desc": "GBase 目标库探测脚本（可复现）",
-   "bytes": 3775,
+   "bytes": 3873,
    "masked": false
   },
   {
    "file": "db009_repair_newlines.py",
    "desc": "【过程脚本】换行修复工具；非验收脚本，结论不依赖它",
-   "bytes": 1155,
+   "bytes": 1193,
    "masked": false
   }
  ]
