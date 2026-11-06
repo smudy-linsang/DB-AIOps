@@ -1,24 +1,26 @@
-有条件通过
+通过
 
 # DB-003 终验报告：DB-AIOps 黑板接入自动链
 
 - 任务单：`docs/pm/orders/DB-003-自动链接入.md`
 - 全链路测试单：`docs/pm/orders/DB-TEST-001-自动链全链路验收.md`（tip `2bd6f9cc`）
 - 执行人：GorkMan（汇总终验）
-- 终验时间：2026-11-05 17:33 America/Los_Angeles
-- 基线核对：main 时点约 `def247a3`（含 A/O 测试单交付与 A 提示词补记）
+- 终验时间：2026-11-05 17:33 America/Los_Angeles；v1.1 闭合飞书条件：2026-11-05 17:42 America/Los_Angeles
+- 基线核对：main 时点约 `def247a3`（含 A/O 测试单交付与 A 提示词补记）；v1.1 证据追加后 tip 以本提交为准
 - 不碰 DB-001 / 不占用 DB-002；不定版；不改 Xinchuang；未改 STATUS/DECISIONS。
 
-## 结论：有条件通过
+## 结论：通过
 
-DB-AIOps 黑板 → `member_poller` 双仓检测 → A-AUTORUN / O-autorun 自动叫醒并落报告，这一段**已实测打通**。缺口仅限：**本宿主机看不到飞书分发器进程/日志，无法用本机证据证实「飞书群已广播 DB-TEST-001」**；STATUS 此前已记分发器曾对 DB-AIOps 广播流动、同路径更新有漏报。按测试单第 2 项「出口未通则如实记缺口、不静默」，整单结论为**有条件通过**，不以推测补飞书闭环。
+DB-AIOps 黑板 → `member_poller` 双仓检测 → 飞书群「Muse领导的AI部门协作」由机器人「部门调度台」广播【黑板动态】→ A-AUTORUN / O-autorun 自动叫醒并落报告 → GorkMan 终验，**全链路实测打通**。
+
+v1.0 唯一缺口「本机看不到飞书分发器」已由用户提供的飞书群截图闭合：截图见 `docs/pm/reports/evidence/DB-003-feishu-broadcast-20261105.png`。群内依次出现 DB-TEST-001 订单（执行：A、O）、O 的 R1-ack / R1-review / receipt / report-O、A 的 ack / report-A，以及 09:35（界面时区，对应本终验报告落库后）的 `DB-003-report-自动链接入.md`。整单结论由**有条件通过**升为**通过**。
 
 ## 1. 通过标准对照（DB-TEST-001）
 
 | # | 检查项 | 结果 | 证据 |
 |---|---|---|---|
 | 1 | 轮询检测 | **通过** | `member-poller-gg` / `member-poller-gg-db` 均为 `active`；`member_poller_state_GG_db.json` 的 `seen` 含 `docs/pm/orders/DB-TEST-001-自动链全链路验收.md`；`last_check` ≈ 2026-11-06T01:32:20Z（≈ 2026-11-05 17:32 America/Los_Angeles），订单落库后数轮内已入 seen |
-| 2 | 分发器广播 | **缺口（本机未证）** | 协调机飞书分发器不在本 WSL 宿主机；`/home/linsang/dispatcher` 仅有 member_poller / wake_gg，无 feishu/lark 常驻进程或广播日志。REST/git 对 DB-AIOps 可见。未宣称飞书群已收到本单广播 |
+| 2 | 分发器广播 | **通过** | 飞书群「Muse领导的AI部门协作」截图：`部门调度台` 广播【黑板动态】含 DB-TEST-001 订单与 A/O 报告，以及本终验报告；证据 `docs/pm/reports/evidence/DB-003-feishu-broadcast-20261105.png`。协调机分发器进程仍不在本 WSL 宿主机，但不影响「群内已广播」的实测结论 |
 | 3 | A 自动叫醒 | **通过** | 见 §3 |
 | 4 | O 自动叫醒 | **通过** | 见 §4 |
 | 5 | GorkMan 终验 | **本文件** | 测试单归档说明见 §6 |
@@ -72,9 +74,9 @@ O 侧自动叫醒与 ack/report 落地满足测试单第 4 项；O 自身「有�
 - `DB-TEST-001` 为临时测试单，不占用正式 `DB-xxx` 编号；订单与 A/O 报告/回执保留作证据，不必删除。
 - 后续正式单继续用 `DB-016` 起编号（以部门经理 STATUS 为准；本文件不改 STATUS）。
 
-## 7. 未尽事项（条件）
+## 7. 未尽事项（非否决条件）
 
-1. **飞书分发器广播**：须在协调机侧核对 DB-TEST-001（或后续正式单）是否入群；本机无法取证。出口未恢复前继续按日可见性核对、不静默。
+1. ~~**飞书分发器广播**~~：**已闭合（v1.1）**。用户截图飞书群「Muse领导的AI部门协作」证实 `部门调度台` 已广播 DB-TEST-001 全链路与本终验报告；证据见 `docs/pm/reports/evidence/DB-003-feishu-broadcast-20261105.png`。
 2. **A 定时任务挂载**：首次空转暴露 API 创建任务无 git 源的风险；A 已改提示词并以第 2 次拉起打通。建议部门经理确认定时任务长期带 DB-AIOps `sources`，避免回归。
 3. **member_poller 是否扫 reports/**：今日仍只扫 `orders/`（与 Xinchuang 叫醒模型一致）；若需扫 reports，另立小单，不并入本终验。
 
@@ -83,3 +85,4 @@ O 侧自动叫醒与 ack/report 落地满足测试单第 4 项；O 自身「有�
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-05 | GorkMan | DB-003 全链路终验：有条件通过（飞书广播本机未证；A/O 自动链与双仓 poller 已通） |
+| v1.1 | 2026-11-05 | GorkMan | 用户飞书群截图闭合广播条件；结论升为通过；入库 evidence/DB-003-feishu-broadcast-20261105.png |
