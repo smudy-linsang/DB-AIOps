@@ -1,0 +1,7 @@
+[2026-11-06 10:37:56] [fire] token file unreadable: FileNotFoundError: [Errno 2] No such file or directory: 'C:\\dispatcher\\mman_fire_token.txt'
+[2026-11-06 10:37:56] [fire] generated new fire token -> C:\dispatcher\mman_fire_token.txt
+[2026-11-06 10:37:56] [fire] fire service listening on http://127.0.0.1:24711/fire (token in mman_fire_token.txt)
+[2026-11-06 10:37:58] [fire] http "GET /health HTTP/1.1" 200 -
+[2026-11-06 10:37:58] [fire] http "POST /fire HTTP/1.1" 401 -
+[2026-11-06 10:39:31] [fire] launched run=fire_cb605dc0604c pid=59484 order=docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md
+[2026-11-06 10:39:31] [fire] http "POST /fire HTTP/1.1" 200 -

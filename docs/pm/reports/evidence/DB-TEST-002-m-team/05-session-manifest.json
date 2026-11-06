@@ -1,0 +1,16 @@
+{
+  "schemaVersion": 1,
+  "sessionId": "mvs_6a1f8e191fe545168fa208a984940aa6",
+  "createdAtMs": 1793932775086,
+  "updatedAtMs": 1793932775086,
+  "source": "local-runtime",
+  "layout": "v2-final-dated-session",
+  "paths": {
+    "sessionDir": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2",
+    "ledger": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2\\ledger.jsonl",
+    "display": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2\\display.jsonl",
+    "snapshot": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2\\snapshot.json",
+    "reports": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2\\reports",
+    "messages": "C:\\Users\\linsa\\.minimax\\v2\\sessions\\2026\\11\\06\\02-39-35-086-session_bXZzXzZhMWY4ZTE5MWZlNTQ1MTY4ZmEyMDhhOTg0OTQwYWE2\\messages.jsonl"
+  }
+}

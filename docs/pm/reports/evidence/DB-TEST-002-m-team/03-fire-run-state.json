@@ -1,0 +1,19 @@
+{
+ "runs": {
+  "fire_cb605dc0604c": {
+   "runId": "fire_cb605dc0604c",
+   "order": "docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md",
+   "pid": 59484,
+   "cmd_head": "C:\\Program Files\\nodejs\\node.EXE C:\\Users\\linsa\\AppData\\Roaming\\npm\\node_modules\\@minimax-ai\\code\\cli.js exec --cwd C:\\DB-AIOps --output-format",
+   "out": "C:\\dispatcher\\fire_runs\\fire_cb605dc0604c.json",
+   "err": "C:\\dispatcher\\fire_runs\\fire_cb605dc0604c.err",
+   "status": "running",
+   "started_at": "2026-11-06T02:39:31.640232+00:00",
+   "attempts": 1
+  }
+ },
+ "by_order": {
+  "docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md": "fire_cb605dc0604c"
+ },
+ "saved_at": "2026-11-06T02:39:31.642703+00:00"
+}

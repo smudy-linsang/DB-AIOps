@@ -1,0 +1,32 @@
+# 来源：C:\dispatcher\poller_MMMan_dbaiops_hidden.log
+# 说明：member_poller（member=MMMan，repo=smudy-linsang/DB-AIOps，interval=60s）无控制台守护日志的完整原文
+# 采集：2026-11-06 本会话内读取；本文件不含任何令牌明文
+
+[launcher] starting member_poller (pythonw, no console)
+[member_poller] member=MMMan repo=smudy-linsang/DB-AIOps workdir=C:\DB-AIOps interval=60s state=C:\dispatcher\member_poller_state_MMMan_DBAIOps.json
+[member_poller] 已叫醒: docs/pm/orders/DB-015-补充-凭据暂缓记缺口.md (mode=wake-cmd)
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at c22fe6d104a21b585fa163c6a1337fa943df2bfe but expected ab126654146e325e79e4a24ef4306e7d064456a8
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: fatal: unable to access 'https://github.com/smudy-linsang/DB-AIOps.git/': Recv failure: Connection was reset
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at 83e67409ff0a80d72741544f6dd2360064596388 but expected c22fe6d104a21b585fa163c6a1337fa943df2bfe
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at e46d4dc4135daa8eb433548df34cd6270e0ec173 but expected de9204906c7993a62e77df820cea01f054d7320f
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at 57b798e79e43316245d7d687b9afb8f18059c204 but expected 2a692197d00276610ca671a283ab8304561bf038
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at b3bee3dd2a0de3de35b4f3f976d434df1e7e7d67 but expected b9b460d4757a84afee4e6af888453afec053d834
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 本轮出错 (下轮重试): RuntimeError:git fetch failed: error: cannot lock ref 'refs/remotes/origin/main': is at 7a6848ee1d3b2f12f026cf607875c1aa038f5765 but expected b3bee3dd2a0de3de35b4f3f976d434df1e7e7d67
+From https://github.com/smudy-linsang/DB-AIOps
+ 
+[member_poller] 已叫醒: docs/pm/orders/DB-005R-补充-外网先行内网延后.md (mode=wake-cmd)
+[member_poller] 已叫醒: docs/pm/orders/DB-017-009环境与适配先行.md (mode=wake-cmd)
+[launcher] fire service already running
+[launcher] starting member_poller (pythonw, no console)
+[member_poller] member=MMMan repo=smudy-linsang/DB-AIOps workdir=C:\DB-AIOps interval=60s state=C:\dispatcher\member_poller_state_MMMan_DBAIOps.json
+[member_poller] 已叫醒: docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md (mode=wake-cmd)

@@ -1,0 +1,8 @@
+# 来源：C:\dispatcher\poller.log（wake_mman 段）
+# 说明：共享轮询日志中 DB-TEST-002 单的全部记录（发现→触发→路径C HTTP Fire 受理→结果）
+# 采集：2026-11-06 本会话内读取；本文件不含任何令牌明文
+
+[2026-11-06 10:39:31] [wake_mman] [docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md] trigger saved: C:\dispatcher\pending_wake_MMMan\20261106-103931__DB-TEST-002-MMMan叫醒出口全链路验收.md.json
+[2026-11-06 10:39:31] [wake_mman] [docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md] fire accepted (http 200): {"ok": true, "status": "launched", "runId": "fire_cb605dc0604c", "pid": 59484}
+[2026-11-06 10:39:31] [wake_mman] [docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md] path B skipped (disabled by default; engine cache overwrites external writes)
+[2026-11-06 10:39:31] [wake_mman] [docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md] wake result trigger=True fire=True store=False

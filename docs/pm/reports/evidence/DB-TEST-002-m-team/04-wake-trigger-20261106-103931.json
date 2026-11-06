@@ -1,0 +1,7 @@
+{
+  "bot": "bot_809d03823a1f",
+  "order": "docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md",
+  "text": "【自动叫醒｜member_poller｜MMMan】\ndocs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md\n\n你是部门成员 MMMan。部门黑板有新任务单派给你：\n- 仓库：https://github.com/smudy-linsang/DB-AIOps\n- 任务单：docs/pm/orders/DB-TEST-002-MMMan叫醒出口全链路验收.md\n本地仓库已由 member_poller 守护执行过 git fetch, 请先 git pull 同步到最新, 完整阅读该任务单, 并按 docs/pm/README.md 的黑板规范执行;如需背景, 先读 docs/pm/STATUS.md 与 docs/pm/DECISIONS.md。完成后把交付报告写入 docs/pm/reports/ 并推送, 报告结论必须是「通过 / 有条件通过 / 不通过」三档之一。",
+  "ts_ms": 1793932771583,
+  "ts_iso": "2026-11-06T10:39:31"
+}
