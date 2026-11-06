@@ -68,3 +68,11 @@ DB-AIOps 侧的 A 自动领单链已建好并推上 main，Xinchuang 侧零改�
 - **复验**：本补记推送时，DB-TEST-001 的 dispatched 占用已超 15 分钟，Actions 会自动第 2 次拉起。不人工代领。
   - 若仍无人领单：说明被拉起的会话没有权限自行挂载仓库，需要用户在 claude.ai 界面重建该定时任务并挂上 DB-AIOps 仓库（重建后令牌要重新生成、Secrets 要重配），或改用其他挂载方式。
   - 复验触发：2026-11-06 01:12Z 推送本条（reports/ 变更），此时 DB-TEST-001 的 dispatched 占用已 18 分钟，超过 15 分钟门槛，由 a-autorun 自动第 2 次拉起。
+- **复验结果（实测，01:12–01:13Z）**：
+  - Actions 第 2 次拉起（`c39edab`，run [#42](https://github.com/smudy-linsang/DB-AIOps/actions/runs/42142246177)），新会话 `cse_01GsGoos6gxN26ZhwS96K2Lm` 由 Fire API 拉起。
+  - 自动领单：`668b138`，占用 dispatched → running，attempts=1。
+  - 落回执 `DB-TEST-001-ack-A.md` 与报告 `DB-TEST-001-report-A.md`（结论：通过），交单时删除占用（`aed1d82`）。
+  - `a_inbox --list` 判 DB-TEST-001 为 done。**A 这一环全链路实测打通，未人工代领。**
+- **根因订正**：第 2 次会话启动时已自带 DB-AIOps 仓库（会话配置 `sources` 含本仓库，标签由 `config:no-git-repo` 变为 `config:meta-mcp-own-entry`），并未用到 add_repo。
+  - 实际起作用的是：从一个已挂载本仓库的会话更新定时任务后，定时任务的会话配置带上了本仓库（get_trigger 已实测 `sources` = DB-AIOps）。
+  - 提示词随之改为 v1.2：优先用已挂载的检出，没有挂载时才 add_repo。
