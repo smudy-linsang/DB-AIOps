@@ -5,8 +5,11 @@
   "declared_methods": 33,
   "direct": 11,
   "alias": 0,
-  "missing": 71,
-  "tested": 8
+  "missing": 36,
+  "tested": 8,
+  "evaluated_batch1": 35,
+  "reusable_eval": 12,
+  "missing_impl_eval": 23
  },
  "rows": [
   {
@@ -36,8 +39,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_locked_users",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "PG 核心无原生锁定标记字段（通常通过 rolvaliduntil 过期或外部认证管理），需在 PG 分支特别处理或标明原生锁定不适用；其余 5 库原生支持。",
+   "eval_notes": "无等价检测器，需新写。涉及 6 库数据字典（dba_users, mysql.user, pg_authid）。"
   },
   {
    "item_id": "INS-COM-PWD-EXPIRE",
@@ -46,8 +53,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_expiring_passwords",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "各库密码生命周期存储方式各异；PG 需特权访问 pg_authid；MySQL 依赖 default_password_lifetime 参数开启。",
+   "eval_notes": "无等价检测器，需新写。涉及 6 库密码过期时间计算与权限适配。"
   },
   {
    "item_id": "INS-COM-CAP-7D",
@@ -56,8 +67,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_7d_capacity",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": "monitor.capacity_engine.CapacityEngine",
+   "workload": "中",
+   "dialect_notes": "新建实例若历史时序数据积累不足 7 天，模型拟合样本不足，需优雅降级 skip。",
+   "eval_notes": "巡检检测器层无包装。可调用平台既有 CapacityEngine (7 天步长)，走平台时序库历史数据。"
   },
   {
    "item_id": "INS-COM-CAP-30D",
@@ -66,8 +81,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_30d_capacity",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": "monitor.capacity_engine.CapacityEngine",
+   "workload": "小",
+   "dialect_notes": "历史采样数据 < 14 天时趋势不稳，需优雅降级 skip。",
+   "eval_notes": "巡检检测器层无包装。可与 7D 复用同一检测器模板，仅步长参数为 30 天。"
   },
   {
    "item_id": "INS-COM-CONN-PEAK",
@@ -75,9 +94,13 @@
    "level": "daily",
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_conn_peak",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_connections_usage",
+   "workload": null,
+   "dialect_notes": "旧方法 detect_connections_usage 仅覆盖 oracle/mysql/pgsql，缺少 dm/gbase/tdsql 分支。",
+   "eval_notes": "可复用 I004 (detect_connections_usage)。缺参数等价性证明（旧方法查当前即时连接，需补充 24h 历史最大峰值聚合）及 3 个国产方言支持。"
   },
   {
    "item_id": "INS-COM-LONG-TXN",
@@ -96,8 +119,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_deadlock_count",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "大",
+   "dialect_notes": "PG 为累计计数器需算 24h 差值；MySQL 默认仅存最后一次死锁需查状态；Oracle 需 Diagnostic 视图或告警日志；机制差异巨大。",
+   "eval_notes": "无等价检测器，需新写。6 库死锁统计接口与持久化机制完全异构，工作量大。"
   },
   {
    "item_id": "INS-COM-SLOW-LOG",
@@ -105,9 +132,13 @@
    "level": "daily",
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_slow_query_log",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_slow_query_burst",
+   "workload": null,
+   "dialect_notes": "Oracle 无独立 slow log 文本文件（走 AWR/SQL Trace），慢日志参数检测在 Oracle 方言语义不对称。",
+   "eval_notes": "可复用 I005 (detect_slow_query_burst)。缺参数等价性证明（旧方法查近1小时慢查询频次，本项查 slow_query_log 开启状态与文件大小）。"
   },
   {
    "item_id": "INS-COM-INDEX-USAGE",
@@ -115,9 +146,13 @@
    "level": "weekly",
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_unused_indexes",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_index_usage",
+   "workload": null,
+   "dialect_notes": "现有检测器实现支持 mysql, pgsql, oracle；缺 dm (V)、gbase 分支；tdsql 可复用 mysql 分支。",
+   "eval_notes": "可复用 I011 (detect_index_usage)。业务逻辑完全吻合（均查30天未使用索引）。缺注册别名挂接与 DM/GBase 方言兼容证明。"
   },
   {
    "item_id": "INS-COM-MISSING-INDEX",
@@ -126,8 +161,12 @@
    "dbs": "oracle,mysql,pgsql,dm",
    "detect": "detect_missing_indexes",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": "monitor.index_advisor.IndexAdvisor",
+   "workload": "中",
+   "dialect_notes": "GBase 与 TDSQL 分布式环境暂未纳入规则定义；各库高 cost 全表扫描视图差异大。",
+   "eval_notes": "无等价检测器，需新写。可参考内部 IndexAdvisor 算法，从全表扫描频次中推荐缺失索引。"
   },
   {
    "item_id": "INS-COM-FK-NO-INDEX",
@@ -146,8 +185,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase",
    "detect": "detect_large_table_not_partitioned",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "TDSQL 属于分布式分片架构（Shard 依赖分布式 Key），未列入适用方言；其余 5 库原生支持分区表。",
+   "eval_notes": "无等价检测器，需新写。查询表大小 > 100GB 且不在分区字典的单表，纯数据字典过滤。"
   },
   {
    "item_id": "INS-COM-STAT-STALE",
@@ -166,8 +209,12 @@
    "dbs": "oracle,mysql,pgsql,dm",
    "detect": "detect_sparse_index",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "不同于 detect_sparse_table（表高水位空块），索引区分度依赖优化器统计信息的准确性（未分析表易误报）。",
+   "eval_notes": "无等价检测器，需新写。检查 distinct_keys / num_rows < 5% 的低区分度索引。"
   },
   {
    "item_id": "INS-COM-BLEVEL-HIGH",
@@ -175,9 +222,13 @@
    "level": "monthly",
    "dbs": "oracle,mysql,pgsql,dm",
    "detect": "detect_high_blevel_index",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_index_health",
+   "workload": null,
+   "dialect_notes": "MySQL InnoDB B+树层高由 page 隐式维护无 blevel 字典字段；PG 无 blevel 列；该指标在 MySQL/PG 属于方言不适用，仅在 Oracle/DM 生效。",
+   "eval_notes": "可复用 I107 (detect_index_health)。缺参数等价性证明（旧方法同时含聚簇因子告警，需参数化分离）及方言约束证明（非 Oracle/DM 须优雅 skip）。"
   },
   {
    "item_id": "INS-COM-SEQ-MAX",
@@ -185,9 +236,13 @@
    "level": "daily",
    "dbs": "oracle,dm,pgsql",
    "detect": "detect_seq_near_max",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_sequence_usage",
+   "workload": null,
+   "dialect_notes": "MySQL 默认无独立 sequence（主键主要为 auto_increment），定义中明确排除 MySQL/GBase/TDSQL。",
+   "eval_notes": "可复用 I110 (detect_sequence_usage)。已有 Oracle/PG dba_sequences/pg_sequences 查询框架，缺 max_value 抓取与 >= 80% 使用率阈值计算及 DM 分支。"
   },
   {
    "item_id": "INS-COM-SEQ-NO-CACHE",
@@ -195,9 +250,13 @@
    "level": "monthly",
    "dbs": "oracle,dm",
    "detect": "detect_seq_no_cache",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_sequence_usage",
+   "workload": null,
+   "dialect_notes": "MySQL/GBase 无独立序列；PG 缺省 cache=1，概念与 Oracle NOCACHE 争用不完全等价；仅限 Oracle/DM。",
+   "eval_notes": "可复用 I110 (detect_sequence_usage)。缺在 SQL 中增加 cache_size = 0 过滤及生成 Finding 的参数证明。"
   },
   {
    "item_id": "INS-COM-PARAM-DEV",
@@ -206,8 +265,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase",
    "detect": "detect_param_deviation",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": "monitor.detectors.config_drift.ConfigDriftDetector",
+   "workload": "中",
+   "dialect_notes": "各库关键参数基线各异（Oracle open_cursors / MySQL max_connections / PG shared_buffers），需差异化配置。",
+   "eval_notes": "无巡检检测器方法，需新写包装层。可复用内部 config_drift 模块比对推荐基线。"
   },
   {
    "item_id": "INS-COM-BACKUP",
@@ -226,8 +289,12 @@
    "dbs": "oracle,dm",
    "detect": "detect_archive_gap",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "MySQL (binlog/relay log)、PG (WAL/replication slot) 复制架构不同，本项归档间隙仅对 Oracle/DM 有效，其余 4 库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。检查 v 中 sequence# 连续性与备库同步断层。"
   },
   {
    "item_id": "INS-COM-LOG-SWITCH",
@@ -235,9 +302,13 @@
    "level": "daily",
    "dbs": "oracle,dm",
    "detect": "detect_log_switches",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_log_switch_freq",
+   "workload": null,
+   "dialect_notes": "MySQL/PG 等引擎无 Oracle redo log 环形切换机制，其余 4 库方言不适用。",
+   "eval_notes": "可复用 I105 (detect_log_switch_freq)。Oracle 逻辑完全一致（查 v，avg > 20 告警）。缺别名挂接与 DM (V) 适配证明。"
   },
   {
    "item_id": "INS-COM-LOCK-WAIT",
@@ -246,8 +317,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_lock_waits",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "6 库全支持，但各库实时锁表（v / data_lock_waits / pg_locks / V）字段与等待模式不同。",
+   "eval_notes": "无等价检测器，需新写。需为 6 库编写即时行锁/表锁等待查询。"
   },
   {
    "item_id": "INS-COM-BLOCK-SESSION",
@@ -256,8 +331,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase,tdsql",
    "detect": "detect_blocked_sessions",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "6 库全支持。但会话阻塞树分析（递归查根因阻断源）各库系统视图互不相同。",
+   "eval_notes": "无等价检测器，需新写。checkers 中有零散 blocking_session 语句，需整合成带等待时长阈值（>5min）的巡检检测器。"
   },
   {
    "item_id": "INS-COM-OPEN-CURSOR",
@@ -266,8 +345,12 @@
    "dbs": "oracle,dm",
    "detect": "detect_open_cursors",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "MySQL、PG、GBase、TDSQL 无数据库级 open_cursors 参数与全局游标上限限制，对这 4 种数据库属于方言不适用。",
+   "eval_notes": "无等价检测器，需新写。查询 v 与 v 计算游标使用率，仅适用 Oracle/DM。"
   },
   {
    "item_id": "INS-COM-TEMP-USAGE",
@@ -276,8 +359,12 @@
    "dbs": "oracle,mysql,pgsql,dm,gbase",
    "detect": "detect_temp_usage",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "TDSQL 分布式架构未声明；各库临时段管理机制差异显著（Oracle 查 dba_temp_files/v，PG 查 temp tablespaces）。",
+   "eval_notes": "无等价检测器，需新写。detect_disk_space 仅查数据表空间，未包含临时表空间排序/哈希段检测。"
   },
   {
    "item_id": "INS-COM-UNDO-USAGE",
@@ -286,8 +373,12 @@
    "dbs": "oracle,dm,pgsql",
    "detect": "detect_undo_usage",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "PG 采用堆内 MVCC 行版本机制，无独立 Undo 表空间，定义中列入 PG 属于方言不适用；MySQL/GBase 未声明。仅对 Oracle/DM 适用。",
+   "eval_notes": "无等价检测器，需新写。Oracle 查 v，DM 查 V；PG 必须明确标注方言不适用并优雅 skip。"
   },
   {
    "item_id": "INS-COM-FRAG-TABLE",
@@ -295,9 +386,13 @@
    "level": "monthly",
    "dbs": "oracle,dm,gbase",
    "detect": "detect_high_parallel",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_table_fragmentation",
+   "workload": null,
+   "dialect_notes": "定义命名存在双重歧义：ID 为 FRAG-TABLE（表碎片），title 为 高并行度表（degree）。",
+   "eval_notes": "若按 ID 语义（表碎片），直接复用 I010 (detect_table_fragmentation)；若按 Title 语义（高并行度表），复用扩展 I109 (detect_high_concurrency_tables) 增加 Oracle degree > 1 查询。缺语义对齐与证明。"
   },
   {
    "item_id": "INS-COM-FAILED-LOGIN",
@@ -315,9 +410,13 @@
    "level": "weekly",
    "dbs": "oracle",
    "detect": "detect_awr_interval",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_awr_config",
+   "workload": null,
+   "dialect_notes": "Oracle 专项，对 MySQL/PG/DM/GBase/TDSQL 全体方言不适用。",
+   "eval_notes": "可复用 I111 (detect_awr_config)。已抓取 interval_seconds，缺 interval_seconds > 3600 (1h) 告警阈值分支与别名挂接。"
   },
   {
    "item_id": "INS-ORA-AWR-RET",
@@ -325,9 +424,13 @@
    "level": "monthly",
    "dbs": "oracle",
    "detect": "detect_awr_retention",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_awr_config",
+   "workload": null,
+   "dialect_notes": "Oracle 专项，对其余 5 种数据库方言不适用。",
+   "eval_notes": "可复用 I111 (detect_awr_config)。逻辑完全一致（retention < 7天报 warning）。缺别名挂接与独立 Finding 拆分证明。"
   },
   {
    "item_id": "INS-ORA-AWR-TOP-EVT",
@@ -336,8 +439,12 @@
    "dbs": "oracle",
    "detect": "detect_awr_top_event",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "Oracle 专项（且需 Diagnostic Pack 授权），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。需解析 dba_hist_system_event 与 dba_hist_snapshot 提取业务高峰等待事件。"
   },
   {
    "item_id": "INS-ORA-AWR-TOP-SQL",
@@ -346,8 +453,12 @@
    "dbs": "oracle",
    "detect": "detect_awr_top_sql",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "中",
+   "dialect_notes": "Oracle 专项（且需 Diagnostic Pack 授权），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。需查询 dba_hist_sqlstat 提取 Top DB Time / CPU SQL。"
   },
   {
    "item_id": "INS-ORA-SCN-HEADROOM",
@@ -366,8 +477,12 @@
    "dbs": "oracle",
    "detect": "detect_sta_recommendations",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专项（且需 Tuning Pack 授权），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。直接查 dba_advisor_recommendations (SYS_AUTO_SQL_TUNING_TASK) 提取建议。"
   },
   {
    "item_id": "INS-ORA-SEG-ADV",
@@ -376,8 +491,12 @@
    "dbs": "oracle",
    "detect": "detect_segment_advisor",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专项，其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。直接查 dba_advisor_findings (auto segment advisor) 提取 shrink 表建议。"
   },
   {
    "item_id": "INS-ORA-AUTO-MW",
@@ -385,9 +504,13 @@
    "level": "monthly",
    "dbs": "oracle",
    "detect": "detect_maintenance_window",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_auto_task_status",
+   "workload": null,
+   "dialect_notes": "Oracle 专项，其余 5 种数据库方言不适用。",
+   "eval_notes": "可复用 I104 (detect_auto_task_status)。查询 dba_autotask 体系，缺维护窗口调度时长与冲突判定逻辑证明。"
   },
   {
    "item_id": "INS-ORA-FRA",
@@ -396,8 +519,12 @@
    "dbs": "oracle",
    "detect": "detect_fra_usage",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专属特性（快速恢复区），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。detect_disk_space 仅查表空间，需新增 v 空间利用率检测。"
   },
   {
    "item_id": "INS-ORA-CTRL-BAK",
@@ -406,8 +533,12 @@
    "dbs": "oracle",
    "detect": "detect_ctrlfile_backup",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专属特性（控制文件自动备份），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。检查 v 自动备份开关及近期备份生成时间。"
   },
   {
    "item_id": "INS-ORA-ARCH-DELETE",
@@ -416,8 +547,12 @@
    "dbs": "oracle",
    "detect": "detect_arch_deletion_policy",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专属特性（RMAN 归档删除策略），其余 5 种数据库方言不适用。",
+   "eval_notes": "无等价检测器，需新写。检查 v 归档删除策略是否配置为 APPLIED ON ALL STANDBY 或等价保护。"
   },
   {
    "item_id": "INS-ORA-DBA-USERS",
@@ -426,8 +561,12 @@
    "dbs": "oracle",
    "detect": "detect_dba_users",
    "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "kind": "缺实现",
+   "tested": "无测试引用",
+   "reusable_method": null,
+   "workload": "小",
+   "dialect_notes": "Oracle 专属角色授权体系（DBA 角色），其余 5 种数据库权限体系不同（如 PG 为 superuser，MySQL 为 grant all），属于方言不适用。",
+   "eval_notes": "无等价检测器，需新写。查询 dba_role_privs WHERE granted_role='DBA' 审计超级特权账号。"
   },
   {
    "item_id": "INS-ORA-TS-AUTOEXT",
@@ -435,9 +574,13 @@
    "level": "monthly",
    "dbs": "oracle,dm",
    "detect": "detect_ts_autoextend",
-   "class": "-",
-   "kind": "无同名实现",
-   "tested": "无测试引用"
+   "class": "GenericDetector",
+   "kind": "语义相近可复用",
+   "tested": "无测试引用",
+   "reusable_method": "GenericDetector.detect_disk_space",
+   "workload": null,
+   "dialect_notes": "非 Oracle/DM 库（MySQL/PG）表空间文件扩展机制不同，属于方言不适用。",
+   "eval_notes": "可复用 I009 (detect_disk_space)。底层同源查 dba_data_files，缺参数等价性证明（需读取 autoextensible = 'NO' 并单独告警）。"
   },
   {
    "item_id": "INS-ORA-LOB-PCT",
