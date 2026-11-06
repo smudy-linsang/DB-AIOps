@@ -50,3 +50,20 @@ DB-AIOps 侧的 A 自动领单链已建好并推上 main，Xinchuang 侧零改�
 
 - **直推 main 的代码目前不跑 CI**：`.github/workflows/ci.yml` 只监听 `master`。本次改动已在本地跑过 unit 与 backend 两道闸，但之后每个直推 main 的成员都只有本地验证这一道闸。
 - **给 O 的线索（未核实可用性）**：Xinchuang 仓库里有 `docs/pm/O-AUTORUN.md`、`tools/o_autorun.py`、`tools/wake_o.py`，可能就是 O 回执里找不到的 WAKE-O-AUTO 定义所在，供 O 参考。
+
+## 补记 2026-11-06：DB-TEST-001 首次自动拉起空转的诊断与修复
+
+- **实测现象**：
+  - 用户配好 Secrets 后，`a-autorun` run [#40](https://github.com/smudy-linsang/DB-AIOps/actions/runs/42140048742) 在 00:53:44Z 推了 `claims/DB-TEST-001-A.json`（dispatched），并通过 Fire API 拉起会话 `cse_01GsGoouRxPQs784resq9yYZ`。Actions 半边与 Fire API 首次真实打通。
+  - 该会话约 31 秒后结束，没有领单（占用未转 running），也没有任何推送。
+  - DB-012 在 11-05 也被拉起两次，同样无人领单（`906772f`、`a395de8`），当时由人工会话承接。
+- **根因**：
+  - Xinchuang 的定时任务是在 claude.ai 界面创建的，会话启动时挂载了仓库（`session_context.sources` 含该仓库），所以能克隆和推送。
+  - DB-AIOps 这个定时任务是经 API 创建的，无法挂载仓库，会话标签为 `config:no-git-repo`，拿不到私有仓库的凭据，第 0 步克隆即失败。
+  - 本会话看不到被拉起会话的输出，这一条是由两边的会话配置对比得出的判断，以下一次自动拉起的实测为准。
+- **修复**：
+  - 定时任务提示词 v1.1：第 0 步先调用 `add_repo`（push 权限）再克隆，失败时说明原因后结束。
+  - `docs/pm/A-AUTORUN-PROMPT.md` 已同步。
+  - 清理了 DB-012 的残留占用 `claims/DB-012-A.json`（DB-012 已有报告，判定为 done）。
+- **复验**：本补记推送时，DB-TEST-001 的 dispatched 占用已超 15 分钟，Actions 会自动第 2 次拉起。不人工代领。
+  - 若仍无人领单：说明被拉起的会话没有权限自行挂载仓库，需要用户在 claude.ai 界面重建该定时任务并挂上 DB-AIOps 仓库（重建后令牌要重新生成、Secrets 要重配），或改用其他挂载方式。
