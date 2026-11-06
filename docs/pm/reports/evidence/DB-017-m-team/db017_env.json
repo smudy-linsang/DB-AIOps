@@ -1,0 +1,146 @@
+{
+  "captured_at": "2026-11-06T15:32:21",
+  "checks": {
+    "odbc_drivers": {
+      "pyodbc_import": "ok",
+      "drivers": [
+        "SQL Server",
+        "DM8 ODBC DRIVER",
+        "Microsoft Access Driver (*.mdb, *.accdb)",
+        "Microsoft Excel Driver (*.xls, *.xlsx, *.xlsm, *.xlsb)",
+        "Microsoft Access Text Driver (*.txt, *.csv)",
+        "Microsoft Access dBASE Driver (*.dbf, *.ndx, *.mdx)"
+      ],
+      "error": null,
+      "pyodbc_version": "5.3.0",
+      "dm_drivers": [
+        "DM8 ODBC DRIVER"
+      ]
+    },
+    "dm_python": {
+      "find_spec": false,
+      "import": "FAIL",
+      "import_error": "ModuleNotFoundError: No module named 'dmPython'",
+      "pip_show": "C:\\DB-AIOps\\.venv\\Scripts\\python.exe: No module named pip",
+      "requirements_lines": [
+        "pymysql>=1.1.0          # MySQL, Gbase8a, TDSQL",
+        "pyodbc>=5.0.0           # 达梦数据库连接层驱动 (DM8 ODBC Driver，用于 DbConnector)",
+        "# dmPython              # 达梦检测器依赖 (DM 原生 Python 驱动，需达梦官方授权安装包安装，可选按需加载)"
+      ]
+    },
+    "checker_registry": {
+      "CHECKER_MAP_keys": [
+        "gbase",
+        "mysql",
+        "oracle",
+        "pgsql",
+        "tdsql"
+      ],
+      "DM_DRIVER_AVAILABLE": false,
+      "DM_DRIVER_ERROR": "No module named 'dmPython'",
+      "is_dm_checker_available": false,
+      "get_checker_dm": "None",
+      "get_checker_gbase": "<class 'monitor.checkers.gbase.GbaseChecker'>",
+      "get_checker_mysql": "<class 'monitor.checkers.mysql.MySQLChecker'>"
+    },
+    "dm_gbase_instances": [
+      {
+        "id": 9,
+        "name": "DM_测试库",
+        "db_type": "dm",
+        "host": "127.0.0.1",
+        "port": 5236,
+        "username": "SYSDBA",
+        "is_active": true,
+        "tcp": {
+          "host": "127.0.0.1",
+          "port": 5236,
+          "reachable": true,
+          "ms": 2.8
+        }
+      },
+      {
+        "id": 11,
+        "name": "GBase8A_测试库",
+        "db_type": "gbase",
+        "host": "127.0.0.1",
+        "port": 5258,
+        "username": "root",
+        "is_active": true,
+        "tcp": {
+          "host": "127.0.0.1",
+          "port": 5258,
+          "reachable": false,
+          "error": "ConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。",
+          "ms": 2037.1
+        },
+        "pymysql_connect": "OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")"
+      },
+      {
+        "id": 15,
+        "name": "probe-gbase",
+        "db_type": "gbase",
+        "host": "127.0.0.1",
+        "port": 5258,
+        "username": "root",
+        "is_active": true,
+        "tcp": {
+          "host": "127.0.0.1",
+          "port": 5258,
+          "reachable": false,
+          "error": "ConnectionRefusedError: [WinError 10061] 由于目标计算机积极拒绝，无法连接。",
+          "ms": 2043.0
+        },
+        "pymysql_connect": "OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无法连接。)\")"
+      }
+    ],
+    "collector_log": {
+      "db_monitor.log": {
+        "size": 1192653,
+        "matches": [
+          "[2026-11-05 20:29:29,335] WARNING monitor.degrade 36316 54748 rid=- [degrade] collect.Gbase (第 1 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:29:29,335] WARNING monitor.degrade 36316 15100 rid=- [degrade] collect.Gbase (第 2 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:30:45,840] WARNING monitor.degrade 55424 57120 rid=- [degrade] collect.Gbase (第 1 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:30:45,840] WARNING monitor.degrade 55424 54672 rid=- [degrade] collect.Gbase (第 2 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:31:59,781] WARNING monitor.degrade 56256 41380 rid=- [degrade] collect.Gbase (第 1 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:31:59,782] WARNING monitor.degrade 56256 39828 rid=- [degrade] collect.Gbase (第 2 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 20:32:59,796] WARNING monitor.degrade 56256 54280 rid=- [degrade] collect.Gbase (第 3 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝，无",
+          "[2026-11-05 21:20:59,741] WARNING monitor.degrade 56256 14844 rid=- [degrade] collect.Gbase (第 100 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-05 22:10:59,793] WARNING monitor.degrade 56256 54688 rid=- [degrade] collect.Gbase (第 200 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-05 23:00:59,742] WARNING monitor.degrade 56256 26704 rid=- [degrade] collect.Gbase (第 300 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-05 23:50:59,772] WARNING monitor.degrade 56256 27400 rid=- [degrade] collect.Gbase (第 400 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 00:40:59,781] WARNING monitor.degrade 56256 24256 rid=- [degrade] collect.Gbase (第 500 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 01:30:59,772] WARNING monitor.degrade 56256 56748 rid=- [degrade] collect.Gbase (第 600 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 02:20:59,777] WARNING monitor.degrade 56256 57276 rid=- [degrade] collect.Gbase (第 700 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 03:10:59,753] WARNING monitor.degrade 56256 52044 rid=- [degrade] collect.Gbase (第 800 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 04:00:59,756] WARNING monitor.degrade 56256 35236 rid=- [degrade] collect.Gbase (第 900 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒绝",
+          "[2026-11-06 04:50:59,773] WARNING monitor.degrade 56256 49640 rid=- [degrade] collect.Gbase (第 1000 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 05:40:59,780] WARNING monitor.degrade 56256 41820 rid=- [degrade] collect.Gbase (第 1100 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 06:30:59,777] WARNING monitor.degrade 56256 35692 rid=- [degrade] collect.Gbase (第 1200 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 07:20:59,752] WARNING monitor.degrade 56256 45092 rid=- [degrade] collect.Gbase (第 1300 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 08:10:59,738] WARNING monitor.degrade 56256 47424 rid=- [degrade] collect.Gbase (第 1400 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 09:00:59,787] WARNING monitor.degrade 56256 50028 rid=- [degrade] collect.Gbase (第 1500 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 09:50:59,785] WARNING monitor.degrade 56256 37340 rid=- [degrade] collect.Gbase (第 1600 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 10:40:59,876] WARNING monitor.degrade 56256 58296 rid=- [degrade] collect.Gbase (第 1700 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 11:30:59,793] WARNING monitor.degrade 56256 20160 rid=- [degrade] collect.Gbase (第 1800 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 12:20:59,793] WARNING monitor.degrade 56256 44192 rid=- [degrade] collect.Gbase (第 1900 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 13:10:59,770] WARNING monitor.degrade 56256 59024 rid=- [degrade] collect.Gbase (第 2000 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 14:00:59,775] WARNING monitor.degrade 56256 59760 rid=- [degrade] collect.Gbase (第 2100 次) 原因=probe-gbase 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 14:50:59,798] WARNING monitor.degrade 56256 48432 rid=- [degrade] collect.Gbase (第 2200 次) 原因=GBase8A_测试库 异常=OperationalError: (2003, \"Can't connect to MySQL server on '127.0.0.1' ([WinError 10061] 由于目标计算机积极拒",
+          "[2026-11-06 15:26:02,850] WARNING monitor.checkers 31332 45276 rid=- DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��: No module named 'dmPython'",
+          "[2026-11-06 15:26:02,853] WARNING monitor.checkers 31332 45276 rid=- ��ȡ���μ����ʧ�ܣ�DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��",
+          "[2026-11-06 15:27:19,328] WARNING monitor.checkers 34712 21660 rid=- DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��: No module named 'dmPython'",
+          "[2026-11-06 15:27:19,329] WARNING monitor.checkers 34712 21660 rid=- ��ȡ���μ����ʧ�ܣ�DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��",
+          "[2026-11-06 15:32:21,975] WARNING monitor.checkers 37012 49232 rid=- DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��: No module named 'dmPython'",
+          "[2026-11-06 15:32:21,976] WARNING monitor.checkers 37012 49232 rid=- ��ȡ���μ����ʧ�ܣ�DM �����δע�᣺ȱ dmPython����ٷ���Ȩ��װ��"
+        ],
+        "mtime": "2026-11-06T15:32:21"
+      },
+      "error.log": {
+        "size": 551760,
+        "matches": [],
+        "mtime": "2026-11-06T15:31:57"
+      }
+    }
+  }
+}

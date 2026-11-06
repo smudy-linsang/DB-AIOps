@@ -1,0 +1,199 @@
+{
+  "captured_at": "2026-11-06T15:27:53",
+  "instance": {
+    "id": 9,
+    "name": "DM_测试库",
+    "host": "127.0.0.1",
+    "port": 5236,
+    "username": "SYSDBA"
+  },
+  "results": {
+    "V_SESSIONS_columns": {
+      "sql": "SELECT COLUMN_NAME FROM ALL_TAB_COLUMNS WHERE TABLE_NAME='V$SESSIONS' ORDER BY COLUMN_ID",
+      "ok": true,
+      "rows": []
+    },
+    "V_SESSIONS_row": {
+      "sql": "SELECT * FROM V$SESSIONS",
+      "ok": true,
+      "rows": [
+        [
+          "352328576",
+          "10",
+          "SELECT * FROM V$SESSIONS",
+          "ACTIVE",
+          "64",
+          "1",
+          "8",
+          "SYSDBA",
+          "SYSDBA",
+          "458246",
+          "2026-11-06 15:27:53",
+          "ODBC",
+          "+08:00",
+          "N",
+          "N",
+          "N",
+          "Y",
+          "N",
+          "N",
+          "Y",
+          "N",
+          "N",
+          "1",
+          "Smudy",
+          "python.exe",
+          "127.0.0.1:58336",
+          "Microsoft Windows 11",
+          "HOMOGENEOUS",
+          "352318176",
+          "RUNNING",
+          "RECEIVE",
+          "2026-11-06 15:27:53.520381",
+          "2026-11-06 15:27:53.520381",
+          "N",
+          "40712",
+          "1",
+          "0",
+          "65535",
+          "None",
+          "0",
+          "None",
+          "None",
+          "None",
+          "8.1.4.200",
+          "22",
+          "-1",
+          "",
+          "",
+          "",
+          "",
+          "0",
+          "0",
+          "None",
+          "0",
+          "ybz5skbinwjoo",
+          "NORMAL",
+          "0"
+        ]
+      ]
+    },
+    "V_VERSION_banner": {
+      "sql": "SELECT BANNER FROM V$VERSION",
+      "ok": true,
+      "rows": [
+        [
+          "DM Database Server 64 V8"
+        ],
+        [
+          "DB Version: 0x7000d"
+        ],
+        [
+          "03134284488-20260330-320063-20200"
+        ],
+        [
+          "Msg Version: 1"
+        ],
+        [
+          "Gsu level(5) cnt: 102"
+        ]
+      ]
+    },
+    "current_user": {
+      "sql": "SELECT USER FROM DUAL",
+      "ok": true,
+      "rows": [
+        [
+          "SYSDBA"
+        ]
+      ]
+    },
+    "V_DATABASE": {
+      "sql": "SELECT * FROM V$DATABASE",
+      "ok": true,
+      "rows": [
+        [
+          "DAMENG",
+          "2026-04-17 15:45:31",
+          "N",
+          "2026-11-06 15:24:59",
+          "4",
+          "0",
+          "0",
+          "16384",
+          "1",
+          "66",
+          "66",
+          "2026-11-03 14:33:52"
+        ]
+      ]
+    },
+    "dba_tables_sample": {
+      "sql": "SELECT OWNER, TABLE_NAME FROM DBA_TABLES WHERE ROWNUM <= 5",
+      "ok": true,
+      "rows": [
+        [
+          "SYS",
+          "SYSOBJECTS"
+        ],
+        [
+          "SYS",
+          "SYSINDEXES"
+        ],
+        [
+          "SYS",
+          "SYSCOLUMNS"
+        ],
+        [
+          "SYS",
+          "SYSUSER$"
+        ],
+        [
+          "SYS",
+          "SYSCONS"
+        ]
+      ]
+    },
+    "dba_tables_count": {
+      "sql": "SELECT COUNT(*) FROM DBA_TABLES",
+      "ok": true,
+      "rows": [
+        [
+          "87"
+        ]
+      ]
+    },
+    "dba_views_count": {
+      "sql": "SELECT COUNT(*) FROM DBA_VIEWS WHERE OWNER='SYSDBA'",
+      "ok": true,
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    "dba_indexes_count": {
+      "sql": "SELECT COUNT(*) FROM DBA_INDEXES WHERE OWNER='SYSDBA'",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    "perf_view_probe": {
+      "sql": "SELECT COUNT(*) FROM V$SESSIONS",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    "dm_dynamic_view": {
+      "sql": "SELECT COUNT(*) FROM V$DM_SESSIONS",
+      "ok": false,
+      "error": "ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$DM_SESSIONS] (-2106) (SQLExecDirectW)')"
+    }
+  }
+}

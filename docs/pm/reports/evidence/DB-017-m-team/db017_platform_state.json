@@ -1,0 +1,194 @@
+{
+  "captured_at": "2026-11-06T15:28:37",
+  "timeseries_by_config": {
+    "metric_point": [
+      [
+        "18",
+        "67130",
+        "2026-11-06 07:28:05.871644+00:00"
+      ],
+      [
+        "2",
+        "58089",
+        "2026-11-06 07:27:59.852131+00:00"
+      ],
+      [
+        "19",
+        "331",
+        "2026-11-06 07:28:01.101470+00:00"
+      ],
+      [
+        "28",
+        "18",
+        "2026-10-15 10:39:36.825261+00:00"
+      ],
+      [
+        "107",
+        "10",
+        "2026-10-15 10:45:24.802251+00:00"
+      ],
+      [
+        "29",
+        "6",
+        "2026-10-15 10:41:05.065559+00:00"
+      ],
+      [
+        "109",
+        "5",
+        "2026-10-15 10:47:03.195037+00:00"
+      ],
+      [
+        "108",
+        "5",
+        "2026-10-15 10:46:13.918315+00:00"
+      ],
+      [
+        "106",
+        "5",
+        "2026-10-15 10:43:46.245496+00:00"
+      ]
+    ],
+    "session_sample": [],
+    "sql_stat": [
+      [
+        "18",
+        "4723",
+        "2026-11-06 07:28:05.864355+00:00"
+      ],
+      [
+        "19",
+        "45",
+        "2026-11-06 07:28:01.096165+00:00"
+      ]
+    ]
+  },
+  "instances": [
+    {
+      "id": 1,
+      "name": "MySQL_测试库",
+      "db_type": "mysql",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 2,
+      "name": "PostgreSQL_测试库",
+      "db_type": "pgsql",
+      "host": "127.0.0.1",
+      "port": 5432,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 3,
+      "name": "Oracle_测试库",
+      "db_type": "oracle",
+      "host": "127.0.0.1",
+      "port": 1521,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 9,
+      "name": "DM_测试库",
+      "db_type": "dm",
+      "host": "127.0.0.1",
+      "port": 5236,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 10,
+      "name": "TDSQL_模拟测试库",
+      "db_type": "tdsql",
+      "host": "127.0.0.1",
+      "port": 3306,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 11,
+      "name": "GBase8A_测试库",
+      "db_type": "gbase",
+      "host": "127.0.0.1",
+      "port": 5258,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 15,
+      "name": "probe-gbase",
+      "db_type": "gbase",
+      "host": "127.0.0.1",
+      "port": 5258,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 16,
+      "name": "probe-tdsql",
+      "db_type": "tdsql",
+      "host": "127.0.0.1",
+      "port": 3308,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 18,
+      "name": "M-team probe-tdsql-proxy",
+      "db_type": "tdsql",
+      "host": "127.0.0.1",
+      "port": 15002,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    },
+    {
+      "id": 19,
+      "name": "M-team probe-mysql-8.0",
+      "db_type": "mysql",
+      "host": "127.0.0.1",
+      "port": 13306,
+      "is_active": true,
+      "cpu_cores": null,
+      "status": null,
+      "last_check": "None",
+      "last_error": "None"
+    }
+  ],
+  "dm_log_signals": [
+    "[2026-11-06 15:26:02,850] WARNING monitor.checkers 31332 45276 rid=- DM 检测器未注册：缺 dmPython（需官方授权安装）: No module named 'dmPython'",
+    "[2026-11-06 15:26:02,853] WARNING monitor.checkers 31332 45276 rid=- 获取达梦检查器失败：DM 检测器未注册：缺 dmPython（需官方授权安装）",
+    "[2026-11-06 15:27:19,328] WARNING monitor.checkers 34712 21660 rid=- DM 检测器未注册：缺 dmPython（需官方授权安装）: No module named 'dmPython'",
+    "[2026-11-06 15:27:19,329] WARNING monitor.checkers 34712 21660 rid=- 获取达梦检查器失败：DM 检测器未注册：缺 dmPython（需官方授权安装）"
+  ],
+  "dm_log_signal_total": 4
+}

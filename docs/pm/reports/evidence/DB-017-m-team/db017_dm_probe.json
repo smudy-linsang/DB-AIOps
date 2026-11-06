@@ -1,0 +1,118 @@
+{
+  "captured_at": "2026-11-06T15:27:18",
+  "probe": {
+    "instance": {
+      "id": 9,
+      "name": "DM_测试库",
+      "host": "127.0.0.1",
+      "port": 5236,
+      "username": "SYSDBA",
+      "is_active": true,
+      "credential": "len=9,head=***",
+      "credential_source": "platform local dev DB (decrypted in memory)"
+    },
+    "conn_str_template": "DRIVER={DM8 ODBC DRIVER};SERVER=127.0.0.1:5236;UID=SYSDBA;PWD=<hidden>",
+    "connect": {
+      "ok": true,
+      "ms": 230.7
+    },
+    "queries": [
+      {
+        "name": "select_1",
+        "sql": "SELECT 1 FROM DUAL",
+        "ok": true,
+        "rowcount": 1,
+        "sample": [
+          [
+            "1"
+          ]
+        ]
+      },
+      {
+        "name": "version",
+        "sql": "SELECT * FROM V$VERSION",
+        "ok": true,
+        "rowcount": 5,
+        "sample": [
+          [
+            "DM Database Server 64 V8"
+          ],
+          [
+            "DB Version: 0x7000d"
+          ],
+          [
+            "03134284488-20260330-320063-20200"
+          ],
+          [
+            "Msg Version: 1"
+          ],
+          [
+            "Gsu level(5) cnt: 102"
+          ]
+        ]
+      },
+      {
+        "name": "current_schema",
+        "sql": "SELECT USER FROM DUAL",
+        "ok": true,
+        "rowcount": 1,
+        "sample": [
+          [
+            "SYSDBA"
+          ]
+        ]
+      },
+      {
+        "name": "db_name",
+        "sql": "SELECT NAME FROM V$DATABASE",
+        "ok": true,
+        "rowcount": 1,
+        "sample": [
+          [
+            "DAMENG"
+          ]
+        ]
+      },
+      {
+        "name": "table_count",
+        "sql": "SELECT COUNT(*) FROM DBA_TABLES WHERE OWNER = (SELECT USER FROM DUAL)",
+        "ok": true,
+        "rowcount": 1,
+        "sample": [
+          [
+            "1"
+          ]
+        ]
+      },
+      {
+        "name": "session_info",
+        "sql": "SELECT SESSID, USER_NAME, HOST_NAME, CLNT_IP, TYPE FROM V$SESSIONS",
+        "ok": false,
+        "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[HOST_NAME] (-2111) (SQLExecDirectW)')"
+      },
+      {
+        "name": "dm_sys_table",
+        "sql": "SELECT COUNT(*) FROM DBA_TABLES WHERE TABLE_NAME LIKE 'V$%'",
+        "ok": true,
+        "rowcount": 1,
+        "sample": [
+          [
+            "0"
+          ]
+        ]
+      }
+    ],
+    "detector_layer": {
+      "DM_DRIVER_AVAILABLE": false,
+      "DM_DRIVER_ERROR": "No module named 'dmPython'",
+      "get_checker_dm": "None",
+      "CHECKER_MAP_keys": [
+        "gbase",
+        "mysql",
+        "oracle",
+        "pgsql",
+        "tdsql"
+      ]
+    }
+  }
+}

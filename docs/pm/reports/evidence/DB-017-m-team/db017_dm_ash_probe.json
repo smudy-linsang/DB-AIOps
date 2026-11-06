@@ -1,0 +1,113 @@
+{
+  "captured_at": "2026-11-06T15:30:14",
+  "instance": {
+    "id": 9,
+    "name": "DM_测试库",
+    "host": "127.0.0.1",
+    "port": 5236
+  },
+  "results": [
+    {
+      "name": "sentinel.ping.dm",
+      "sql": "SELECT 1 FROM DUAL",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "sentinel.golden.v_session",
+      "sql": "SELECT count(*) FROM v$session WHERE type='USER'",
+      "ok": false,
+      "error": "ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[v$session] (-2106) (SQLExecDirectW)')"
+    },
+    {
+      "name": "sentinel.golden.v_parameter",
+      "sql": "SELECT value FROM v$parameter WHERE name='sessions'",
+      "ok": true,
+      "rows": []
+    },
+    {
+      "name": "sentinel.ash_oracle.probe",
+      "sql": "SELECT * FROM (SELECT SESS_ID, USER_ID, SQL_TEXT, STATE, WAIT_TYPE, WAIT_TIME FROM V$SESSIONS) WHERE ROWNUM<=1",
+      "ok": false,
+      "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[USER_ID] (-2111) (SQLExecDirectW)')"
+    },
+    {
+      "name": "sentinel.ash_oracle.v_session",
+      "sql": "SELECT count(*) FROM v$session",
+      "ok": false,
+      "error": "ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[v$session] (-2106) (SQLExecDirectW)')"
+    },
+    {
+      "name": "checker.v_sessions.state",
+      "sql": "SELECT count(*) FROM v$sessions WHERE STATE='ACTIVE'",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "checker.v_session_wait",
+      "sql": "SELECT count(*) FROM V$SESSION_WAIT WHERE EVENT != 'Idle'",
+      "ok": false,
+      "error": "ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$SESSION_WAIT] (-2106) (SQLExecDirectW)')"
+    },
+    {
+      "name": "checker.v_instance.log_size",
+      "sql": "SELECT LOG_SIZE FROM V$INSTANCE",
+      "ok": false,
+      "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[LOG_SIZE] (-2111) (SQLExecDirectW)')"
+    },
+    {
+      "name": "checker.v_deadlock",
+      "sql": "SELECT COUNT(*) FROM V$DEADLOCK_HISTORY",
+      "ok": true,
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "checker.v_trx",
+      "sql": "SELECT count(*) FROM V$TRX",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    },
+    {
+      "name": "checker.v_arch_file",
+      "sql": "SELECT count(*) FROM V$ARCH_FILE",
+      "ok": true,
+      "rows": [
+        [
+          "0"
+        ]
+      ]
+    },
+    {
+      "name": "checker.v_rlog",
+      "sql": "SELECT COUNT(*) FROM V$RLOG WHERE STATUS='ACTIVE'",
+      "ok": false,
+      "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')"
+    },
+    {
+      "name": "checker.v_rlog_plain",
+      "sql": "SELECT COUNT(*) FROM V$RLOG",
+      "ok": true,
+      "rows": [
+        [
+          "1"
+        ]
+      ]
+    }
+  ]
+}
