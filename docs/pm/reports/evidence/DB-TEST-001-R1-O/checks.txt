@@ -1,0 +1,40 @@
+test_authorization_failure_and_missing_names (health_tests.HealthTests.test_authorization_failure_and_missing_names) ... ok
+test_present_secrets_never_appear_in_snapshot (health_tests.HealthTests.test_present_secrets_never_appear_in_snapshot) ... ok
+test_read_failure_remains_visible (health_tests.HealthTests.test_read_failure_remains_visible) ... ok
+
+----------------------------------------------------------------------
+Ran 3 tests in 0.000s
+
+OK
+
+Read-only real order resolution PASS (virtual manifest):
+{
+  "job_key": "a1a76fa9e2a67f061ef6bc7f51524998fc60e853dfe898978de3fac04a343078",
+  "task_id": "DB-TEST-001",
+  "round": 1,
+  "source_sha": "2bd6f9cc4bc32532e4e892f28b77a547b818c4da",
+  "dispatch_sha": "2bd6f9cc4bc32532e4e892f28b77a547b818c4da",
+  "manifest_path": "docs/pm/dispatch/DB-TEST-001-auto-O.json",
+  "order_path": "docs/pm/orders/DB-TEST-001-自动链全链路验收.md",
+  "requires": [],
+  "report_path": "docs/pm/reports/DB-TEST-001-R1-review-O.md",
+  "receipt_path": "docs/pm/reports/DB-TEST-001-R1-review-O.receipt.json",
+  "evidence_prefix": "docs/pm/reports/evidence/DB-TEST-001-R1-O/"
+}
+
+Runtime metadata (explicit non-secret allowlist):
+{
+  "GITHUB_ACTIONS": "true",
+  "GITHUB_RUN_ID": "42140048710",
+  "GITHUB_RUN_ATTEMPT": "1",
+  "GITHUB_WORKFLOW": "O DB-AIOps automatic review",
+  "GITHUB_EVENT_NAME": "push",
+  "GITHUB_SHA": "2bd6f9cc4bc32532e4e892f28b77a547b818c4da",
+  "GITHUB_REPOSITORY": "smudy-linsang/DB-AIOps",
+  "RUNNER_OS": "Linux"
+}
+Python 3.12.16 (main, Oct 26 2026, 02:50:49) [GCC 13.3.0]
+docs/pm/reports/DB-TEST-001-ack-O.md: ABSENT at source
+docs/pm/reports/DB-TEST-001-R1-ack-O.md: ABSENT at source
+docs/pm/reports/DB-TEST-001-report-A.md: ABSENT at source
+docs/pm/reports/DB-003-report-自动链接入.md: ABSENT at source

@@ -1,0 +1,39 @@
+{
+  "schema_version": 1,
+  "role": "O",
+  "task_id": "DB-TEST-001",
+  "round": 1,
+  "source_sha": "2bd6f9cc4bc32532e4e892f28b77a547b818c4da",
+  "job_key": "a1a76fa9e2a67f061ef6bc7f51524998fc60e853dfe898978de3fac04a343078",
+  "conclusion": "有条件通过",
+  "report_path": "docs/pm/reports/DB-TEST-001-R1-review-O.md",
+  "report_sha256": "321423a0b142075f0136379b792784ec2e2790137a4cc3084e65f93d0f30f225",
+  "checks": [
+    {
+      "name": "actions-runtime-metadata",
+      "result": "PASS"
+    },
+    {
+      "name": "fixed-source-real-order-resolution",
+      "result": "PASS"
+    },
+    {
+      "name": "synthetic-health-tests-3",
+      "result": "PASS"
+    },
+    {
+      "name": "poller-broadcast-A-final-acceptance",
+      "result": "BLOCKED"
+    },
+    {
+      "name": "O-prior-ack-and-publication",
+      "result": "BLOCKED"
+    }
+  ],
+  "evidence": [
+    {
+      "path": "docs/pm/reports/evidence/DB-TEST-001-R1-O/checks.txt",
+      "sha256": "37073fccb4077427af8019d21b3010fc33fba238964f83fbde5072b455e7b3da"
+    }
+  ]
+}
