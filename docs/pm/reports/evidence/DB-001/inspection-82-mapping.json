@@ -158,7 +158,7 @@
    "tested": "无测试引用",
    "reusable_method": "GenericDetector.detect_index_usage",
    "workload": null,
-   "dialect_notes": "现有检测器实现支持 mysql, pgsql, oracle；缺 dm (V)、gbase 分支；tdsql 可复用 mysql 分支。",
+   "dialect_notes": "现有检测器实现支持 mysql, pgsql, oracle；缺 dm (V$INDEX_USAGE)、gbase 分支；tdsql 可复用 mysql 分支。",
    "eval_notes": "可复用 I011 (detect_index_usage)。业务逻辑完全吻合（均查30天未使用索引）。缺注册别名挂接与 DM/GBase 方言兼容证明。"
   },
   {
@@ -301,7 +301,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "MySQL (binlog/relay log)、PG (WAL/replication slot) 复制架构不同，本项归档间隙仅对 Oracle/DM 有效，其余 4 库方言不适用。",
-   "eval_notes": "无等价检测器，需新写。检查 v 中 sequence# 连续性与备库同步断层。"
+   "eval_notes": "无等价检测器，需新写。检查 v$archived_log 中 sequence# 连续性与备库同步断层。"
   },
   {
    "item_id": "INS-COM-LOG-SWITCH",
@@ -315,7 +315,7 @@
    "reusable_method": "GenericDetector.detect_log_switch_freq",
    "workload": null,
    "dialect_notes": "MySQL/PG 等引擎无 Oracle redo log 环形切换机制，其余 4 库方言不适用。",
-   "eval_notes": "可复用 I105 (detect_log_switch_freq)。Oracle 逻辑完全一致（查 v，avg > 20 告警）。缺别名挂接与 DM (V) 适配证明。"
+   "eval_notes": "可复用 I105 (detect_log_switch_freq)。Oracle 逻辑完全一致（查 v$log_history，avg > 20 告警）。缺别名挂接与 DM (V$RLOG) 适配证明。"
   },
   {
    "item_id": "INS-COM-LOCK-WAIT",
@@ -328,7 +328,7 @@
    "tested": "无测试引用",
    "reusable_method": null,
    "workload": "中",
-   "dialect_notes": "6 库全支持，但各库实时锁表（v / data_lock_waits / pg_locks / V）字段与等待模式不同。",
+   "dialect_notes": "6 库全支持，但各库实时锁表（v$lock / data_lock_waits / pg_locks / V$LOCK）字段与等待模式不同。",
    "eval_notes": "无等价检测器，需新写。需为 6 库编写即时行锁/表锁等待查询。"
   },
   {
@@ -357,7 +357,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "MySQL、PG、GBase、TDSQL 无数据库级 open_cursors 参数与全局游标上限限制，对这 4 种数据库属于方言不适用。",
-   "eval_notes": "无等价检测器，需新写。查询 v 与 v 计算游标使用率，仅适用 Oracle/DM。"
+   "eval_notes": "无等价检测器，需新写。查询 v$sesstat 与 v$parameter 计算游标使用率，仅适用 Oracle/DM。"
   },
   {
    "item_id": "INS-COM-TEMP-USAGE",
@@ -370,7 +370,7 @@
    "tested": "无测试引用",
    "reusable_method": null,
    "workload": "中",
-   "dialect_notes": "TDSQL 分布式架构未声明；各库临时段管理机制差异显著（Oracle 查 dba_temp_files/v，PG 查 temp tablespaces）。",
+   "dialect_notes": "TDSQL 分布式架构未声明；各库临时段管理机制差异显著（Oracle 查 dba_temp_files/v$sort_usage，PG 查 temp tablespaces）。",
    "eval_notes": "无等价检测器，需新写。detect_disk_space 仅查数据表空间，未包含临时表空间排序/哈希段检测。"
   },
   {
@@ -385,7 +385,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "PG 采用堆内 MVCC 行版本机制，无独立 Undo 表空间，定义中列入 PG 属于方言不适用；MySQL/GBase 未声明。仅对 Oracle/DM 适用。",
-   "eval_notes": "无等价检测器，需新写。Oracle 查 v，DM 查 V；PG 必须明确标注方言不适用并优雅 skip。"
+   "eval_notes": "无等价检测器，需新写。Oracle 查 v$undostat，DM 查 V$UNDO_SPACE；PG 必须明确标注方言不适用并优雅 skip。"
   },
   {
    "item_id": "INS-COM-FRAG-TABLE",
@@ -531,7 +531,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "Oracle 专属特性（快速恢复区），其余 5 种数据库方言不适用。",
-   "eval_notes": "无等价检测器，需新写。detect_disk_space 仅查表空间，需新增 v 空间利用率检测。"
+   "eval_notes": "无等价检测器，需新写。detect_disk_space 仅查表空间，需新增 v$recovery_file_dest 空间利用率检测。"
   },
   {
    "item_id": "INS-ORA-CTRL-BAK",
@@ -545,7 +545,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "Oracle 专属特性（控制文件自动备份），其余 5 种数据库方言不适用。",
-   "eval_notes": "无等价检测器，需新写。检查 v 自动备份开关及近期备份生成时间。"
+   "eval_notes": "无等价检测器，需新写。检查 v$rman_configuration 自动备份开关及近期备份生成时间。"
   },
   {
    "item_id": "INS-ORA-ARCH-DELETE",
@@ -559,7 +559,7 @@
    "reusable_method": null,
    "workload": "小",
    "dialect_notes": "Oracle 专属特性（RMAN 归档删除策略），其余 5 种数据库方言不适用。",
-   "eval_notes": "无等价检测器，需新写。检查 v 归档删除策略是否配置为 APPLIED ON ALL STANDBY 或等价保护。"
+   "eval_notes": "无等价检测器，需新写。检查 v$rman_configuration 归档删除策略是否配置为 APPLIED ON ALL STANDBY 或等价保护。"
   },
   {
    "item_id": "INS-ORA-DBA-USERS",
