@@ -43,42 +43,42 @@
 | 41 | `INS-ORA-ARCH-DELETE` | 归档日志清理策略 | weekly | oracle | `detect_arch_deletion_policy` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
 | 42 | `INS-ORA-DBA-USERS` | DBA 权限账号 | monthly | oracle | `detect_dba_users` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
 | 43 | `INS-ORA-TS-AUTOEXT` | 表空间自动扩展 | monthly | oracle,dm | `detect_ts_autoextend` | GenericDetector | 否 | 无测试引用 | **语义相近可复用 (GenericDetector.detect_disk_space)** |
-| 44 | `INS-ORA-LOB-PCT` | LOB PCTVERSION 异常 | monthly | oracle | `detect_lob_pctversion` | - | 否 | 无测试引用 | **无同名实现** |
-| 45 | `INS-ORA-DBLINK` | 残留 DBLINK | monthly | oracle | `detect_dblinks` | - | 否 | 无测试引用 | **无同名实现** |
-| 46 | `INS-ORA-DIR-OBJ` | Directory 对象 | monthly | oracle | `detect_directory_objects` | - | 否 | 无测试引用 | **无同名实现** |
-| 47 | `INS-ORA-RMAN-AGE` | RMAN 备份距今 | daily | oracle | `detect_rman_backup_age` | - | 否 | 无测试引用 | **无同名实现** |
-| 48 | `INS-ORA-DG-LAG` | DataGuard Lag | daily | oracle | `detect_dg_lag` | - | 否 | 无测试引用 | **无同名实现** |
-| 49 | `INS-ORA-DG-STATUS` | DataGuard 状态 | daily | oracle | `detect_dg_status` | - | 否 | 无测试引用 | **无同名实现** |
-| 50 | `INS-ORA-RAC-VIP` | RAC VIP 状态 | daily | oracle | `detect_rac_vip` | - | 否 | 无测试引用 | **无同名实现** |
-| 51 | `INS-ORA-REDOLOG-SIZE` | Redo Log 大小 | monthly | oracle | `detect_redolog_size` | - | 否 | 无测试引用 | **无同名实现** |
-| 52 | `INS-ORA-OPT-STATS-GATHER` | 自动统计信息收集 | weekly | oracle | `detect_auto_stats_gather` | - | 否 | 无测试引用 | **无同名实现** |
-| 53 | `INS-ORA-OPEN-FILE` | 打开文件数 | daily | oracle | `detect_open_files` | - | 否 | 无测试引用 | **无同名实现** |
-| 54 | `INS-ORA-LOB-CACHE` | LOB CACHE 读取 | monthly | oracle | `detect_lob_cache_hit` | - | 否 | 无测试引用 | **无同名实现** |
-| 55 | `INS-ORA-ASH-USAGE` | ASH 内存使用 | monthly | oracle | `detect_ash_memory` | - | 否 | 无测试引用 | **无同名实现** |
-| 56 | `INS-ORA-RMAN-CONF` | RMAN 配置 | monthly | oracle | `detect_rman_config` | - | 否 | 无测试引用 | **无同名实现** |
-| 57 | `INS-ORA-AUDIT-TRAIL` | 审计日志 | weekly | oracle | `detect_audit_trail` | - | 否 | 无测试引用 | **无同名实现** |
-| 58 | `INS-ORA-PGA-LEAK` | PGA 泄漏 | monthly | oracle | `detect_pga_leak` | - | 否 | 无测试引用 | **无同名实现** |
-| 59 | `INS-ORA-IO-STAT` | IO 分布 | monthly | oracle | `detect_io_distribution` | - | 否 | 无测试引用 | **无同名实现** |
-| 60 | `INS-ORA-EXADATA` | Exadata 特性 | monthly | oracle | `detect_exadata_features` | - | 否 | 无测试引用 | **无同名实现** |
-| 61 | `INS-MYSQL-BINLOG-DELAY` | Binlog Dump 延迟 | daily | mysql,tdsql | `detect_binlog_dump_delay` | - | 否 | 无测试引用 | **无同名实现** |
-| 62 | `INS-MYSQL-GTID` | GTID 一致性 | weekly | mysql,tdsql | `detect_gtid_consistency` | - | 否 | 无测试引用 | **无同名实现** |
-| 63 | `INS-MYSQL-SEMI-SYNC` | 半同步复制状态 | daily | mysql,tdsql | `detect_semi_sync` | - | 否 | 无测试引用 | **无同名实现** |
-| 64 | `INS-MYSQL-EVENT` | Event 调度器 | weekly | mysql,tdsql | `detect_event_scheduler` | - | 否 | 无测试引用 | **无同名实现** |
-| 65 | `INS-MYSQL-FK-CASCADE` | 危险外键级联 | monthly | mysql,tdsql | `detect_dangerous_fk` | - | 否 | 无测试引用 | **无同名实现** |
-| 66 | `INS-MYSQL-TMP-DISK` | 磁盘临时表比例 | daily | mysql,tdsql | `detect_tmp_disk_ratio` | - | 否 | 无测试引用 | **无同名实现** |
-| 67 | `INS-PG-WAL-RECV` | WAL Receiver 状态 | daily | pgsql | `detect_wal_receiver` | - | 否 | 无测试引用 | **无同名实现** |
-| 68 | `INS-PG-INACTIVE-SLOT` | 失效复制槽 | daily | pgsql | `detect_inactive_repl_slot` | - | 否 | 无测试引用 | **无同名实现** |
-| 69 | `INS-PG-VACUUM-FREEZE` | Freeze Age | daily | pgsql | `detect_freeze_age` | - | 否 | 无测试引用 | **无同名实现** |
-| 70 | `INS-PG-BLOAT` | 表/索引膨胀 | weekly | pgsql | `detect_bloat` | - | 否 | 无测试引用 | **无同名实现** |
-| 71 | `INS-PG-EXT-OUTDATED` | 扩展版本 | monthly | pgsql | `detect_extension_versions` | - | 否 | 无测试引用 | **无同名实现** |
-| 72 | `INS-PG-STMT-TIMEOUT` | Statement Timeout | monthly | pgsql | `detect_statement_timeout` | - | 否 | 无测试引用 | **无同名实现** |
-| 73 | `INS-DM-DSC` | DSC 节点状态 | daily | dm | `detect_dsc_nodes` | - | 否 | 无测试引用 | **无同名实现** |
-| 74 | `INS-DM-DW-STANDBY` | 主备同步状态 | daily | dm | `detect_dw_standby` | - | 否 | 无测试引用 | **无同名实现** |
-| 75 | `INS-DM-ARCH` | 归档状态 | daily | dm | `detect_dm_arch` | - | 否 | 无测试引用 | **无同名实现** |
-| 76 | `INS-DM-RLOG` | RLOG 同步状态 | daily | dm | `detect_dm_rlog` | - | 否 | 无测试引用 | **无同名实现** |
-| 77 | `INS-GBASE-BALANCE` | 节点负载均衡 | daily | gbase | `detect_gbase_node_balance` | - | 否 | 无测试引用 | **无同名实现** |
-| 78 | `INS-GBASE-DIST` | 数据分布均衡 | weekly | gbase | `detect_gbase_distribution` | - | 否 | 无测试引用 | **无同名实现** |
-| 79 | `INS-GBASE-NODE-DOWN` | 节点宕机 | daily | gbase | `detect_gbase_node_down` | - | 否 | 无测试引用 | **无同名实现** |
+| 44 | `INS-ORA-LOB-PCT` | LOB PCTVERSION 异常 | monthly | oracle | `detect_lob_pctversion` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 45 | `INS-ORA-DBLINK` | 残留 DBLINK | monthly | oracle | `detect_dblinks` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 46 | `INS-ORA-DIR-OBJ` | Directory 对象 | monthly | oracle | `detect_directory_objects` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 47 | `INS-ORA-RMAN-AGE` | RMAN 备份距今 | daily | oracle | `detect_rman_backup_age` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 48 | `INS-ORA-DG-LAG` | DataGuard Lag | daily | oracle | `detect_dg_lag` | - | 否 | 无测试引用 | **缺实现 (中，限Oracle)** |
+| 49 | `INS-ORA-DG-STATUS` | DataGuard 状态 | daily | oracle | `detect_dg_status` | - | 否 | 无测试引用 | **缺实现 (中，限Oracle)** |
+| 50 | `INS-ORA-RAC-VIP` | RAC VIP 状态 | daily | oracle | `detect_rac_vip` | - | 否 | 无测试引用 | **缺实现 (中，限Oracle)** |
+| 51 | `INS-ORA-REDOLOG-SIZE` | Redo Log 大小 | monthly | oracle | `detect_redolog_size` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 52 | `INS-ORA-OPT-STATS-GATHER` | 自动统计信息收集 | weekly | oracle | `detect_auto_stats_gather` | GenericDetector | 否 | 无测试引用 | **语义相近可复用 (GenericDetector.detect_auto_task_status)** |
+| 53 | `INS-ORA-OPEN-FILE` | 打开文件数 | daily | oracle | `detect_open_files` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 54 | `INS-ORA-LOB-CACHE` | LOB CACHE 读取 | monthly | oracle | `detect_lob_cache_hit` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 55 | `INS-ORA-ASH-USAGE` | ASH 内存使用 | monthly | oracle | `detect_ash_memory` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 56 | `INS-ORA-RMAN-CONF` | RMAN 配置 | monthly | oracle | `detect_rman_config` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 57 | `INS-ORA-AUDIT-TRAIL` | 审计日志 | weekly | oracle | `detect_audit_trail` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 58 | `INS-ORA-PGA-LEAK` | PGA 泄漏 | monthly | oracle | `detect_pga_leak` | - | 否 | 无测试引用 | **缺实现 (小，限Oracle)** |
+| 59 | `INS-ORA-IO-STAT` | IO 分布 | monthly | oracle | `detect_io_distribution` | - | 否 | 无测试引用 | **缺实现 (中，限Oracle)** |
+| 60 | `INS-ORA-EXADATA` | Exadata 特性 | monthly | oracle | `detect_exadata_features` | - | 否 | 无测试引用 | **缺实现 (中，限Oracle)** |
+| 61 | `INS-MYSQL-BINLOG-DELAY` | Binlog Dump 延迟 | daily | mysql,tdsql | `detect_binlog_dump_delay` | GenericDetector | 否 | 无测试引用 | **语义相近可复用 (GenericDetector.detect_replication_lag)** |
+| 62 | `INS-MYSQL-GTID` | GTID 一致性 | weekly | mysql,tdsql | `detect_gtid_consistency` | - | 否 | 无测试引用 | **缺实现 (中，限MySQL/TDSQL)** |
+| 63 | `INS-MYSQL-SEMI-SYNC` | 半同步复制状态 | daily | mysql,tdsql | `detect_semi_sync` | - | 否 | 无测试引用 | **缺实现 (小，限MySQL/TDSQL)** |
+| 64 | `INS-MYSQL-EVENT` | Event 调度器 | weekly | mysql,tdsql | `detect_event_scheduler` | - | 否 | 无测试引用 | **缺实现 (小，限MySQL/TDSQL)** |
+| 65 | `INS-MYSQL-FK-CASCADE` | 危险外键级联 | monthly | mysql,tdsql | `detect_dangerous_fk` | - | 否 | 无测试引用 | **缺实现 (小，限MySQL/TDSQL)** |
+| 66 | `INS-MYSQL-TMP-DISK` | 磁盘临时表比例 | daily | mysql,tdsql | `detect_tmp_disk_ratio` | - | 否 | 无测试引用 | **缺实现 (小，限MySQL/TDSQL)** |
+| 67 | `INS-PG-WAL-RECV` | WAL Receiver 状态 | daily | pgsql | `detect_wal_receiver` | - | 否 | 无测试引用 | **缺实现 (小，限PostgreSQL)** |
+| 68 | `INS-PG-INACTIVE-SLOT` | 失效复制槽 | daily | pgsql | `detect_inactive_repl_slot` | - | 否 | 无测试引用 | **缺实现 (小，限PostgreSQL)** |
+| 69 | `INS-PG-VACUUM-FREEZE` | Freeze Age | daily | pgsql | `detect_freeze_age` | - | 否 | 无测试引用 | **缺实现 (小，限PostgreSQL)** |
+| 70 | `INS-PG-BLOAT` | 表/索引膨胀 | weekly | pgsql | `detect_bloat` | - | 否 | 无测试引用 | **缺实现 (中，限PostgreSQL)** |
+| 71 | `INS-PG-EXT-OUTDATED` | 扩展版本 | monthly | pgsql | `detect_extension_versions` | - | 否 | 无测试引用 | **缺实现 (小，限PostgreSQL)** |
+| 72 | `INS-PG-STMT-TIMEOUT` | Statement Timeout | monthly | pgsql | `detect_statement_timeout` | - | 否 | 无测试引用 | **缺实现 (小，限PostgreSQL)** |
+| 73 | `INS-DM-DSC` | DSC 节点状态 | daily | dm | `detect_dsc_nodes` | - | 否 | 无测试引用 | **缺实现 (中，限DM)** |
+| 74 | `INS-DM-DW-STANDBY` | 主备同步状态 | daily | dm | `detect_dw_standby` | - | 否 | 无测试引用 | **缺实现 (中，限DM)** |
+| 75 | `INS-DM-ARCH` | 归档状态 | daily | dm | `detect_dm_arch` | - | 否 | 无测试引用 | **缺实现 (小，限DM)** |
+| 76 | `INS-DM-RLOG` | RLOG 同步状态 | daily | dm | `detect_dm_rlog` | - | 否 | 无测试引用 | **缺实现 (中，限DM)** |
+| 77 | `INS-GBASE-BALANCE` | 节点负载均衡 | daily | gbase | `detect_gbase_node_balance` | - | 否 | 无测试引用 | **缺实现 (中，限GBase)** |
+| 78 | `INS-GBASE-DIST` | 数据分布均衡 | weekly | gbase | `detect_gbase_distribution` | - | 否 | 无测试引用 | **缺实现 (中，限GBase)** |
+| 79 | `INS-GBASE-NODE-DOWN` | 节点宕机 | daily | gbase | `detect_gbase_node_down` | - | 否 | 无测试引用 | **缺实现 (中，限GBase)** |
 | 80 | `INS-TDSQL-SHARD` | Set 主备健康 | daily | tdsql | `detect_tdsql_set_health` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |
 | 81 | `INS-TDSQL-PROXY` | Proxy 网关状态 | daily | tdsql | `detect_tdsql_proxy` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |
 | 82 | `INS-TDSQL-SHARDKEY` | 分片表配置 | daily | tdsql | `detect_tdsql_shardkey` | TDSQLDetector | 是 | 无测试引用 | **直接命中** |
