@@ -1,0 +1,498 @@
+{
+  "generated_at": "2026-11-07T04:06:39.713640+00:00",
+  "side_effects": [
+    "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
+  ],
+  "base": "http://<local-host>:<platform-port>",
+  "window": "24h",
+  "periodic_days": 7,
+  "instances": {
+    "18": {
+      "continuity": {
+        "config_id": 18,
+        "now": "2026-11-07T04:06:39.716328+00:00",
+        "lookback_hours": 48,
+        "min_time": "2026-11-05 12:32:58.414492+00:00",
+        "max_time": "2026-11-07 04:06:00.745759+00:00",
+        "rows": 28482,
+        "distinct_digests": 46,
+        "distinct_time_points": 2359,
+        "gap_count_gt_180s": 0,
+        "first_time_point": "2026-11-05 12:32:58.414492+00:00",
+        "last_time_point": "2026-11-07 04:06:00.745759+00:00",
+        "baseline_day_window": {
+          "from": "2026-11-05T04:06:39.716328+00:00",
+          "to": "2026-11-06T04:06:39.716328+00:00",
+          "rows": 3875,
+          "distinct_digests": 27,
+          "min_time": "2026-11-05 12:32:58.414492+00:00",
+          "max_time": "2026-11-06 04:05:59.169428+00:00"
+        },
+        "current_24h_window": {
+          "from": "2026-11-06T04:06:39.716328+00:00",
+          "to": "2026-11-07T04:06:39.716328+00:00",
+          "rows": 24607,
+          "distinct_digests": 43
+        }
+      },
+      "regression_day": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-regression/?window=24h&baseline=day",
+        "http": 200,
+        "kind": "昨日同时段环比 (baseline=day)",
+        "window": {
+          "from": "2026-11-06T04:06:39.819398+00:00",
+          "to": "2026-11-07T04:06:39.819398+00:00"
+        },
+        "baseline": {
+          "kind": "day",
+          "from": "2026-11-05T04:06:39.819398+00:00",
+          "to": "2026-11-06T04:06:39.819398+00:00"
+        },
+        "counts": {
+          "regressed": 2,
+          "new": 19,
+          "improved": 1,
+          "gone": 3,
+          "stable": 21
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": null,
+        "basis_warning": null,
+        "items_returned": 25,
+        "items": [
+          {
+            "digest12": "d1b847d614e6",
+            "status": "regressed",
+            "avg_ratio": 1.38,
+            "exec_ratio": 2.79,
+            "impact_ms": 140341,
+            "plan_changed_at": null,
+            "cur": {
+              "exec": 2606,
+              "total_ms": 189608,
+              "avg_ms": 72.758,
+              "rows_examined_per_exec": 9540.0,
+              "lock_ms_per_exec": 0.001
+            },
+            "base": {
+              "exec": 934,
+              "total_ms": 49267,
+              "avg_ms": 52.748,
+              "rows_examined_per_exec": 9540.0,
+              "lock_ms_per_exec": 0.0
+            }
+          },
+          {
+            "digest12": "87b19c8074a0",
+            "status": "regressed",
+            "avg_ratio": 1.07,
+            "exec_ratio": 2.0,
+            "impact_ms": 2830,
+            "plan_changed_at": null,
+            "cur": {
+              "exec": 2,
+              "total_ms": 5305,
+              "avg_ms": 2652.5,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "base": {
+              "exec": 1,
+              "total_ms": 2475,
+              "avg_ms": 2475.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            }
+          },
+          {
+            "digest12": "403d6015f4e5",
+            "status": "improved",
+            "avg_ratio": 0.62,
+            "exec_ratio": 1.01,
+            "impact_ms": -2285,
+            "plan_changed_at": "2026-11-06T07:44:06.381994+00:00",
+            "cur": {
+              "exec": 278,
+              "total_ms": 3957,
+              "avg_ms": 14.234,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "base": {
+              "exec": 274,
+              "total_ms": 6242,
+              "avg_ms": 22.781,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            }
+          },
+          {
+            "digest12": "70efc887a83b",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -4,
+            "plan_changed_at": null,
+            "cur": {
+              "exec": null,
+              "total_ms": null,
+              "avg_ms": null,
+              "rows_examined_per_exec": null,
+              "lock_ms_per_exec": null
+            },
+            "base": {
+              "exec": 1,
+              "total_ms": 4,
+              "avg_ms": 4.0,
+              "rows_examined_per_exec": 27.0,
+              "lock_ms_per_exec": 0.0
+            }
+          },
+          {
+            "digest12": "5b4d544d8965",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "plan_changed_at": null,
+            "cur": {
+              "exec": null,
+              "total_ms": null,
+              "avg_ms": null,
+              "rows_examined_per_exec": null,
+              "lock_ms_per_exec": null
+            },
+            "base": {
+              "exec": 1,
+              "total_ms": 1,
+              "avg_ms": 1.0,
+              "rows_examined_per_exec": 19.0,
+              "lock_ms_per_exec": 0.0
+            }
+          },
+          {
+            "digest12": "c0b367163f05",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "plan_changed_at": null,
+            "cur": {
+              "exec": null,
+              "total_ms": null,
+              "avg_ms": null,
+              "rows_examined_per_exec": null,
+              "lock_ms_per_exec": null
+            },
+            "base": {
+              "exec": 1,
+              "total_ms": 1,
+              "avg_ms": 1.0,
+              "rows_examined_per_exec": 17.0,
+              "lock_ms_per_exec": 0.0
+            }
+          }
+        ],
+        "new_digest12_list": [
+          "f0b08114c94b",
+          "9fd00cac2394",
+          "4728b04636d6",
+          "dd88d28f718f",
+          "ff04b29f27c9",
+          "2215519697e2",
+          "d5382476e405",
+          "73460fbc970b",
+          "d75cc4c222de",
+          "c2af55bfab4e",
+          "9d03ea459f03",
+          "fb7f1e01687a",
+          "056a48bfb654",
+          "4fc74e0a3b61",
+          "8f24dab22f4c",
+          "b715edd335c8",
+          "b70a6695680a",
+          "a34fab38cc66",
+          "ce04eda080d3"
+        ],
+        "items_detail_note": "仅展开 regressed/improved/gone 明细；new 项只留 digest12 列表"
+      },
+      "regression_week": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-regression/?window=24h&baseline=week",
+        "http": 200,
+        "kind": "上周同时段环比 (baseline=week)",
+        "window": {
+          "from": "2026-11-06T04:06:39.945235+00:00",
+          "to": "2026-11-07T04:06:39.945235+00:00"
+        },
+        "baseline": {
+          "kind": "week",
+          "from": "2026-10-30T04:06:39.945235+00:00",
+          "to": "2026-10-31T04:06:39.945235+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 43,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "basis_warning": null,
+        "items_returned": 43,
+        "items": [],
+        "new_digest12_list": [
+          "d1b847d614e6",
+          "80804d1cc937",
+          "f0b08114c94b",
+          "9fd00cac2394",
+          "4728b04636d6",
+          "d92061db99b8",
+          "dd88d28f718f",
+          "ff04b29f27c9",
+          "5f9188806d79",
+          "6171e5b3b12f",
+          "87b19c8074a0",
+          "403d6015f4e5",
+          "1581b156e40f",
+          "2215519697e2",
+          "d5382476e405",
+          "8976a6772b61",
+          "73460fbc970b",
+          "d75cc4c222de",
+          "c2af55bfab4e",
+          "fc7ae28a15d2",
+          "9d03ea459f03",
+          "fb7f1e01687a",
+          "056a48bfb654",
+          "4fc74e0a3b61",
+          "94922d524b37",
+          "a5df47899326",
+          "8f24dab22f4c",
+          "b715edd335c8",
+          "b70a6695680a",
+          "a34fab38cc66",
+          "4d4f0bd83b61",
+          "011b661a32bd",
+          "ed4de50f035b",
+          "ce04eda080d3",
+          "0b230517d4f6",
+          "0eec58c68977",
+          "e96f3338c0b5",
+          "263efc9027b5",
+          "eed7e918c0a1",
+          "3e67fa9d38d8",
+          "57755c0cc694",
+          "f8c46887c7dc",
+          "e4e71035a165"
+        ],
+        "items_detail_note": "仅展开 regressed/improved/gone 明细；new 项只留 digest12 列表"
+      },
+      "periodic": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-periodic/?days=7",
+        "http": 200,
+        "kind": "日周期 SQL (sql-periodic)",
+        "days": 7,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        },
+        "items_returned": 0,
+        "items": []
+      }
+    },
+    "19": {
+      "continuity": {
+        "config_id": 19,
+        "now": "2026-11-07T04:06:40.141720+00:00",
+        "lookback_hours": 48,
+        "min_time": "2026-11-06 07:26:59.714245+00:00",
+        "max_time": "2026-11-07 04:06:01.723426+00:00",
+        "rows": 23882,
+        "distinct_digests": 37,
+        "distinct_time_points": 1192,
+        "gap_count_gt_180s": 0,
+        "first_time_point": "2026-11-06 07:26:59.714245+00:00",
+        "last_time_point": "2026-11-07 04:06:01.723426+00:00",
+        "baseline_day_window": {
+          "from": "2026-11-05T04:06:40.141720+00:00",
+          "to": "2026-11-06T04:06:40.141720+00:00",
+          "rows": 0,
+          "distinct_digests": 0,
+          "min_time": null,
+          "max_time": null
+        },
+        "current_24h_window": {
+          "from": "2026-11-06T04:06:40.141720+00:00",
+          "to": "2026-11-07T04:06:40.141720+00:00",
+          "rows": 23882,
+          "distinct_digests": 37
+        }
+      },
+      "regression_day": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-regression/?window=24h&baseline=day",
+        "http": 200,
+        "kind": "昨日同时段环比 (baseline=day)",
+        "window": {
+          "from": "2026-11-06T04:06:40.210428+00:00",
+          "to": "2026-11-07T04:06:40.210428+00:00"
+        },
+        "baseline": {
+          "kind": "day",
+          "from": "2026-11-05T04:06:40.210428+00:00",
+          "to": "2026-11-06T04:06:40.210428+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 37,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "basis_warning": null,
+        "items_returned": 37,
+        "items": [],
+        "new_digest12_list": [
+          "d1b847d614e6",
+          "f0b08114c94b",
+          "9fd00cac2394",
+          "4728b04636d6",
+          "80804d1cc937",
+          "d92061db99b8",
+          "dd88d28f718f",
+          "ff04b29f27c9",
+          "5f9188806d79",
+          "6171e5b3b12f",
+          "403d6015f4e5",
+          "87b19c8074a0",
+          "1581b156e40f",
+          "2215519697e2",
+          "d5382476e405",
+          "8976a6772b61",
+          "73460fbc970b",
+          "d75cc4c222de",
+          "9d03ea459f03",
+          "fc7ae28a15d2",
+          "fb7f1e01687a",
+          "056a48bfb654",
+          "4fc74e0a3b61",
+          "a5df47899326",
+          "8f24dab22f4c",
+          "b715edd335c8",
+          "011b661a32bd",
+          "a34fab38cc66",
+          "ce04eda080d3",
+          "0b230517d4f6",
+          "0eec58c68977",
+          "e96f3338c0b5",
+          "4d4f0bd83b61",
+          "94922d524b37",
+          "eed7e918c0a1",
+          "ed4de50f035b",
+          "e4e71035a165"
+        ],
+        "items_detail_note": "仅展开 regressed/improved/gone 明细；new 项只留 digest12 列表"
+      },
+      "regression_week": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-regression/?window=24h&baseline=week",
+        "http": 200,
+        "kind": "上周同时段环比 (baseline=week)",
+        "window": {
+          "from": "2026-11-06T04:06:40.287529+00:00",
+          "to": "2026-11-07T04:06:40.287529+00:00"
+        },
+        "baseline": {
+          "kind": "week",
+          "from": "2026-10-30T04:06:40.287529+00:00",
+          "to": "2026-10-31T04:06:40.287529+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 37,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "basis_warning": null,
+        "items_returned": 37,
+        "items": [],
+        "new_digest12_list": [
+          "d1b847d614e6",
+          "f0b08114c94b",
+          "9fd00cac2394",
+          "4728b04636d6",
+          "80804d1cc937",
+          "d92061db99b8",
+          "dd88d28f718f",
+          "ff04b29f27c9",
+          "5f9188806d79",
+          "6171e5b3b12f",
+          "403d6015f4e5",
+          "87b19c8074a0",
+          "1581b156e40f",
+          "2215519697e2",
+          "d5382476e405",
+          "8976a6772b61",
+          "73460fbc970b",
+          "d75cc4c222de",
+          "9d03ea459f03",
+          "fc7ae28a15d2",
+          "fb7f1e01687a",
+          "056a48bfb654",
+          "4fc74e0a3b61",
+          "a5df47899326",
+          "8f24dab22f4c",
+          "b715edd335c8",
+          "011b661a32bd",
+          "a34fab38cc66",
+          "ce04eda080d3",
+          "0b230517d4f6",
+          "0eec58c68977",
+          "e96f3338c0b5",
+          "4d4f0bd83b61",
+          "94922d524b37",
+          "eed7e918c0a1",
+          "ed4de50f035b",
+          "e4e71035a165"
+        ],
+        "items_detail_note": "仅展开 regressed/improved/gone 明细；new 项只留 digest12 列表"
+      },
+      "periodic": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-periodic/?days=7",
+        "http": 200,
+        "kind": "日周期 SQL (sql-periodic)",
+        "days": 7,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        },
+        "items_returned": 0,
+        "items": []
+      }
+    }
+  }
+}

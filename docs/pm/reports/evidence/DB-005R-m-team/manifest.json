@@ -1,4 +1,11 @@
 {
+ "order": "DB-005R",
+ "generated_by": "M-team (MMMan)",
+ "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
+ "file_count": 19,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 18 份（含 README-evidence.md）。目录实有文件数 = file_count = 19。",
+ "total_bytes": 146693,
+ "total_bytes_note": "files 列表 18 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "db005r_s1_log.json",
@@ -22,6 +29,12 @@
    "file": "db005r_g13.json",
    "desc": "G-13 探针：平台 EXPLAIN digest 在直连实例与 mock proxy 上的失败形态 + 目标库直证",
    "bytes": 7304,
+   "masked": true
+  },
+  {
+   "file": "db005r_g11_day_baseline.json",
+   "desc": "G-11 回填证据（v1.1，2026-11-07 12:06）：cid=18/19 的采集连续性（只读 sql_stat 覆盖与间隙）+ baseline=day / baseline=week / sql-periodic 三次同一接口调用的精简结果",
+   "bytes": 14965,
    "masked": true
   },
   {
@@ -79,6 +92,12 @@
    "masked": true
   },
   {
+   "file": "reproduce_g11_day_baseline.py",
+   "desc": "G-11 回填脚本（v1.1）：同一接口重跑 baseline=day / baseline=week / sql-periodic，并只读核算采集连续性；优先签发令牌，失败才回退到口令登录（副作用写入 side_effects）",
+   "bytes": 15854,
+   "masked": true
+  },
+  {
    "file": "reproduce_reset_pw.py",
    "desc": "本地开发账号口令轮换脚本（口令只经环境变量传入）",
    "bytes": 676,
@@ -89,9 +108,17 @@
    "desc": "计划采集脚本（before/after 计划哈希）",
    "bytes": 4540,
    "masked": true
+  },
+  {
+   "file": "README-evidence.md",
+   "desc": "证据清单与复现命令说明",
+   "bytes": 3963,
+   "masked": false
   }
  ],
  "scan_hits": 0,
+ "scan_scope": "10 份实测产物（数据类，含 v1.1 新增 db005r_g11_day_baseline.json）—— 沿用 v1.0 口径",
+ "scan_note": "v1.1 回填后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
  "scan_list": [
   "127.0.0.1",
   "15002",
