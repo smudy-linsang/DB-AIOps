@@ -2,10 +2,10 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 19,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 18 份（含 README-evidence.md）。目录实有文件数 = file_count = 19。",
- "total_bytes": 146693,
- "total_bytes_note": "files 列表 18 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 24,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 23 份（含 README-evidence.md）。目录实有文件数 = file_count = 24。",
+ "total_bytes": 261844,
+ "total_bytes_note": "files 列表 23 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "db005r_s1_log.json",
@@ -112,13 +112,43 @@
   {
    "file": "README-evidence.md",
    "desc": "证据清单与复现命令说明",
-   "bytes": 3963,
+   "bytes": 5926,
    "masked": false
+  },
+  {
+   "file": "db005r_g11_day_baseline_20261108.json",
+   "desc": "G-11 二轮回填（v1.2，2026-11-08 15:27）：cid=19/18 的采集连续性（只读 sql_stat 覆盖与间隙）+ baseline=day / baseline=week / sql-periodic 三次同一接口调用的精简结果",
+   "bytes": 34068,
+   "masked": true
+  },
+  {
+   "file": "db005r_g11_day_baseline_20261108_full.json",
+   "desc": "G-11 二轮回填的完整版输出（含全部 items 明细，供逐条核对）",
+   "bytes": 46247,
+   "masked": true
+  },
+  {
+   "file": "g11_periodic_gate.json",
+   "desc": "日周期判定门槛机理诊断：sql-periodic 在 days=3/4/5/6/7 的门槛扫描 + 按平台同规则复刻统计每 digest 实际运行日数 + 全留存覆盖与逐本地日期行数",
+   "bytes": 24244,
+   "masked": true
+  },
+  {
+   "file": "g11_workload_hourly_buckets.txt",
+   "desc": "决定性事实：workload digest 1581b156… 在 cid=18/19 的小时执行桶直查（证明压测负载在 11-07 15:27 之后已停止）",
+   "bytes": 239,
+   "masked": false
+  },
+  {
+   "file": "reproduce_g11_periodic_gate.py",
+   "desc": "G-11 二轮诊断脚本（v1.2）：扫描 sql-periodic 的 days 门槛表现 + 只读核算每 digest 实际运行日数",
+   "bytes": 8390,
+   "masked": true
   }
  ],
  "scan_hits": 0,
- "scan_scope": "10 份实测产物（数据类，含 v1.1 新增 db005r_g11_day_baseline.json）—— 沿用 v1.0 口径",
- "scan_note": "v1.1 回填后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
+ "scan_scope": "14 份实测产物（数据类，含 v1.2 新增 db005r_g11_day_baseline_20261108.json / db005r_g11_day_baseline_20261108_full.json / g11_periodic_gate.json / g11_workload_hourly_buckets.txt）—— 沿用 v1.0 口径",
+ "scan_note": "v1.2 回填后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
  "scan_list": [
   "127.0.0.1",
   "15002",

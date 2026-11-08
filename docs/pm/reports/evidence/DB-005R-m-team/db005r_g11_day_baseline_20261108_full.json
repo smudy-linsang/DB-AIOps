@@ -1,0 +1,1471 @@
+{
+  "generated_at": "2026-11-08T07:27:10.018852+00:00",
+  "side_effects": [
+    "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
+  ],
+  "base": "http://<local-host>:<platform-port>",
+  "window": "24h",
+  "periodic_days": 7,
+  "instances": {
+    "19": {
+      "continuity": {
+        "config_id": 19,
+        "now": "2026-11-08T07:27:10.021477+00:00",
+        "lookback_hours": 48,
+        "min_time": "2026-11-06 07:28:01.096165+00:00",
+        "max_time": "2026-11-08 07:27:07.424097+00:00",
+        "rows": 45676,
+        "distinct_digests": 37,
+        "distinct_time_points": 2282,
+        "gap_count_gt_180s": 0,
+        "gaps_sample": [],
+        "first_time_point": "2026-11-06 07:28:01.096165+00:00",
+        "last_time_point": "2026-11-08 07:27:07.424097+00:00",
+        "baseline_day_window": {
+          "from": "2026-11-06T07:27:10.021477+00:00",
+          "to": "2026-11-07T07:27:10.021477+00:00",
+          "rows": 26959,
+          "distinct_digests": 37,
+          "min_time": "2026-11-06 07:28:01.096165+00:00",
+          "max_time": "2026-11-07 07:26:11.145907+00:00"
+        },
+        "current_24h_window": {
+          "from": "2026-11-07T07:27:10.021477+00:00",
+          "to": "2026-11-08T07:27:10.021477+00:00",
+          "rows": 18717,
+          "distinct_digests": 20
+        }
+      },
+      "regression_day": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-regression/?window=24h&baseline=day",
+        "http": 200,
+        "kind": "昨日同时段环比 (baseline=day)",
+        "window": {
+          "from": "2026-11-07T07:27:10.189247+00:00",
+          "to": "2026-11-08T07:27:10.189247+00:00"
+        },
+        "baseline": {
+          "kind": "day",
+          "from": "2026-11-06T07:27:10.189247+00:00",
+          "to": "2026-11-07T07:27:10.189247+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 0,
+          "improved": 0,
+          "gone": 17,
+          "stable": 20
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": null,
+        "basis_warning": null,
+        "items_returned": 17,
+        "items": [
+          {
+            "digest": "d92061db99b87ea3af2c3c20182c7d69",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -18001,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 18001,
+              "avg_ms": 18001.0,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 18000.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -10200,
+            "current": null,
+            "baseline": {
+              "exec": 280,
+              "total_ms": 10200,
+              "avg_ms": 36.429,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -7899,
+            "current": null,
+            "baseline": {
+              "exec": 770,
+              "total_ms": 7899,
+              "avg_ms": 10.258,
+              "rows_examined_per_exec": 79678.4,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": "2026-11-06T07:49:46.860133+00:00"
+          },
+          {
+            "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -3735,
+            "current": null,
+            "baseline": {
+              "exec": 264,
+              "total_ms": 3735,
+              "avg_ms": 14.148,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": "2026-11-06T07:49:46.961190+00:00"
+          },
+          {
+            "digest": "87b19c8074a0ed39710a964e39d1c7d2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -2320,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 2320,
+              "avg_ms": 2320.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "1581b156e40f00f664570a0264cf2532",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1948,
+            "current": null,
+            "baseline": {
+              "exec": 5498,
+              "total_ms": 1948,
+              "avg_ms": 0.354,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.004
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "fc7ae28a15d257f9183da7e5a7a2f1d2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -38,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 38,
+              "avg_ms": 38.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "a5df47899326d3d183539025603f93c2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -12,
+            "current": null,
+            "baseline": {
+              "exec": 10,
+              "total_ms": 12,
+              "avg_ms": 1.2,
+              "rows_examined_per_exec": 19.8,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "8f24dab22f4c82aefa0672f412a5723c",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -4,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 4,
+              "avg_ms": 4.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 3,
+              "total_ms": 1,
+              "avg_ms": 0.333,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "0eec58c68977ee942d0dce9ee969850a",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 1,
+              "avg_ms": 1.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 1,
+              "avg_ms": 1.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 3,
+              "total_ms": 1,
+              "avg_ms": 0.333,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "94922d524b37705ddc2452b06da20bd5",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ed4de50f035be12188597ba5c7c730a6",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          }
+        ]
+      },
+      "regression_week": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-regression/?window=24h&baseline=week",
+        "http": 200,
+        "kind": "上周同时段环比 (baseline=week)",
+        "window": {
+          "from": "2026-11-07T07:27:10.508460+00:00",
+          "to": "2026-11-08T07:27:10.508460+00:00"
+        },
+        "baseline": {
+          "kind": "week",
+          "from": "2026-10-31T07:27:10.508460+00:00",
+          "to": "2026-11-01T07:27:10.508460+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 20,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "basis_warning": null,
+        "items_returned": 20,
+        "items": [
+          {
+            "digest": "d1b847d614e6c2b66f91d482065ece0c",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 170042,
+            "current": {
+              "exec": 2257,
+              "total_ms": 170042,
+              "avg_ms": 75.34,
+              "rows_examined_per_exec": 9540.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "80804d1cc937b0fb077c1495a19c0964",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 129223,
+            "current": {
+              "exec": 1321,
+              "total_ms": 129223,
+              "avg_ms": 97.822,
+              "rows_examined_per_exec": 14235.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "f0b08114c94b448ec50b7d4e96f3e791",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 115947,
+            "current": {
+              "exec": 936,
+              "total_ms": 115947,
+              "avg_ms": 123.875,
+              "rows_examined_per_exec": 159962.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "9fd00cac2394c963040e5c25e57b8ebd",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 104962,
+            "current": {
+              "exec": 936,
+              "total_ms": 104962,
+              "avg_ms": 112.139,
+              "rows_examined_per_exec": 156992.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4728b04636d6e73e2963be8771952fee",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 90951,
+            "current": {
+              "exec": 936,
+              "total_ms": 90951,
+              "avg_ms": 97.17,
+              "rows_examined_per_exec": 9550.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "dd88d28f718f6d146aa157e378d1e101",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 14537,
+            "current": {
+              "exec": 936,
+              "total_ms": 14537,
+              "avg_ms": 15.531,
+              "rows_examined_per_exec": 9530.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ff04b29f27c9a8f50e17d5f19bf36d76",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 12076,
+            "current": {
+              "exec": 936,
+              "total_ms": 12076,
+              "avg_ms": 12.902,
+              "rows_examined_per_exec": 9530.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "2215519697e2ac10845071c2cd05d46d",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 722,
+            "current": {
+              "exec": 936,
+              "total_ms": 722,
+              "avg_ms": 0.771,
+              "rows_examined_per_exec": 15.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "d5382476e405cbe142903745c5ba0325",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 670,
+            "current": {
+              "exec": 936,
+              "total_ms": 670,
+              "avg_ms": 0.716,
+              "rows_examined_per_exec": 97.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "8976a6772b61765005bf7e497e07f4c7",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 596,
+            "current": {
+              "exec": 1321,
+              "total_ms": 596,
+              "avg_ms": 0.451,
+              "rows_examined_per_exec": 4.4,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "73460fbc970b2e9a5d74973dc5db6ed1",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 285,
+            "current": {
+              "exec": 936,
+              "total_ms": 285,
+              "avg_ms": 0.304,
+              "rows_examined_per_exec": 314.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "d75cc4c222de0679f52f5ad5911ab044",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 162,
+            "current": {
+              "exec": 936,
+              "total_ms": 162,
+              "avg_ms": 0.173,
+              "rows_examined_per_exec": 5.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "9d03ea459f03502b8826ec3b98537660",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 102,
+            "current": {
+              "exec": 936,
+              "total_ms": 102,
+              "avg_ms": 0.109,
+              "rows_examined_per_exec": 3.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "056a48bfb6548b9301264b51adb92705",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 87,
+            "current": {
+              "exec": 936,
+              "total_ms": 87,
+              "avg_ms": 0.093,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "fb7f1e01687a862329b3130890b7a3a7",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 40,
+            "current": {
+              "exec": 936,
+              "total_ms": 40,
+              "avg_ms": 0.043,
+              "rows_examined_per_exec": 1.9,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4fc74e0a3b6182e6e9c5b4247c6de05b",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 16,
+            "current": {
+              "exec": 936,
+              "total_ms": 16,
+              "avg_ms": 0.017,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "a34fab38cc6665824161d989737f6ee6",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 5,
+            "current": {
+              "exec": 936,
+              "total_ms": 5,
+              "avg_ms": 0.005,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "011b661a32bd891ce7695deff6672821",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 4,
+            "current": {
+              "exec": 1321,
+              "total_ms": 4,
+              "avg_ms": 0.003,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "b715edd335c8ab2a3c43087e726bbc97",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 1,
+            "current": {
+              "exec": 936,
+              "total_ms": 1,
+              "avg_ms": 0.001,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ce04eda080d3f5605113e1d0d47c2f20",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 1,
+            "current": {
+              "exec": 936,
+              "total_ms": 1,
+              "avg_ms": 0.001,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          }
+        ]
+      },
+      "periodic": {
+        "config_id": 19,
+        "query": "/api/v1/databases/19/perf/sql-periodic/?days=7",
+        "http": 200,
+        "kind": "日周期 SQL (sql-periodic)",
+        "days": 7,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        },
+        "items_returned": 0,
+        "items": []
+      }
+    },
+    "18": {
+      "continuity": {
+        "config_id": 18,
+        "now": "2026-11-08T07:27:10.730641+00:00",
+        "lookback_hours": 48,
+        "min_time": "2026-11-06 07:28:05.864355+00:00",
+        "max_time": "2026-11-08 07:27:06.050156+00:00",
+        "rows": 47321,
+        "distinct_digests": 41,
+        "distinct_time_points": 2746,
+        "gap_count_gt_180s": 0,
+        "gaps_sample": [],
+        "first_time_point": "2026-11-06 07:28:05.864355+00:00",
+        "last_time_point": "2026-11-08 07:27:06.050156+00:00",
+        "baseline_day_window": {
+          "from": "2026-11-06T07:27:10.730641+00:00",
+          "to": "2026-11-07T07:27:10.730641+00:00",
+          "rows": 27065,
+          "distinct_digests": 41,
+          "min_time": "2026-11-06 07:28:05.864355+00:00",
+          "max_time": "2026-11-07 07:27:01.388215+00:00"
+        },
+        "current_24h_window": {
+          "from": "2026-11-07T07:27:10.730641+00:00",
+          "to": "2026-11-08T07:27:10.730641+00:00",
+          "rows": 20256,
+          "distinct_digests": 20
+        }
+      },
+      "regression_day": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-regression/?window=24h&baseline=day",
+        "http": 200,
+        "kind": "昨日同时段环比 (baseline=day)",
+        "window": {
+          "from": "2026-11-07T07:27:10.867848+00:00",
+          "to": "2026-11-08T07:27:10.867848+00:00"
+        },
+        "baseline": {
+          "kind": "day",
+          "from": "2026-11-06T07:27:10.867848+00:00",
+          "to": "2026-11-07T07:27:10.867848+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 0,
+          "improved": 0,
+          "gone": 21,
+          "stable": 20
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": null,
+        "basis_warning": null,
+        "items_returned": 21,
+        "items": [
+          {
+            "digest": "d92061db99b87ea3af2c3c20182c7d69",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -18001,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 18001,
+              "avg_ms": 9000.5,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 9000.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -10670,
+            "current": null,
+            "baseline": {
+              "exec": 292,
+              "total_ms": 10670,
+              "avg_ms": 36.541,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -7914,
+            "current": null,
+            "baseline": {
+              "exec": 803,
+              "total_ms": 7914,
+              "avg_ms": 9.856,
+              "rows_examined_per_exec": 76404.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -3913,
+            "current": null,
+            "baseline": {
+              "exec": 276,
+              "total_ms": 3913,
+              "avg_ms": 14.178,
+              "rows_examined_per_exec": 150000.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": "2026-11-06T07:44:06.381994+00:00"
+          },
+          {
+            "digest": "87b19c8074a0ed39710a964e39d1c7d2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -2320,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 2320,
+              "avg_ms": 2320.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "1581b156e40f00f664570a0264cf2532",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -2020,
+            "current": null,
+            "baseline": {
+              "exec": 5715,
+              "total_ms": 2020,
+              "avg_ms": 0.353,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.004
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "fc7ae28a15d257f9183da7e5a7a2f1d2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -85,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 85,
+              "avg_ms": 42.5,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "94922d524b37705ddc2452b06da20bd5",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -4,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 4,
+              "avg_ms": 2.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "a5df47899326d3d183539025603f93c2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -4,
+            "current": null,
+            "baseline": {
+              "exec": 3,
+              "total_ms": 4,
+              "avg_ms": 1.333,
+              "rows_examined_per_exec": 21.7,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "8f24dab22f4c82aefa0672f412a5723c",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -4,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 4,
+              "avg_ms": 4.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -3,
+            "current": null,
+            "baseline": {
+              "exec": 4,
+              "total_ms": 3,
+              "avg_ms": 0.75,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ed4de50f035be12188597ba5c7c730a6",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -2,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 2,
+              "avg_ms": 1.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 4,
+              "total_ms": 1,
+              "avg_ms": 0.25,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "0eec58c68977ee942d0dce9ee969850a",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 1,
+              "avg_ms": 0.5,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": -1,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 1,
+              "avg_ms": 0.5,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "263efc9027b5f787ecd7e29b5d51040c",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "3e67fa9d38d82054e7fc01fe3ee8844d",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "57755c0cc69482aaf69a940f6c0e01f2",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "f8c46887c7dcaa8df3ee3209b87eabf4",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 1,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          },
+          {
+            "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+            "status": "gone",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 0,
+            "current": null,
+            "baseline": {
+              "exec": 2,
+              "total_ms": 0,
+              "avg_ms": 0.0,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "plan_changed_at": null
+          }
+        ]
+      },
+      "regression_week": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-regression/?window=24h&baseline=week",
+        "http": 200,
+        "kind": "上周同时段环比 (baseline=week)",
+        "window": {
+          "from": "2026-11-07T07:27:11.089438+00:00",
+          "to": "2026-11-08T07:27:11.089438+00:00"
+        },
+        "baseline": {
+          "kind": "week",
+          "from": "2026-10-31T07:27:11.089438+00:00",
+          "to": "2026-11-01T07:27:11.089438+00:00"
+        },
+        "counts": {
+          "regressed": 0,
+          "new": 20,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "thresholds": {
+          "avg_ratio": 1.5,
+          "min_delta_ms": 5.0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "basis_warning": null,
+        "items_returned": 20,
+        "items": [
+          {
+            "digest": "d1b847d614e6c2b66f91d482065ece0c",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 169943,
+            "current": {
+              "exec": 2256,
+              "total_ms": 169943,
+              "avg_ms": 75.329,
+              "rows_examined_per_exec": 9540.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "80804d1cc937b0fb077c1495a19c0964",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 129154,
+            "current": {
+              "exec": 1320,
+              "total_ms": 129154,
+              "avg_ms": 97.844,
+              "rows_examined_per_exec": 14235.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "f0b08114c94b448ec50b7d4e96f3e791",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 115947,
+            "current": {
+              "exec": 936,
+              "total_ms": 115947,
+              "avg_ms": 123.875,
+              "rows_examined_per_exec": 159962.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "9fd00cac2394c963040e5c25e57b8ebd",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 104962,
+            "current": {
+              "exec": 936,
+              "total_ms": 104962,
+              "avg_ms": 112.139,
+              "rows_examined_per_exec": 156992.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4728b04636d6e73e2963be8771952fee",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 90951,
+            "current": {
+              "exec": 936,
+              "total_ms": 90951,
+              "avg_ms": 97.17,
+              "rows_examined_per_exec": 9550.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "dd88d28f718f6d146aa157e378d1e101",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 14537,
+            "current": {
+              "exec": 936,
+              "total_ms": 14537,
+              "avg_ms": 15.531,
+              "rows_examined_per_exec": 9530.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ff04b29f27c9a8f50e17d5f19bf36d76",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 12076,
+            "current": {
+              "exec": 936,
+              "total_ms": 12076,
+              "avg_ms": 12.902,
+              "rows_examined_per_exec": 9530.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "2215519697e2ac10845071c2cd05d46d",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 722,
+            "current": {
+              "exec": 936,
+              "total_ms": 722,
+              "avg_ms": 0.771,
+              "rows_examined_per_exec": 15.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "d5382476e405cbe142903745c5ba0325",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 670,
+            "current": {
+              "exec": 936,
+              "total_ms": 670,
+              "avg_ms": 0.716,
+              "rows_examined_per_exec": 97.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "8976a6772b61765005bf7e497e07f4c7",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 495,
+            "current": {
+              "exec": 1320,
+              "total_ms": 495,
+              "avg_ms": 0.375,
+              "rows_examined_per_exec": 4.4,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "73460fbc970b2e9a5d74973dc5db6ed1",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 285,
+            "current": {
+              "exec": 936,
+              "total_ms": 285,
+              "avg_ms": 0.304,
+              "rows_examined_per_exec": 314.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "d75cc4c222de0679f52f5ad5911ab044",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 162,
+            "current": {
+              "exec": 936,
+              "total_ms": 162,
+              "avg_ms": 0.173,
+              "rows_examined_per_exec": 5.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "9d03ea459f03502b8826ec3b98537660",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 102,
+            "current": {
+              "exec": 936,
+              "total_ms": 102,
+              "avg_ms": 0.109,
+              "rows_examined_per_exec": 3.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "056a48bfb6548b9301264b51adb92705",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 87,
+            "current": {
+              "exec": 936,
+              "total_ms": 87,
+              "avg_ms": 0.093,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "fb7f1e01687a862329b3130890b7a3a7",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 40,
+            "current": {
+              "exec": 936,
+              "total_ms": 40,
+              "avg_ms": 0.043,
+              "rows_examined_per_exec": 1.9,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "4fc74e0a3b6182e6e9c5b4247c6de05b",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 16,
+            "current": {
+              "exec": 936,
+              "total_ms": 16,
+              "avg_ms": 0.017,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "a34fab38cc6665824161d989737f6ee6",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 5,
+            "current": {
+              "exec": 936,
+              "total_ms": 5,
+              "avg_ms": 0.005,
+              "rows_examined_per_exec": 0.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "b715edd335c8ab2a3c43087e726bbc97",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 1,
+            "current": {
+              "exec": 936,
+              "total_ms": 1,
+              "avg_ms": 0.001,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "ce04eda080d3f5605113e1d0d47c2f20",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 1,
+            "current": {
+              "exec": 936,
+              "total_ms": 1,
+              "avg_ms": 0.001,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          },
+          {
+            "digest": "011b661a32bd891ce7695deff6672821",
+            "status": "new",
+            "avg_ratio": null,
+            "exec_ratio": null,
+            "impact_ms": 1,
+            "current": {
+              "exec": 1320,
+              "total_ms": 1,
+              "avg_ms": 0.001,
+              "rows_examined_per_exec": 1.0,
+              "lock_ms_per_exec": 0.0
+            },
+            "baseline": null,
+            "plan_changed_at": null
+          }
+        ]
+      },
+      "periodic": {
+        "config_id": 18,
+        "query": "/api/v1/databases/18/perf/sql-periodic/?days=7",
+        "http": 200,
+        "kind": "日周期 SQL (sql-periodic)",
+        "days": 7,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        },
+        "items_returned": 0,
+        "items": []
+      }
+    }
+  }
+}

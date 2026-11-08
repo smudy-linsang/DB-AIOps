@@ -1,0 +1,866 @@
+{
+  "generated_at": "2026-11-08T07:28:32.401741+00:00",
+  "side_effects": [
+    "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
+  ],
+  "base": "http://<local-host>:<platform-port>",
+  "window_days": 7,
+  "rule": {
+    "hour_share": 0.8,
+    "max_hours": 6,
+    "day_share": 0.7
+  },
+  "threshold_by_days": {
+    "3": 3,
+    "4": 3,
+    "5": 4,
+    "6": 5,
+    "7": 5
+  },
+  "instances": {
+    "18": {
+      "retention": {
+        "min_time": "2026-11-05 12:32:58.414492+00:00",
+        "max_time": "2026-11-08 07:27:06.050156+00:00",
+        "rows": 52020,
+        "distinct_digests": 46
+      },
+      "rows_per_local_date": {
+        "2026-11-05": 971,
+        "2026-11-06": 13782,
+        "2026-11-07": 24971,
+        "2026-11-08": 12296
+      },
+      "candidates": [
+        {
+          "digest": "1581b156e40f00f664570a0264cf2532",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 11758,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 5960,
+              "total_ms": 1799
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 5798,
+              "total_ms": 2046
+            }
+          ],
+          "sql_text_sample": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1722,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 904,
+              "total_ms": 9643
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 818,
+              "total_ms": 7923
+            }
+          ],
+          "sql_text_sample": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 592,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 296,
+              "total_ms": 13383
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 296,
+              "total_ms": 10806
+            }
+          ],
+          "sql_text_sample": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 552,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 274,
+              "total_ms": 6242
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 278,
+              "total_ms": 3957
+            }
+          ],
+          "sql_text_sample": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 6,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 1
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 4,
+              "total_ms": 3
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 6,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 2
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 4,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "d92061db99b87ea3af2c3c20182c7d69",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 22610
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 18001
+            }
+          ],
+          "sql_text_sample": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "fc7ae28a15d257f9183da7e5a7a2f1d2",
+          "run_days": 2,
+          "hours": [
+            15,
+            20,
+            21
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 75
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 85
+            }
+          ],
+          "sql_text_sample": "ALTER TABLE `orders` DROP INDEX `idx_user_created`"
+        },
+        {
+          "digest": "94922d524b37705ddc2452b06da20bd5",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 2
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 4
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "ed4de50f035be12188597ba5c7c730a6",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 1
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 2
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "0eec58c68977ee942d0dce9ee969850a",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 2
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 1
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 4,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 2,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "87b19c8074a0ed39710a964e39d1c7d2",
+          "run_days": 2,
+          "hours": [
+            15,
+            21
+          ],
+          "day_start_hour": 15,
+          "total_exec": 3,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 1,
+              "total_ms": 2475
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 2,
+              "total_ms": 5305
+            }
+          ],
+          "sql_text_sample": "ALTER TABLE `orders` ADD INDEX `idx_user_created` ( `user_id` , `created_at` )"
+        },
+        {
+          "digest": "57755c0cc69482aaf69a940f6c0e01f2",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 2,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 1,
+              "total_ms": 1
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "f8c46887c7dcaa8df3ee3209b87eabf4",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 2,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 1,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "SELECT `id` , `user_id` FROM `orders` ORDER BY `id` LIMIT ?"
+        },
+        {
+          "digest": "263efc9027b5f787ecd7e29b5d51040c",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 2,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 1,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "3e67fa9d38d82054e7fc01fe3ee8844d",
+          "run_days": 2,
+          "hours": [
+            15,
+            20
+          ],
+          "day_start_hour": 15,
+          "total_exec": 2,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 1,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "ROLLBACK"
+        },
+        {
+          "digest": "a5df47899326d3d183539025603f93c2",
+          "run_days": 1,
+          "hours": [
+            20,
+            21
+          ],
+          "day_start_hour": 20,
+          "total_exec": 21,
+          "runs": [
+            {
+              "run_day": "2026-11-05",
+              "exec": 18,
+              "total_ms": 26
+            }
+          ],
+          "sql_text_sample": "SELECT TABLE_NAME , `INDEX_NAME` , COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = COALESCE ( ? , SCHEMA ( ) ) AND TABLE_NAME IN (...) ORDER BY TABLE_NAME , `INDEX_NAME` , `SEQ_IN_INDEX`"
+        }
+      ],
+      "candidate_total": 26,
+      "max_run_days": 2,
+      "endpoint_sweep": [
+        {
+          "days": 3,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 4,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 5,
+          "required_run_days": 4,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 6,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 7,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        }
+      ]
+    },
+    "19": {
+      "retention": {
+        "min_time": "2026-11-06 07:26:59.714245+00:00",
+        "max_time": "2026-11-08 07:27:07.424097+00:00",
+        "rows": 45697,
+        "distinct_digests": 37
+      },
+      "rows_per_local_date": {
+        "2026-11-06": 10325,
+        "2026-11-07": 24055,
+        "2026-11-08": 11317
+      },
+      "candidates": [
+        {
+          "digest": "1581b156e40f00f664570a0264cf2532",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 5722,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 5722,
+              "total_ms": 2024
+            }
+          ],
+          "sql_text_sample": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "6171e5b3b12f5cc4016eacc2545f3359",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 803,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 803,
+              "total_ms": 7916
+            }
+          ],
+          "sql_text_sample": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "5f9188806d79ff78a3f0a05bea9c49cf",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 292,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 292,
+              "total_ms": 10672
+            }
+          ],
+          "sql_text_sample": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "403d6015f4e53d1edc7c7ffd6c02fd03",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 276,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 276,
+              "total_ms": 3914
+            }
+          ],
+          "sql_text_sample": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "a5df47899326d3d183539025603f93c2",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 10,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 10,
+              "total_ms": 12
+            }
+          ],
+          "sql_text_sample": "SELECT TABLE_NAME , `INDEX_NAME` , COLUMN_NAME FROM `information_schema` . `statistics` WHERE `TABLE_SCHEMA` = COALESCE ( ? , SCHEMA ( ) ) AND TABLE_NAME IN (...) ORDER BY TABLE_NAME , `INDEX_NAME` , `SEQ_IN_INDEX`"
+        },
+        {
+          "digest": "0b230517d4f6513c9e6cee87741f1d9c",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 3,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 3,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "4d4f0bd83b6136f7457fdc405ff24af8",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 3,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 3,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "d92061db99b87ea3af2c3c20182c7d69",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 18001
+            }
+          ],
+          "sql_text_sample": "UPDATE `orders` SET STATUS = STATUS WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "87b19c8074a0ed39710a964e39d1c7d2",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 2320
+            }
+          ],
+          "sql_text_sample": "ALTER TABLE `orders` ADD INDEX `idx_user_created` ( `user_id` , `created_at` )"
+        },
+        {
+          "digest": "fc7ae28a15d257f9183da7e5a7a2f1d2",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 38
+            }
+          ],
+          "sql_text_sample": "ALTER TABLE `orders` DROP INDEX `idx_user_created`"
+        },
+        {
+          "digest": "8f24dab22f4c82aefa0672f412a5723c",
+          "run_days": 1,
+          "hours": [
+            16
+          ],
+          "day_start_hour": 16,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 4
+            }
+          ],
+          "sql_text_sample": "SELECT COUNT ( * ) `n` FROM `orders`"
+        },
+        {
+          "digest": "0eec58c68977ee942d0dce9ee969850a",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "e96f3338c0b5d371f3ea36545dc061f8",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 1
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "94922d524b37705ddc2452b06da20bd5",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "e4e71035a165c3c5166cb0c5e1952cd9",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = JSON SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "ed4de50f035be12188597ba5c7c730a6",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "eed7e918c0a1d6b4f61e0b63ffae5fad",
+          "run_days": 1,
+          "hours": [
+            15
+          ],
+          "day_start_hour": 15,
+          "total_exec": 1,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 1,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "EXPLAIN FORMAT = `TREE` SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        }
+      ],
+      "candidate_total": 17,
+      "max_run_days": 1,
+      "endpoint_sweep": [
+        {
+          "days": 3,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 4,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 5,
+          "required_run_days": 4,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 6,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 7,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        }
+      ]
+    }
+  }
+}
