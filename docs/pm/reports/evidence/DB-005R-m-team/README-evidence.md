@@ -2,7 +2,7 @@
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 24 份**（含本清单与 `manifest.json`）：14 份实测产物 + 8 份可复现脚本 + 本清单 + manifest。**实测产物（14 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 27 份**（含本清单与 `manifest.json`）：17 份实测产物 + 8 份可复现脚本 + 本清单 + manifest。**实测产物（17 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -15,6 +15,9 @@
 | `db005r_g11_day_baseline_20261108_full.json` | G-11 二轮回填的**完整版**输出（含全部 items 明细，供逐条核对） | 46247 | 是 |
 | `g11_periodic_gate.json` | **日周期判定门槛机理诊断**：`sql-periodic` 在 days=3/4/5/6/7 的扫描结果 + 按平台同规则复刻（去掉 day_share 门槛）统计每个 digest 的**实际运行日数** + 全留存覆盖与逐本地日期行数 | 24244 | 是 |
 | `g11_workload_hourly_buckets.txt` | 决定性事实：workload digest `1581b156…` 在 cid=18/19 的**小时执行桶**直查（证明压测负载在 11-07 15:27 之后已停止） | 239 | 否 |
+| `g11_topology_probe.json` | **G-11 拓扑与采集管道只读核验**：mock proxy 后端指向（与 cid=19 同一后端）+ 近 4h 两路 digest 集合重合度（25/25 重合、独有 0/0）+ 两路采样推进情况 | 2808 | 是 |
+| `g11_gate_math.json` | **G-11 判定窗边界复刻**：按 `monitor/sql_compare.py::detect_daily` 真实实现复刻，枚举 5 个判定时刻 × days=3/4/5/7 × cid=18/19 的判定结果（证明 days=3 复判必须落在 11-12 15:00 前） | 19970 | 是 |
+| `g11_gate_math_magnitudes.json` | **G-11 判定窗边界复刻（执行量级敏感性）**：单路连驱 vs 两路并行（同后端双跑）两种日执行量下的判定对照 | 12320 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |

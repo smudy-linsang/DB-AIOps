@@ -2,118 +2,22 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 24,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 23 份（含 README-evidence.md）。目录实有文件数 = file_count = 24。",
- "total_bytes": 261844,
- "total_bytes_note": "files 列表 23 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 27,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 26 份（含 README-evidence.md）。目录实有文件数 = file_count = 27。",
+ "total_bytes": 296942,
+ "total_bytes_note": "files 列表 26 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
-   "file": "db005r_s1_log.json",
-   "desc": "S-1 阶段日志（建实例/场景A/删索引/场景B/计划采集/API 验收/A-2/G-13）",
-   "bytes": 2086,
+   "file": "README-evidence.md",
+   "desc": "证据清单与复现命令说明",
+   "bytes": 5926,
    "masked": false
-  },
-  {
-   "file": "db005r_s1_api.json",
-   "desc": "S-1 API 链路级回归验收结果（慢列表/详情/建议/耗时构成/环比/告警，22 项）",
-   "bytes": 30010,
-   "masked": true
-  },
-  {
-   "file": "db005r_s1_a2.json",
-   "desc": "A-2 专项：索引存在时不重复建议同一索引",
-   "bytes": 4983,
-   "masked": false
-  },
-  {
-   "file": "db005r_g13.json",
-   "desc": "G-13 探针：平台 EXPLAIN digest 在直连实例与 mock proxy 上的失败形态 + 目标库直证",
-   "bytes": 7304,
-   "masked": true
   },
   {
    "file": "db005r_g11_day_baseline.json",
    "desc": "G-11 回填证据（v1.1，2026-11-07 12:06）：cid=18/19 的采集连续性（只读 sql_stat 覆盖与间隙）+ baseline=day / baseline=week / sql-periodic 三次同一接口调用的精简结果",
    "bytes": 14965,
    "masked": true
-  },
-  {
-   "file": "s1_run_A_client_summary.txt",
-   "desc": "场景A（索引在位）客户端侧 workload 汇总",
-   "bytes": 1562,
-   "masked": false
-  },
-  {
-   "file": "s1_run_B_client_summary.txt",
-   "desc": "场景B（索引已删）客户端侧 workload 汇总",
-   "bytes": 1575,
-   "masked": false
-  },
-  {
-   "file": "s1_lockwait_injection.txt",
-   "desc": "锁等待注入记录（A 持锁 20s / B 等锁）",
-   "bytes": 95,
-   "masked": false
-  },
-  {
-   "file": "s1_plan_before.json",
-   "desc": "计划采集 before（索引在位）",
-   "bytes": 2253,
-   "masked": true
-  },
-  {
-   "file": "s1_plan_after.json",
-   "desc": "计划采集 after（索引已删）",
-   "bytes": 3652,
-   "masked": true
-  },
-  {
-   "file": "reproduce_s1_run.py",
-   "desc": "S-1 全流程脚本（建实例→场景A→删索引→场景B→计划采集→API 验收→A-2→G-13）",
-   "bytes": 9632,
-   "masked": true
-  },
-  {
-   "file": "reproduce_g13_probe.py",
-   "desc": "G-13 探针脚本",
-   "bytes": 7498,
-   "masked": true
-  },
-  {
-   "file": "reproduce_api_check.py",
-   "desc": "API 链路级验收脚本（22 项检查，DB-005 同一脚本）",
-   "bytes": 30836,
-   "masked": true
-  },
-  {
-   "file": "reproduce_a2_check.py",
-   "desc": "A-2 专项脚本（索引存在时不重复建议）",
-   "bytes": 5209,
-   "masked": true
-  },
-  {
-   "file": "reproduce_g11_day_baseline.py",
-   "desc": "G-11 回填脚本（v1.1）：同一接口重跑 baseline=day / baseline=week / sql-periodic，并只读核算采集连续性；优先签发令牌，失败才回退到口令登录（副作用写入 side_effects）",
-   "bytes": 15854,
-   "masked": true
-  },
-  {
-   "file": "reproduce_reset_pw.py",
-   "desc": "本地开发账号口令轮换脚本（口令只经环境变量传入）",
-   "bytes": 676,
-   "masked": false
-  },
-  {
-   "file": "reproduce_plan_capture.py",
-   "desc": "计划采集脚本（before/after 计划哈希）",
-   "bytes": 4540,
-   "masked": true
-  },
-  {
-   "file": "README-evidence.md",
-   "desc": "证据清单与复现命令说明",
-   "bytes": 5926,
-   "masked": false
   },
   {
    "file": "db005r_g11_day_baseline_20261108.json",
@@ -128,9 +32,51 @@
    "masked": true
   },
   {
+   "file": "db005r_g13.json",
+   "desc": "G-13 探针：平台 EXPLAIN digest 在直连实例与 mock proxy 上的失败形态 + 目标库直证",
+   "bytes": 7304,
+   "masked": true
+  },
+  {
+   "file": "db005r_s1_a2.json",
+   "desc": "A-2 专项：索引存在时不重复建议同一索引",
+   "bytes": 4983,
+   "masked": false
+  },
+  {
+   "file": "db005r_s1_api.json",
+   "desc": "S-1 API 链路级回归验收结果（慢列表/详情/建议/耗时构成/环比/告警，22 项）",
+   "bytes": 30010,
+   "masked": true
+  },
+  {
+   "file": "db005r_s1_log.json",
+   "desc": "S-1 阶段日志（建实例/场景A/删索引/场景B/计划采集/API 验收/A-2/G-13）",
+   "bytes": 2086,
+   "masked": false
+  },
+  {
+   "file": "g11_gate_math.json",
+   "desc": "G-11 判定窗边界复刻：按 monitor/sql_compare.py::detect_daily 真实实现复刻，枚举 5 个判定时刻 x days=3/4/5/7 x cid=18/19 的判定结果（证明 days=3 复判必须落在 11-12 15:00 前）",
+   "bytes": 19970,
+   "masked": true
+  },
+  {
+   "file": "g11_gate_math_magnitudes.json",
+   "desc": "G-11 判定窗边界复刻（执行量级敏感性）：单路连驱与两路并行（同后端双跑）两种日执行量下的判定对照",
+   "bytes": 12320,
+   "masked": true
+  },
+  {
    "file": "g11_periodic_gate.json",
    "desc": "日周期判定门槛机理诊断：sql-periodic 在 days=3/4/5/6/7 的门槛扫描 + 按平台同规则复刻统计每 digest 实际运行日数 + 全留存覆盖与逐本地日期行数",
    "bytes": 24244,
+   "masked": true
+  },
+  {
+   "file": "g11_topology_probe.json",
+   "desc": "G-11 拓扑与采集管道只读核验：mock proxy 后端指向（与 cid=19 同一后端）+ 近 4h 两路 digest 集合重合度 + 两路采样推进情况",
+   "bytes": 2808,
    "masked": true
   },
   {
@@ -140,10 +86,82 @@
    "masked": false
   },
   {
+   "file": "reproduce_a2_check.py",
+   "desc": "A-2 专项脚本（索引存在时不重复建议）",
+   "bytes": 5209,
+   "masked": true
+  },
+  {
+   "file": "reproduce_api_check.py",
+   "desc": "API 链路级验收脚本（22 项检查，DB-005 同一脚本）",
+   "bytes": 30836,
+   "masked": true
+  },
+  {
+   "file": "reproduce_g11_day_baseline.py",
+   "desc": "G-11 回填脚本（v1.1）：同一接口重跑 baseline=day / baseline=week / sql-periodic，并只读核算采集连续性；优先签发令牌，失败才回退到口令登录（副作用写入 side_effects）",
+   "bytes": 15854,
+   "masked": true
+  },
+  {
    "file": "reproduce_g11_periodic_gate.py",
    "desc": "G-11 二轮诊断脚本（v1.2）：扫描 sql-periodic 的 days 门槛表现 + 只读核算每 digest 实际运行日数",
    "bytes": 8390,
    "masked": true
+  },
+  {
+   "file": "reproduce_g13_probe.py",
+   "desc": "G-13 探针脚本",
+   "bytes": 7498,
+   "masked": true
+  },
+  {
+   "file": "reproduce_plan_capture.py",
+   "desc": "计划采集脚本（before/after 计划哈希）",
+   "bytes": 4540,
+   "masked": true
+  },
+  {
+   "file": "reproduce_reset_pw.py",
+   "desc": "本地开发账号口令轮换脚本（口令只经环境变量传入）",
+   "bytes": 676,
+   "masked": false
+  },
+  {
+   "file": "reproduce_s1_run.py",
+   "desc": "S-1 全流程脚本（建实例→场景A→删索引→场景B→计划采集→API 验收→A-2→G-13）",
+   "bytes": 9632,
+   "masked": true
+  },
+  {
+   "file": "s1_lockwait_injection.txt",
+   "desc": "锁等待注入记录（A 持锁 20s / B 等锁）",
+   "bytes": 95,
+   "masked": false
+  },
+  {
+   "file": "s1_plan_after.json",
+   "desc": "计划采集 after（索引已删）",
+   "bytes": 3652,
+   "masked": true
+  },
+  {
+   "file": "s1_plan_before.json",
+   "desc": "计划采集 before（索引在位）",
+   "bytes": 2253,
+   "masked": true
+  },
+  {
+   "file": "s1_run_A_client_summary.txt",
+   "desc": "场景A（索引在位）客户端侧 workload 汇总",
+   "bytes": 1562,
+   "masked": false
+  },
+  {
+   "file": "s1_run_B_client_summary.txt",
+   "desc": "场景B（索引已删）客户端侧 workload 汇总",
+   "bytes": 1575,
+   "masked": false
   }
  ],
  "scan_hits": 0,
