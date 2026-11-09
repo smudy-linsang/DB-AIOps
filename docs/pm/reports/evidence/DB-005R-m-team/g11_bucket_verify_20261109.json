@@ -1,0 +1,35 @@
+{
+  "at": "2026-11-09T15:51:21.547140+08:00",
+  "date": "2026-11-09",
+  "event": "bucket_verify",
+  "script": "C:\\dispatcher\\g11_verify_buckets.py",
+  "read_only": true,
+  "instances": {
+    "18": {
+      "instance": "<instance-proxy>",
+      "max_time": "2026-11-09 07:50:06.086367+00:00",
+      "rows_total": 68824,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-05T20:00:00+08:00": 5960,
+        "2026-11-06T15:00:00+08:00": 5798,
+        "2026-11-09T15:00:00+08:00": 21587
+      },
+      "expected_15h_bucket": "2026-11-09T15:00:00+08:00",
+      "exec_in_expected_bucket": 21587
+    },
+    "19": {
+      "instance": "<instance-mysql>",
+      "max_time": "2026-11-09 07:50:07.158203+00:00",
+      "rows_total": 61435,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-06T15:00:00+08:00": 5722,
+        "2026-11-09T15:00:00+08:00": 21587
+      },
+      "expected_15h_bucket": "2026-11-09T15:00:00+08:00",
+      "exec_in_expected_bucket": 21587
+    }
+  },
+  "conclusion": "首日连驱已在平台侧落库：两路 workload digest 1581b156… 均落在 11-09 15:00 本地小时桶（exec 各 21587），采集间隙 >180s = 0；累计 15 点运行日 cid=19 = 2（11-06、11-09）、cid=18 = 2（11-06、11-09）。11-10、11-11 两轮完成后可达 days=3 门槛（复判须在 11-12 15:00 前）。"
+}

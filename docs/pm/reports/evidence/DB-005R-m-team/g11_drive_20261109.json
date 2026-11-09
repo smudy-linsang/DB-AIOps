@@ -1,0 +1,129 @@
+{
+  "drive_date": "2026-11-09",
+  "window_local": "15:00-16:00 (+08:00)",
+  "driver_script": "C:\\dispatcher\\g11_daily_drive.py",
+  "scheduled_task": "MMMan-DBAIOps-G11DailyDrive",
+  "workload_mode": "run（纯只读 SELECT；不跑 load/index/drop/lockwait/batch）",
+  "task_last_result": 0,
+  "events": [
+    {
+      "event": "verify_ok",
+      "cid": 19,
+      "instance": "<instance-mysql>",
+      "db": "aiops_probe_shop",
+      "at": "2026-11-09 14:42:20"
+    },
+    {
+      "event": "verify_ok",
+      "cid": 18,
+      "instance": "<instance-proxy>",
+      "db": "aiops_probe_shop",
+      "at": "2026-11-09 14:42:20"
+    },
+    {
+      "event": "verify_done",
+      "ok_cids": [
+        19,
+        18
+      ],
+      "at": "2026-11-09 14:42:20"
+    },
+    {
+      "event": "drive_start",
+      "minutes": 45,
+      "at": "2026-11-09 15:05:01",
+      "targets": [
+        {
+          "cid": 19,
+          "instance": "<instance-mysql>",
+          "db": "aiops_probe_shop"
+        },
+        {
+          "cid": 18,
+          "instance": "<instance-proxy>",
+          "db": "aiops_probe_shop"
+        }
+      ]
+    },
+    {
+      "event": "drive_instance_done",
+      "cid": 19,
+      "rc": 0,
+      "at": "2026-11-09 15:50:02"
+    },
+    {
+      "event": "drive_instance_done",
+      "cid": 18,
+      "rc": 0,
+      "at": "2026-11-09 15:50:02"
+    },
+    {
+      "event": "drive_done",
+      "results": [
+        {
+          "cid": 19,
+          "rc": 0
+        },
+        {
+          "cid": 18,
+          "rc": 0
+        }
+      ],
+      "at": "2026-11-09 15:50:02"
+    }
+  ],
+  "client_summary": {
+    "18": {
+      "instance": "<instance-proxy>",
+      "queries": [
+        {
+          "name": "slow_user_sort",
+          "count": 1586,
+          "avg_ms": 24.6
+        },
+        {
+          "name": "agg_no_shardkey",
+          "count": 551,
+          "avg_ms": 44
+        },
+        {
+          "name": "range_no_key",
+          "count": 558,
+          "avg_ms": 19.1
+        },
+        {
+          "name": "pk_lookup",
+          "count": 10763,
+          "avg_ms": 4.8
+        }
+      ]
+    },
+    "19": {
+      "instance": "<instance-mysql>",
+      "queries": [
+        {
+          "name": "slow_user_sort",
+          "count": 1567,
+          "avg_ms": 22.3
+        },
+        {
+          "name": "agg_no_shardkey",
+          "count": 499,
+          "avg_ms": 41.5
+        },
+        {
+          "name": "range_no_key",
+          "count": 564,
+          "avg_ms": 17.1
+        },
+        {
+          "name": "pk_lookup",
+          "count": 10828,
+          "avg_ms": 2.3
+        }
+      ]
+    }
+  },
+  "side_effects": "只读 SELECT；未改表结构、未改数据、未动索引（idx_user_created 仍缺失）；未重启采集器(PID 48048)与 Web(PID 54884)；凭据仅经环境变量传入子进程，不落盘、不入库、不入证据、不入日志。",
+  "note": "两路并行＝同一后端双跑（见 g11_topology_probe.json），故两路 15 点桶执行量相同（均 21587）。"
+}
