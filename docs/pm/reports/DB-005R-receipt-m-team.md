@@ -81,4 +81,18 @@
 | 副作用 | 本轮**未轮换** `mteam` 口令（连驱脚本不触碰平台认证路径）；未重启任何平台进程；未改任何仓库文件（仅新增宿主机脚本与计划任务） |
 | ETA | **11-12 20:32 后**同轮复跑：`reproduce_g11_day_baseline.py --cid 19 --cid2 18 --window 24h --periodic-days 7` + `reproduce_g11_periodic_gate.py`（同一脚本、同一接口、同一命令），用 `days=3` 判日周期，并顺带复跑 cid=18 的 `baseline=week`；结果回填报告 **v1.3**（第一行结论三档按实测定）。**cid=19 的 `baseline=week` 需 11-13 15:27 后**另轮补 |
 
+## 9. 复核与订正（MMMan 主会话 11-09 08:55–09:0x 复核）
 
+| 项 | 内容 |
+|---|---|
+| 复核性质 | **本会话对 §8 装置与 ETA 做独立复核**，不重复接单、不重复造装置。§8 的连驱装置（`C:\dispatcher\g11_daily_drive.py` + 计划任务 `MMMan-DBAIOps-G11DailyDrive`）**予以保留并沿用**；本会话只做加固与订正 |
+| **★订正 1：days=3 复判时点** | **§8 的 ETA「11-12 20:32 后同轮复跑」按算术不成立**。`monitor/sql_compare.py::detect_daily` 的判定窗是 `[判定时刻 - days, 判定时刻)`，而「同一活跃小时跨 ≥3 个运行日」要求 **11-09/11-10/11 三个 15 点桶同时落在窗内**。按 `detect_daily` 真实实现复刻实测（证据 `g11_gate_math.json`）：判定时刻 **11-12 09:50** → days=3 两路均 `OK(days_seen=3)`；判定时刻 **11-12 20:35** → days=3 两路均 `NO(run_days<3)`（11-09 的桶已滑出窗）。**故 days=3 复判必须落在 11-12 15:00 之前**（含 11-11 16:00–11-12 15:00 之间的任一时刻）。这是**判定窗边界问题，不是平台缺陷** |
+| **★订正 2：days=7 门槛** | days=7 需 `ceil(7×0.7)=5` 个运行日。11-09/10/11 连驱只提供 3 个 15 点运行日；cid=19 因 11-06 才纳管、历史仅 1 个 15 点桶，**days=7 在 11-12 必然仍为 `NO`**。cid=18 因多一个 11-05 20:00 桶，在 11-11 16:00–11-12 09:50 窗口内 days=7 可 `OK(days_seen=5)`，但该窗口很短（11-12 09:50 后 11-05 桶滑出 ⇒ 回到 `NO`）。**结论：PM 裁决「用 days=3 判定日周期」是唯一可达口径**，与 §8 一致；days=7 只作诊断读数，不作判定 |
+| 复核：拓扑 | `docker inspect tdsql-proxy` 实测：mock proxy（15002）的 `TDSQL_BACKEND_HOST=host.docker.internal` / `TDSQL_BACKEND_PORT=13306` ⇒ **cid=18（proxy）与 cid=19（直连 MySQL 8.0）指向同一个后端**。平台侧近 4h 实测 digest 集合：cid=19 与 cid=18 **重合 25 / 各 25、独有 0 / 0**（证据 `g11_topology_probe.json`）⇒ **一轮连驱可同时喂两路**，两路各自独立采集同一后端 |
+| 复核：采集连续性 | 采集器 PID 48048（起 2026-11-05 20:31:56）、Web PID 54884（起 2026-11-05 20:29:12）**均未重启**；两路最近采样持续推进至 11-09 09:02 本地，4h 内 cid=18 2620 行 / cid=19 2520 行、各 25 个 digest |
+| 复核：目标库状态 | `aiops_probe_shop.orders` 实测 **150000 行**，索引仅 `PRIMARY`（`idx_user_created` 已被 S-1 阶段删除，**连驱脚本不碰索引** ⇒ 状态不变）；workload 候选 digest 在目标库实测为 `1581b156…`（12525 次）/ `6171e5b3…`（1843）/ `5f918880…`（626）/ `403d6015…`（580），与 §8 口径一致 |
+| 复核：凭据与副作用 | 连驱脚本**不触碰平台认证路径** ⇒ 连驱三轮**不轮换 `mteam` 口令**。但**复跑脚本会**：本地开发态 token 存 LocMemCache 跨进程不可见（实测 LocMem 与 Redis 两种模式签发的令牌均被 API 401 拒绝）⇒ 复跑回退到「重置本地开发账号口令 + 登录」，随机值只经环境变量传入、不落盘不入库不入证据。**每次复跑轮次按脚本回退次数如实计入，不隐瞒** |
+| 装置加固 | ① 沿用 §8 的 `MMMan-DBAIOps-G11DailyDrive`（每日 15:05），**修正其 XML**：`DisallowStartIfOnBatteries` / `StopIfGoingOnBatteries` 由 `true` 改为 `false`（本机为笔记本 + 有电池，原设置会在用电池时**不触发**），并补 `StartWhenAvailable=true`（错过 15:05 时尽快补跑，仍受脚本 15 点闸门约束）。② 新增只读核验任务 `MMMan-DBAIOps-G11BucketVerify`（每日 16:05，脚本 `g11_verify_buckets.py`）：**只读**核验 workload digest 是否落在 15 点桶 + 采集间隙，不驱动负载、不改数据。③ 新增复跑计划任务 4 个（脚本 `db005r_g11_rerun.py`，**同一脚本、同一接口、同一命令**）：`G11Rejudge-D1`（**11-12 09:50**，days=3 判定 —— 依订正 1 前移）、`G11Rejudge-W18`（11-12 20:35，cid=18 baseline=week）、`G11Rejudge-W19`（11-13 15:35，cid=19 baseline=week）、`G11Rejudge-Mature`（11-14 16:00，周基线成熟轮） |
+| 幂等与防重复 | 本会话另建的连驱任务 `MMMan-DBAIOps-G11Drive` 已**撤销**（避免与 §8 装置同日双跑、污染同一小时桶）；本会话自建的临时探针脚本已清理，仅保留计划任务实际引用的 3 个脚本（`g11_daily_drive.py` / `g11_verify_buckets.py` / `db005r_g11_rerun.py`），已逐一核验存在 |
+| 约束确认 | 未改业务代码（`scripts/` 与 `monitor/` 未动）；未改他人文件；未触碰 `STATUS.md` / `DECISIONS.md`；G-10 开关维持关闭；正式机 17.192 不动；凭据不供给、不落盘、不入库、不入证据；**不重启采集器与 Web**；驱动批次（G-D1 装 cp311 dmPython + 重启）仍等 PM 于 **11-13 15:27 后**安排 |
+| ETA（订正后） | **11-12 09:50**（`G11Rejudge-D1`）出 days=3 判定结论；**11-12 20:35** cid=18 baseline=week；**11-13 15:35** cid=19 baseline=week；**11-14 16:00** 周基线成熟轮。报告 **v1.3** 依上述结果回填，第一行结论三档按实测定 |
