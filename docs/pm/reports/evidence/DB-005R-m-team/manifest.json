@@ -2,15 +2,15 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 29,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 28 份（含 README-evidence.md）。目录实有文件数 = file_count = 29。",
- "total_bytes": 302917,
- "total_bytes_note": "files 列表 28 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 31,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 30 份（含 README-evidence.md）。目录实有文件数 = file_count = 31。",
+ "total_bytes": 307966,
+ "total_bytes_note": "files 列表 30 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "README-evidence.md",
    "desc": "证据清单与复现命令说明",
-   "bytes": 7488,
+   "bytes": 8101,
    "masked": false
   },
   {
@@ -62,9 +62,21 @@
    "masked": true
   },
   {
+   "file": "g11_bucket_verify_20261110.json",
+   "desc": "G-11 次日连驱落库只读核验：workload digest 1581b156… 在 cid=18/19 的 15 点本地小时桶执行量（各 21617）+ 采集间隙（>180s = 0）+ 累计 15 点运行日",
+   "bytes": 1703,
+   "masked": true
+  },
+  {
    "file": "g11_drive_20261109.json",
    "desc": "G-11 首日人工连驱（2026-11-09 15:05-15:50）执行证据：两路 workload run 模式 rc=0、客户端侧查询次数与平均耗时（只读 SELECT，无表/数据/索引副作用）",
    "bytes": 3015,
+   "masked": true
+  },
+  {
+   "file": "g11_drive_20261110.json",
+   "desc": "G-11 次日人工连驱（2026-11-10 15:05-15:50，计划任务自动触发）执行证据：两路 workload run 模式 rc=0、客户端侧查询次数与平均耗时（只读 SELECT，无表/数据/索引副作用）",
+   "bytes": 2733,
    "masked": true
   },
   {
@@ -177,8 +189,8 @@
   }
  ],
  "scan_hits": 0,
- "scan_scope": "19 份实测产物（数据类，含首日连驱 g11_drive_20261109.json / g11_bucket_verify_20261109.json）—— 沿用 v1.0 口径",
- "scan_note": "首日连驱入库后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
+ "scan_scope": "21 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json）—— 沿用 v1.0 口径",
+ "scan_note": "11-10 连驱入库后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
  "scan_list": [
   "127.0.0.1",
   "15002",
