@@ -99,3 +99,16 @@
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-10 | MMMan | G-11 人工连驱**当日核验与上板分册**（2026-11-10）：驱动 rc=0 双路、15 点桶各 21617、采集间隙 0、15 点运行日累计 3（判定窗内 2）、manifest 四项口径订正后自洽（31 份 / 307966 B / 差异 0）、回执 §12 新增。**结论档位：有条件通过**（母报告 v1.2 不变，v1.3 留待 11-12 09:50 days=3 实测） |
+| v1.1 | 2026-11-10 | MMMan | 补 §8 落库与 CI 核验：manifest 订正提交 `df5fbc1`、交付提交 `5deebe1`、提交纪律复核、本地 unit exit 0、远端 CI run 42781046109 七 job 全绿、并行 README 订正 `51786e9` 已复核自洽。**结论档位不变（有条件通过）** |
+## 8. 落库与 CI 核验
+
+| 项 | 结果 |
+|---|---|
+| manifest 订正提交 | `df5fbc1` —— 由 `g11_reconcile_and_commit.py` 自动生成（**仅含 manifest.json 一个文件**，未夹带他人文件），已推 origin/main |
+| 本轮交付提交 | `5deebe1` —— 回执 §12 + 本报告 + 2 份新证据 + README-evidence.md 索引（**5 个文件，266 insertions / 2 deletions**） |
+| 提交纪律复核 | `git diff --cached --stat` 提交前逐行核对：暂存区**仅我件 5 个**，未夹带他人文件；未用 `git add .`、未 force；未改 `STATUS.md` / `DECISIONS.md`；中文提交信息写成 UTF-8 文件后用 `git commit --only -F`（未用 `-m`） |
+| 本地 / 远端一致 | `local == origin/main == 5deebe1`，ahead/behind = 0/0（另有一条并行 MMMan 进程的 README 口径订正提交 `51786e9` 叠在其上，内容为把 README 首段残留的「19 份数据类文件」改为「21 份」，**字节长度不变**，manifest 无需重算，已复核仍自洽） |
+| 本地验证 | `scripts/validate.sh unit` **exit 0**（红线扫描 pass / unit 测试 pass），时点 HEAD = 24c62c2 |
+| 远端 CI | 推送后 run **42781046109**（main，push 触发）**7 个 job 全绿**：安全扫描 ✓ / 静态检查 ✓ / 前端构建与测试 ✓ / 单元测试（无外部依赖）✓ / 方言测试（MySQL/PG）✓ / 方言测试（Oracle）✓ / 集成测试（PostgreSQL）✓（日志中的 `X db unreachable` 是容器拉起前的探测噪声，非失败项） |
+| 未触碰项 | 未重启采集器 PID 48048 与 Web PID 54884；未轮换 `mteam` 口令；未改业务代码；未执行 days=3 复判；未碰 `STATUS.md` / `DECISIONS.md` |
+
