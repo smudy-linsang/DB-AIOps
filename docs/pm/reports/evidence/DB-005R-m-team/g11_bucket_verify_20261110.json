@@ -1,0 +1,38 @@
+{
+  "at": "2026-11-10T16:05:02.074486+08:00",
+  "date": "2026-11-10",
+  "event": "bucket_verify",
+  "script": "C:\\dispatcher\\g11_verify_buckets.py",
+  "scheduled_task": "MMMan-DBAIOps-G11BucketVerify",
+  "read_only": true,
+  "instances": {
+    "18": {
+      "instance": "<instance-proxy>",
+      "max_time": "2026-11-10 08:05:06.794408+00:00",
+      "rows_total": 84532,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-05T20:00:00+08:00": 5960,
+        "2026-11-06T15:00:00+08:00": 5798,
+        "2026-11-09T15:00:00+08:00": 21587,
+        "2026-11-10T15:00:00+08:00": 21617
+      },
+      "expected_15h_bucket": "2026-11-10T15:00:00+08:00",
+      "exec_in_expected_bucket": 21617
+    },
+    "19": {
+      "instance": "<instance-mysql>",
+      "max_time": "2026-11-10 08:03:09.084492+00:00",
+      "rows_total": 76399,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-06T15:00:00+08:00": 5722,
+        "2026-11-09T15:00:00+08:00": 21587,
+        "2026-11-10T15:00:00+08:00": 21617
+      },
+      "expected_15h_bucket": "2026-11-10T15:00:00+08:00",
+      "exec_in_expected_bucket": 21617
+    }
+  },
+  "conclusion": "次日（11-10）连驱已在平台侧落库：两路 workload digest 1581b156… 均落在 11-10 15:00 本地小时桶（exec 各 21617，与首日 21587 同量级），采集间隙 >180s = 0；累计 15 点运行日 cid=19 = 3（11-06、11-09、11-10）、cid=18 = 3（11-06、11-09、11-10；11-05 20:00 桶按 hour_share=0.8 不计入候选小时）。11-12 09:50 的 days=3 复判窗内现有 11-09/11-10 两个 15 点桶，仍需 11-11 15:05 第三轮落桶方能满足 3 个运行日。"
+}

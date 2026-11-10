@@ -1,8 +1,8 @@
-# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 首日人工连驱 11-09）
+# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10）
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 29 份**（含本清单与 `manifest.json`）：19 份实测产物 + 8 份可复现脚本 + 本清单 + manifest。**实测产物（19 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 31 份**（含本清单与 `manifest.json`）：21 份实测产物 + 8 份可复现脚本 + 本清单 + manifest。**实测产物（19 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -20,6 +20,8 @@
 | `g11_gate_math_magnitudes.json` | **G-11 判定窗边界复刻（执行量级敏感性）**：单路连驱 vs 两路并行（同后端双跑）两种日执行量下的判定对照 | 12320 | 是 |
 | `g11_drive_20261109.json` | **首日人工连驱执行证据**（2026-11-09 15:05:01 起、45 分钟、计划任务 `MMMan-DBAIOps-G11DailyDrive`）：两路 workload `run` 模式（纯只读 SELECT）均 rc=0 + 客户端侧各查询次数与平均耗时 | 3015 | 是 |
 | `g11_bucket_verify_20261109.json` | **首日连驱落库只读核验**（2026-11-09 15:51）：workload digest `1581b156…` 在 cid=18/19 的 **11-09 15:00 本地小时桶**执行量（各 21587）+ 采集间隙（>180s = 0）+ 累计 15 点运行日 | 1398 | 是 |
+| `g11_drive_20261110.json` | **次日人工连驱执行证据**（2026-11-10 15:05:03 起、45 分钟、计划任务 `MMMan-DBAIOps-G11DailyDrive` 自动触发、Last Result 0）：两路 workload `run` 模式（纯只读 SELECT）均 rc=0 + 客户端侧各查询次数与平均耗时 | 2733 | 是 |
+| `g11_bucket_verify_20261110.json` | **次日连驱落库只读核验**（2026-11-10 16:05，任务 `MMMan-DBAIOps-G11BucketVerify`）：workload digest `1581b156…` 在 cid=18/19 的 **11-10 15:00 本地小时桶**执行量（各 21617）+ 采集间隙（>180s = 0）+ 累计 15 点运行日 | 1703 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |
