@@ -12,7 +12,7 @@
 | 插件版本 | minimax-bot v0.7.24（`serverInfo.version` 实测） |
 | 基线 HEAD | `24e9bc1`（main；`git pull --ff-only origin main` 后 `rev-list --count HEAD..origin/main` = 0） |
 | 验证 | `scripts/validate.sh unit --json` → **exit_code 0**（阶段「红线扫描」pass、「unit 测试」pass，`git_rev=24e9bc1`） |
-| CI | 推送后回看：见 §八 |
+| CI | 推送后回看：head `ca0a0c0` 上 `A autorun dispatch`(135)、`O DB-AIOps automatic review`(138)、`CI`(221) 三个 workflow **全部 completed / success**；CI 7 个 job 全绿 |
 
 ## 一、结论摘要
 
@@ -110,8 +110,19 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 
 ## 八、CI 回看
 
-见同目录 `AVATAR-SYNC12-20261111-report-m-team.md` 的追加小节（推送后回填）。
+推送后回看 head `ca0a0c0`（`24e9bc1..ca0a0c0`），三个 workflow **全部 completed / success**：
+
+| workflow | run | 状态 |
+|---|---|---|
+| `A autorun dispatch` | 135 | completed / success |
+| `O DB-AIOps automatic review` | 138 | completed / success |
+| `CI` | 221 | completed / success |
+
+`CI` 的 7 个 job 逐个实测为 **success**：静态检查、安全扫描、前端构建与测试、方言测试（Oracle）、
+方言测试（MySQL/PG）、单元测试（无外部依赖）、集成测试（PostgreSQL）。
+
+**结论档位不变**：通过。CI 全绿未引入任何红灯，master 无需回滚。
 
 ---
 
-版本：v1.0 ｜ 2026-11-11 ｜ MMMan
+版本：v1.1 ｜ 2026-11-11 ｜ MMMan（v1.1 补记 CI 回看结果，结论档位不变）
