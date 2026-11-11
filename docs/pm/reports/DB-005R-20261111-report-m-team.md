@@ -87,7 +87,7 @@
 
 ## 六、commit 与推送
 
-- commit（首轮核验）：`de35075` —— 中文提交信息以 UTF-8 文件落盘后 `git commit --only -F`；本轮复核提交哈希见 §九 与回话；
+- commit（首轮核验）：`de35075` —— 中文提交信息以 UTF-8 文件落盘后 `git commit --only -F`；本轮复核提交见 §九.0（`9ff7b6f`）；
 - 推送：`git push origin main`（rc=0）；
 - 提交范围：**仅我件**（`DB-005R-receipt-m-team.md`、`DB-005R-20261111-report-m-team.md`、证据目录 6 份新文件 + `README-evidence.md` + `manifest.json`），未 `git add .`、未 force。
 
@@ -131,6 +131,12 @@
 | manifest 订正脚本 | **重跑** `g11_reconcile_and_commit.py`（16:17:32，rc=0） | **no drift, nothing to commit** | ✓ |
 | 单元验证 | `scripts/validate.sh unit --json` | exit_code=0（红线扫描 pass + unit 测试 pass），git_rev=`de35075` | ✓ |
 | CI | `gh run list` | `de35075` 上 CI / A autorun dispatch / O DB-AIOps automatic review **全部 success** | ✓ |
+
+### 9.0 本轮提交
+
+- commit：**`9ff7b6f`** —— 中文提交信息以 UTF-8 文件落盘后 `git commit --only -F`（未用 `-m`）；
+- 推送：`git push origin main`（rc=0，`de35075..9ff7b6f`）；
+- 提交范围：**仅我件 6 份**（`DB-005R-20261111-report-m-team.md`、`DB-005R-receipt-m-team.md`、`README-evidence.md`、`manifest.json`、`g11_manifest_selfcheck_20261111.py`、`g11_recheck_20261111.json`），未 `git add .`、未 force、未夹带他人文件。
 
 ### 9.1 本轮订正项
 
