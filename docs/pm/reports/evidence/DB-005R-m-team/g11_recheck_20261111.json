@@ -1,0 +1,76 @@
+{
+ "event": "g11_recheck_20261111",
+ "recorded_at": "2026-11-11T16:31:00+08:00",
+ "read_only": true,
+ "scope": "第二会话对 11-11 轮结论的独立复验（不重跑负载、不改业务代码、不重启采集器与 Web、不改 STATUS.md/DECISIONS.md）",
+ "summary": "独立复验全部通过：11-11 连驱确未执行、15 点桶两路 exec 均为 0、宿主主机重启根因链条闭合、manifest 四项口径自洽。第一轮结论不翻案。",
+ "independent_reverification": {
+  "drive_log": {
+   "path": "<dispatcher>/g11_drive_log.jsonl",
+   "total_lines": 15,
+   "lines_matching_2026_11_11": 0,
+   "last_entry_at": "2026-11-10 15:50:04",
+   "event_counts": {"drive_start": 2, "drive_instance_done": 4, "drive_done": 2},
+   "verdict": "无任何 2026-11-11 条目；drive_start/drive_instance_done/drive_done 当日全部缺失（两轮 = 11-09/11-10），11-11 连驱未执行"
+  },
+  "bucket_verify_rerun": {
+   "script": "reproduce_g11_verify_20261111.py",
+   "ran_at": "2026-11-11T16:16:42+08:00",
+   "read_only": true,
+   "cid_19": {"exec_in_expected_bucket": 0, "expected_15h_bucket": "2026-11-11T15:00:00+08:00", "bucket_present": false, "rows_total": 86599, "max_time_utc": "2026-11-11 00:53:09.847785+00:00", "last_sample_local": "08:53:09", "gap_count_gt_180s_30min": 0, "hour_buckets": {"2026-11-06T15:00:00+08:00": 5722, "2026-11-09T15:00:00+08:00": 21587, "2026-11-10T15:00:00+08:00": 21617}},
+   "cid_18": {"exec_in_expected_bucket": 0, "expected_15h_bucket": "2026-11-11T15:00:00+08:00", "bucket_present": false, "rows_total": 95372, "max_time_utc": "2026-11-11 00:53:07.704130+00:00", "last_sample_local": "08:53:07", "gap_count_gt_180s_30min": 0, "hour_buckets": {"2026-11-05T20:00:00+08:00": 5960, "2026-11-06T15:00:00+08:00": 5798, "2026-11-09T15:00:00+08:00": 21587, "2026-11-10T15:00:00+08:00": 21617}},
+   "verdict": "复跑结果与第一轮入库证据逐项一致（exec=0、桶整桶不存在、最后采样 08:53:09/08:53:07）；gap_count_gt_180s_30min=0 为空窗假绿，仍以最后采样时刻并读"
+  },
+  "scheduled_task": {
+   "name": "MMMan-DBAIOps-G11DailyDrive",
+   "state": "Ready",
+   "last_run_time": "2026-11-11 15:05:02",
+   "last_task_result": 1,
+   "next_run_time": "2026-11-12 15:05:00",
+   "number_of_missed_runs": 0,
+   "verdict": "计划任务按时触发但退出码非 0，与「取凭据阶段失败、未写出 drive_start」一致"
+  },
+  "rootcause_recheck": {
+   "host_boot_time_local": "2026-11-11 09:10:45",
+   "timescaledb_container": {"name": "db-aiops-timescaledb", "finished_at_utc": "2026-11-11T01:09:16.184002995Z", "finished_at_local": "2026-11-11 09:09:16", "oom_killed": false, "current_state": "running(healthy)", "restarted_at_local": "2026-11-11 16:05:57"},
+   "collector_pid_48048_present": false,
+   "web_pid_54884_present": false,
+   "verdict": "宿主主机 09:10:45 重启 → 时序库容器 09:09:16 停止（主库与时序库同端口）→ 采集器与 Web 进程消失 → 采集停在 08:53 → 15:05 连驱取凭据失败；因果链闭合，属运行时中断而非平台代码缺陷"
+  },
+  "manifest_reconcile_rerun": {
+   "script": "g11_reconcile_and_commit.py",
+   "ran_at": "2026-11-11 16:17:32",
+   "exit_code": 0,
+   "result": "no drift, nothing to commit",
+   "measured": {"file_count": 37, "total_bytes": 321899, "data_files": 25, "wrote": false, "changes": []},
+   "verdict": "manifest 四项口径（bytes/file_count/total_bytes/scan_scope）经目录实测重算后无漂移"
+  },
+  "manifest_selfcheck_rerun": {
+   "script": "g11_manifest_selfcheck_20261111.py",
+   "dir_actual_files_excl_manifest": 36,
+   "manifest_file_count": 37,
+   "file_count_self_consistent": true,
+   "total_bytes_listed": 321899,
+   "total_bytes_actual": 321899,
+   "total_bytes_self_consistent": true,
+   "per_file_diffs": [],
+   "scan_scope_listed": 25,
+   "data_files_actual": 25,
+   "scan_scope_self_consistent": true,
+   "new_evidence_scan_hits_total": 0,
+   "verdict": "独立自洽复核脚本复跑全部通过，逐文件字节差异 0，敏感扫描命中 0"
+  }
+ },
+ "unit_validation": {"command": "scripts/validate.sh unit --json", "exit_code": 0, "git_rev": "de35075", "stages": [{"name": "红线扫描", "status": "pass", "duration_ms": 791}, {"name": "unit 测试", "status": "pass", "duration_ms": 62719}], "note": "引用测试条数以该时点 HEAD 为准"},
+ "ci_status": {"head_sha": "de35075", "workflows": ["CI", "A autorun dispatch", "O DB-AIOps automatic review"], "conclusion": "success"},
+ "conclusion": {
+  "verdict": "第一轮结论成立，不翻案",
+  "detail": "11-11 连驱未执行、15 点桶两路落桶执行量 = 0，15 点运行日累计维持 cid=19 = 3、cid=18 = 3（11-06、11-09、11-10）；11-12 09:50 days=3 判定窗内仍只有 2 个 15 点桶",
+  "plate_defect": "无平台代码缺陷证据，不计缺陷单；母报告档位不变（v1.2 有条件通过）"
+ },
+ "gaps_pending_pm_decision": [
+  "11-12 09:50 G11Rejudge-D1（days=3）：判定窗内仅 2 个 15 点桶，当前必为 NO；补跑路径需 PM 裁决（连驱脚本日期闸门 DRIVE_DATES 只含 11-09/10/11），本轮不自行放宽",
+  "采集器 PID 48048 与 Web PID 54884 已消失，是否恢复属 PM 裁决（涉 DeltaTracker 重置与驱动批次排期）",
+  "11-12 20:35 cid=18 baseline=week、11-13 15:35 cid=19 baseline=week、11-14 16:00 周基线成熟轮均以采集恢复为前提，当前不可测"
+ ]
+}

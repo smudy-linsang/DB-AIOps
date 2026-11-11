@@ -3,8 +3,8 @@
 # DB-005R 第三轮（11-11）连驱核验与上板 交付报告（M-team / MMMan）
 
 - 任务单：黑板《G11当日记录》（2026-11-11 16:01 派发，**只做核验与上板，不重跑负载**）
-- 交付时间：2026-11-11 16:1x（本地）
-- 版本：v1.0
+- 交付时间：2026-11-11 16:12（首轮核验）｜16:3x（复核轮，本 v1.1）
+- 版本：v1.1
 - 结论档位：**不通过**（当日连驱未执行、15 点桶未落库，落桶执行量 = 0）
 - 母报告 `DB-005R-report-m-team.md` 结论档位**不变（v1.2：有条件通过）**，缺陷单仍为空；本轮不新开缺陷单
 
@@ -79,15 +79,15 @@
 
 | 项 | manifest 载明 | 目录实测 | 一致 |
 |---|---|---|---|
-| file_count | 37 | 36 份 + manifest 自身 = 37 | ✓ |
-| total_bytes | 321899 | 321899 | ✓ |
+| file_count | 39 | 38 份 + manifest 自身 = 39 | ✓ |
+| total_bytes | 331171 | 331171 | ✓ |
 | 逐文件字节 | — | **差异 0** | ✓ |
-| scan_scope 份数 | 25 份实测产物 | 25 份 | ✓ |
-| 新增 6 份证据敏感扫描 | 命中 0 | 命中 **0**（沿用 manifest.scan_list 词表） | ✓ |
+| scan_scope 份数 | 26 份实测产物 | 26 份 | ✓ |
+| 新增 8 份证据敏感扫描 | 命中 0 | 命中 **0**（沿用 manifest.scan_list 词表） | ✓ |
 
 ## 六、commit 与推送
 
-- commit：`（见 §七 回话中的哈希）` —— 中文提交信息以 UTF-8 文件落盘后 `git commit --only -F`；
+- commit（首轮核验）：`de35075` —— 中文提交信息以 UTF-8 文件落盘后 `git commit --only -F`；本轮复核提交哈希见 §九 与回话；
 - 推送：`git push origin main`（rc=0）；
 - 提交范围：**仅我件**（`DB-005R-receipt-m-team.md`、`DB-005R-20261111-report-m-team.md`、证据目录 6 份新文件 + `README-evidence.md` + `manifest.json`），未 `git add .`、未 force。
 
@@ -109,10 +109,44 @@
 
 ---
 
-**证据清单**：`docs/pm/reports/evidence/DB-005R-m-team/`（共 37 份，含本轮新增 6 份）——
+**证据清单**：`docs/pm/reports/evidence/DB-005R-m-team/`（共 39 份，含本轮新增 6 份 + 复核轮新增 2 份）——
 `g11_bucket_verify_20261111.json`（落桶核验）、`g11_collection_gap_20261111.json`（中断量化）、
 `g11_drive_20261111.json`（连驱未执行取证）、`g11_rootcause_20261111.json`（根因审计）、
-`reproduce_g11_verify_20261111.py`、`reproduce_g11_gap_20261111.py`（可复现脚本）。
+`reproduce_g11_verify_20261111.py`、`reproduce_g11_gap_20261111.py`（可复现脚本）；
+复核轮新增：`g11_recheck_20261111.json`（复核轮复验记录）、`g11_manifest_selfcheck_20261111.py`（manifest 自洽脚本）。
+
+
+## 九、独立复核与订正（16:2x–16:3x，MMMan 第二会话）
+
+**复核性质**：对首轮（v1.0）结论的**独立复核**，非重跑负载、非重写结论。首轮结论**全部成立，不翻案**。
+
+| 复核项 | 方法 | 结果 | 判定 |
+|---|---|---|---|
+| 11-11 连驱是否执行 | 读 `g11_drive_log.jsonl`（共 15 行，`2026-11-11` **匹配 0 行**），末条仍为 2026-11-10 15:50:04；事件计数 `drive_start`=2 / `drive_instance_done`=4 / `drive_done`=2（= 11-09、11-10 两轮） | 当日四个期望事件**全部缺失** | ✓ 与首轮一致 |
+| 15 点桶落库执行量 | **重跑** `reproduce_g11_verify_20261111.py`（16:16:42，TSDB 已恢复，只读） | cid=19 exec=**0**、cid=18 exec=**0**，**桶整桶不存在**；小时桶字典仅 11-05 20:00 / 11-06 / 11-09 / 11-10 | ✓ 与首轮入库证据逐项一致 |
+| 采集连续性 | 同上脚本 `max_time` | 两路最后采样 **08:53:09 / 08:53:07**，`gap_count_gt_180s_30min`=0（**空窗假绿**，以最后采样时刻并读） | ✓ 口径订正在首轮已写入，本轮沿用 |
+| 计划任务状态 | `Get-ScheduledTask MMMan-DBAIOps-G11DailyDrive` | Last Run **15:05:02**、Last Result **1**（非 0）、Next Run 11-12 15:05:00、State=Ready | ✓ 与首轮一致 |
+| 根因链 | `BootTime`、容器 `FinishedAt`、进程表 | 主机 **09:10:45** 重启 → 容器 **09:09:16** 停止 → **PID 48048 / 54884 均不在进程表** → 15:05 取凭据失败 | ✓ 因果链闭合，属运行时中断、非平台代码缺陷 |
+| manifest 自洽 | **重跑** `g11_manifest_selfcheck_20261111.py` | file_count 39 ✓、total_bytes **331171** ✓、**逐文件差异 0** ✓、scan_scope 26 = 实数 26 ✓、**敏感扫描命中 0** ✓ | ✓ |
+| manifest 订正脚本 | **重跑** `g11_reconcile_and_commit.py`（16:17:32，rc=0） | **no drift, nothing to commit** | ✓ |
+| 单元验证 | `scripts/validate.sh unit --json` | exit_code=0（红线扫描 pass + unit 测试 pass），git_rev=`de35075` | ✓ |
+| CI | `gh run list` | `de35075` 上 CI / A autorun dispatch / O DB-AIOps automatic review **全部 success** | ✓ |
+
+### 9.1 本轮订正项
+
+1. **证据自洽脚本补入库**：首轮引用的独立自洽脚本 `g11_manifest_selfcheck_20261111.py` 原先只存在于 `C:\dispatcher\probe_out\`（仓库外），复核人无法据以复现——本轮已**补入仓库证据目录**，扫描清单由 6 份扩到 8 份。
+2. **manifest 口径随之订正**：新增 `g11_manifest_selfcheck_20261111.py` + `g11_recheck_20261111.json` 后按目录实测重算 → `file_count` **37 → 39**、`total_bytes` **321899 → 331171**、`scan_scope`「**25 份 → 26 份实测产物**」，`README-evidence.md` 索引与份数口径同步（§五 表已更新）。
+3. **占位符订正**：首轮「交付时间 16:1x」「commit 见 §七 回话中的哈希」（§七 实为「遗留缺口与复通条件」，交叉引用有误）已补全为首轮实际值 `de35075`。
+
+### 9.2 本轮未做（遵守约束）
+
+未重跑负载；未启动/重启采集器与 Web（PID 48048 / 54884 保持消失）；未改 `STATUS.md` / `DECISIONS.md`；未改业务代码；未碰他人文件；未轮换 `mteam` 口令；**未在 11-12 09:50 之前提前做 days=3 复判**。TSDB 容器沿用首轮的最小恢复状态（Up/healthy），本轮只读使用。
+
+### 9.3 结论与遗留
+
+**结论档位不变：不通过**（11-11 连驱未执行、落桶执行量 = 0；母报告 `DB-005R-report-m-team.md` 档位仍为 **v1.2 有条件通过**，缺陷单为空）。遗留缺口逐条同 §七、§八，**补跑路径与采集器恢复均待 muse 裁决**，本轮不自行放宽口径。
+
+---
 
 **敏感扫描**：新增 6 份证据命中 0（沿用 manifest `scan_list` 词表）；全量无凭据明文，
 本地地址/端口/实例名按 DB-005R 既有口径掩码。

@@ -2,7 +2,7 @@
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 37 份**（含本清单与 `manifest.json`）：25 份实测产物 + 10 份可复现脚本 + 本清单 + manifest。**实测产物（25 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 39 份**（含本清单与 `manifest.json`）：26 份实测产物 + 11 份可复现脚本 + 本清单 + manifest。**实测产物（26 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -28,6 +28,8 @@
 | `g11_rootcause_20261111.json` | **根因审计**：宿主主机 09:10:45 重启 → 时序库容器 09:09:16 停止（主库与时序库同端口）→ 采集器/Web 进程消失 → 11-11 连驱与落桶双缺失；含 TSDB 恢复动作与影响面 | 2356 | 是 |
 | `reproduce_g11_verify_20261111.py` | 11-11 落桶只读核验脚本（TSDB 恢复后手动复核用） | 2587 | 是 |
 | `reproduce_g11_gap_20261111.py` | 采集中断量化脚本（逐小时 rows 分布 + 最后采样时刻 + 11-11 全天样本统计） | 2382 | 是 |
+| `g11_recheck_20261111.json` | **11-11 独立复核轮复验记录**（16:2x 第二会话）：重跑落桶只读核验、重跑 manifest 自洽脚本、重跑 reconcile（no drift）、宿主主机重启与容器/PID 存活性复核、计划任务 Last Result 复核 | 5435 | 是 |
+| `g11_manifest_selfcheck_20261111.py` | manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描 | 2897 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |
@@ -79,5 +81,10 @@ python C:\dispatcher\g11_verify_buckets.py           # 只读核验 15 点桶落
 # 前置：时序库容器需可用（11-11 因宿主主机重启停止，已恢复后复核）
 python reproduce_g11_verify_20261111.py             # 只读核验 11-11 15 点桶落库与采集间隙
 python reproduce_g11_gap_20261111.py                 # 量化采集中断（逐小时 rows + 最后采样时刻）
+
+# G-11 11-11 独立复核轮（16:2x 第二会话）：复跑上述只读核验 + manifest 自洽复核
+python reproduce_g11_verify_20261111.py             # 复跑落桶核验（exec=0、桶不存在）
+python g11_manifest_selfcheck_20261111.py          # manifest 四项口径自洽复核（逐文件差异 0）
+python C:\dispatcher\g11_reconcile_and_commit.py   # manifest 订正（无漂移则不提交）
 
 原始运行副本保留在本机 `C:\dispatcher\probe_out\`，**不入库**；仓库 `.gitignore` 含 `*.log`，故日志类证据入库时统一改名为 `.txt`（沿用 DB-005 先例）。
