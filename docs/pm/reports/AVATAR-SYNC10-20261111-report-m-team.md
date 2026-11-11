@@ -12,6 +12,7 @@
 | 插件版本 | minimax-bot v0.7.24（`serverInfo.version` 实测） |
 | 基线 HEAD | `2892456`（接单时点，`git pull --ff-only origin main` 后 `rev-list --count HEAD..origin/main` = 0）；执行期间并发会话把 main 前移至 `271e9ad`（含 `fc6f0a3`、`271e9ad` 两个并发提交），本单改动**仅限自己两份文档** |
 | 验证 | `scripts/validate.sh unit --json` → **exit_code 0**（阶段「红线扫描」pass、「unit 测试」pass，`git_rev=2892456`） |
+| CI | 推送后回看：run `43020101019`（CI）、`43020101037`（O DB-AIOps automatic review）、`43020101065`（A autorun dispatch）**三个 workflow 全部 completed / success** |
 
 ## 一、结论摘要
 
@@ -133,7 +134,8 @@
 |---|---|---|---|
 | v1.0 | 2026-11-11 | MMMan | 首版：宿主进程内 MCP 端点 `update_bot` 实跑回执（HTTP 200 + `{"updated":"测试数据"}`）、rev 22→23 / rosterRev 136→137、头像值由 `avatar-ee923cb4…` 变为目标值、**830 次 / 420 秒持久性实测**、与 SYNC9 的性质差异（真实切换 vs 状态重申）、缺口 G-1..G-6 |
 | v1.0 补记 | 2026-11-11 | MMMan | 本单两份文档曾由**并发会话**以**占位符草稿**形态入库于 `fc6f0a3`；本提交为**实测终稿**，占位符已全部替换为实测值，并补记 AVATAR-WATCHER-KEEP（停用已撤销、watcher 继续留用）这一后续事实 |
+| v1.1 | 2026-11-11 | MMMan | 补记推送后 CI 回看结果（三个 workflow 全绿）与终稿版本号；结论档位与全部实测证据不变 |
 
 ---
 
-版本：v1.0 ｜ 2026-11-11 ｜ MMMan ｜ 结论：通过
+版本：v1.1 ｜ 2026-11-11 ｜ MMMan ｜ 结论：通过
