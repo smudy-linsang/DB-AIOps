@@ -48,6 +48,15 @@ ORIGINAL_METHODS = {
     'INS-TDSQL-SHARD': 'detect_tdsql_set_health',
 }
 EXCLUDED = ('INS-ORA-OPT-STATS-GATHER', 'INS-MYSQL-BINLOG-DELAY')
+DB022_IDS = [
+    'INS-COM-USER-LOCKED', 'INS-COM-PWD-EXPIRE', 'INS-COM-CAP-7D', 'INS-COM-CAP-30D',
+    'INS-COM-DEADLOCK-24H', 'INS-COM-MISSING-INDEX', 'INS-COM-PART-NEEDED',
+    'INS-COM-SPARSE-INDEX', 'INS-COM-PARAM-DEV', 'INS-COM-ARCH-GAP',
+    'INS-COM-LOCK-WAIT', 'INS-COM-BLOCK-SESSION', 'INS-COM-OPEN-CURSOR',
+    'INS-COM-TEMP-USAGE', 'INS-COM-UNDO-USAGE', 'INS-ORA-AWR-TOP-EVT',
+    'INS-ORA-AWR-TOP-SQL', 'INS-ORA-STA-OUTPUT', 'INS-ORA-SEG-ADV', 'INS-ORA-FRA',
+    'INS-ORA-CTRL-BAK', 'INS-ORA-ARCH-DELETE', 'INS-ORA-DBA-USERS',
+]
 MUST = {
     'INS-ORA-LOB-PCT': (['dba_lobs', 'pctversion'], []),
     'INS-ORA-DBLINK': (['dba_db_links', 'v$sql'], []),
@@ -747,16 +756,19 @@ class Db023DetectorTests(TestCase):
         for item_id in EXCLUDED:
             self.assertNotIn(item_id, DETECTOR_REGISTRY)
             self.assertNotIn(item_id, DB023_DETECTORS)
+        for item_id in DB022_IDS:
+            self.assertIn(item_id, DETECTOR_REGISTRY)
+            self.assertNotIn(item_id, DB023_DETECTORS)
         for key, name in ORIGINAL_METHODS.items():
             self.assertEqual(DETECTOR_REGISTRY[key].__name__, name)
         direct = [item['item_id'] for item in ALL_ITEMS if item['item_id'] in DETECTOR_REGISTRY]
         self.assertTrue(set(ORIGINAL_DIRECT).issubset(direct))
+        self.assertTrue(set(DB022_IDS).issubset(direct))
         self.assertEqual(len(set(DB023_DETECTORS).intersection(direct)), 34)
-        self.assertGreaterEqual(len(DETECTOR_REGISTRY), 68)
-        self.assertGreaterEqual(len(direct), 45)
         base_keys = len(DETECTOR_REGISTRY) - len(DB023_DETECTORS)
-        self.assertGreaterEqual(base_keys, 34)
-        self.assertEqual(len(DETECTOR_REGISTRY), base_keys + 34)
+        self.assertEqual(base_keys, 57)
+        self.assertEqual(len(DETECTOR_REGISTRY), 91)
+        self.assertEqual(len(direct), 68)
 
     def test_sql_constants_do_not_reuse_rejected_signals(self):
         self.assertIn('age(c.relfrozenxid)', SQL_FREEZE)
