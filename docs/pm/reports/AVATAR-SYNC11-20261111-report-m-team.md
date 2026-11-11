@@ -12,6 +12,7 @@
 | 插件版本 | minimax-bot v0.7.24（`serverInfo.version` 实测） |
 | 基线 HEAD | `9692e35`（main；`git pull --ff-only origin main` 后 `rev-list --count HEAD..origin/main` = 0） |
 | 验证 | `scripts/validate.sh unit --json` → **exit_code 0**（阶段「红线扫描」pass、「unit 测试」pass，`git_rev=9692e35`） |
+| CI | 推送后回看：run 队列 `O DB-AIOps automatic review`、`CI`、`A autorun dispatch` 三个 workflow 在 head `2d1cddc` 上**全部 completed / success** |
 
 ## 一、结论摘要
 
@@ -144,4 +145,4 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 
 ---
 
-版本：v1.0 ｜ 2026-11-11 ｜ MMMan ｜ 结论：通过
+版本：v1.1 ｜ 2026-11-11 ｜ MMMan ｜ 结论：通过（补记 CI 回看结果，结论不变）
