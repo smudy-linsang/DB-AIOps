@@ -29,7 +29,7 @@
 | `reproduce_g11_verify_20261111.py` | 11-11 落桶只读核验脚本（TSDB 恢复后手动复核用） | 2587 | 是 |
 | `reproduce_g11_gap_20261111.py` | 采集中断量化脚本（逐小时 rows 分布 + 最后采样时刻 + 11-11 全天样本统计） | 2382 | 是 |
 | `g11_recheck_20261111.json` | **11-11 独立复核轮复验记录**（16:2x 第二会话）：重跑落桶只读核验、重跑 manifest 自洽脚本、重跑 reconcile（no drift）、宿主主机重启与容器/PID 存活性复核、计划任务 Last Result 复核 | 5435 | 是 |
-| `g11_manifest_selfcheck_20261111.py` | manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描 | 3417 | 是 |
+| `g11_manifest_selfcheck_20261111.py` | manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描 | 3427 | 是 |
 | `g11_recovery_20261111.json` | **恢复取证（2026-11-11 恢复轮）**：采集器/Web 新 PID 与启动时刻、逐小时写入分布（证明无业务负载也持续写基线行 ⇒ 08:53 后无行＝采集器进程已死）、中断→恢复缺口量化（489.2 分钟）、新窗口装置与相关计划任务清单 | 27105 | 是 |
 | `reproduce_g11_recovery_20261111.py` | 恢复取证可复现脚本（只读：进程/计划任务/DRIVE_DATES/sql_stat 连续性与逐小时写入分布） | 8242 | 是 |
 | `g11_recovery_probe_20261111.json` | 恢复后双读采样前推核验（间隔 65s：sql_stat / metric_point / collection_snapshot 前后对照） | 3478 | 是 |

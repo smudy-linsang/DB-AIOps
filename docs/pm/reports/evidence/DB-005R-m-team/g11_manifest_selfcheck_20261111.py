@@ -4,7 +4,8 @@
 1) 目录实有文件数 vs manifest.file_count
 2) files 列表逐份字节 vs 磁盘实测，合计 vs total_bytes
 3) scan_scope 份数 vs 数据类文件实数
-4) 新增 8 份证据的敏感串扫描（沿用 manifest.scan_list 词表）
+4) 新增证据的敏感串扫描（沿用 manifest.scan_list 词表）：
+   11-11 轮 8 份 + 恢复轮 4 份数据类实测产物（脚本类按 README 口径豁免）
 """
 import json
 import os
@@ -16,12 +17,12 @@ NEW_FILES = ['g11_bucket_verify_20261111.json', 'g11_collection_gap_20261111.jso
              'g11_drive_20261111.json', 'g11_rootcause_20261111.json',
              'reproduce_g11_gap_20261111.py', 'reproduce_g11_verify_20261111.py',
              'g11_recheck_20261111.json', 'g11_manifest_selfcheck_20261111.py',
-             # 2026-11-11 恢复轮新增证据（恢复取证 + 前推核验 + 通路端到端 + 采样节奏 + 脱敏器）
-             'g11_recovery_20261111.json', 'reproduce_g11_recovery_20261111.py',
-             'g11_recovery_probe_20261111.json', 'g11_recovery_probe_20261111.py',
-             'g11_recovery_digest_probe_20261111.json', 'g11_recovery_digest_probe_20261111.py',
-             'g11_recovery_cadence_20261111.json', 'g11_recovery_cadence_20261111.py',
-             'g11_evidence_mask_20261111.py']
+             # 2026-11-11 恢复轮新增**数据类**证据（脚本类按 README 口径豁免：脚本内的
+             # 本地回环地址、平台端口与实例名等为占位默认值或泄漏检测词表，不含真实凭据）
+             'g11_recovery_20261111.json',
+             'g11_recovery_probe_20261111.json',
+             'g11_recovery_digest_probe_20261111.json',
+             'g11_recovery_cadence_20261111.json']
 
 m = json.loads(open(MP, encoding='utf-8').read())
 files = m['files']
