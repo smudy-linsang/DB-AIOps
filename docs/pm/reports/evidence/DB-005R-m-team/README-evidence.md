@@ -1,8 +1,8 @@
-# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10）
+# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10 + 11-11 落桶核验与中断取证）
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 31 份**（含本清单与 `manifest.json`）：21 份实测产物 + 8 份可复现脚本 + 本清单 + manifest。**实测产物（21 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 37 份**（含本清单与 `manifest.json`）：25 份实测产物 + 10 份可复现脚本 + 本清单 + manifest。**实测产物（25 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -22,6 +22,12 @@
 | `g11_bucket_verify_20261109.json` | **首日连驱落库只读核验**（2026-11-09 15:51）：workload digest `1581b156…` 在 cid=18/19 的 **11-09 15:00 本地小时桶**执行量（各 21587）+ 采集间隙（>180s = 0）+ 累计 15 点运行日 | 1398 | 是 |
 | `g11_drive_20261110.json` | **次日人工连驱执行证据**（2026-11-10 15:05:03 起、45 分钟、计划任务 `MMMan-DBAIOps-G11DailyDrive` 自动触发、Last Result 0）：两路 workload `run` 模式（纯只读 SELECT）均 rc=0 + 客户端侧各查询次数与平均耗时 | 2733 | 是 |
 | `g11_bucket_verify_20261110.json` | **次日连驱落库只读核验**（2026-11-10 16:05，任务 `MMMan-DBAIOps-G11BucketVerify`）：workload digest `1581b156…` 在 cid=18/19 的 **11-10 15:00 本地小时桶**执行量（各 21617）+ 采集间隙（>180s = 0）+ 累计 15 点运行日 | 1703 | 是 |
+| `g11_drive_20261111.json` | **第三轮人工连驱未执行取证**（2026-11-11 15:05:02 计划任务触发、Last Result=1，驱动日志无当日任何条目，两路 workload run 均未启动） | 1147 | 是 |
+| `g11_bucket_verify_20261111.json` | **第三轮落桶只读核验**（2026-11-11 16:06，TSDB 恢复后）：workload digest `1581b156…` 在 cid=18/19 的 **11-11 15:00 本地小时桶 exec 均为 0**（桶不存在）+ 采集间隙指标口径说明 | 2031 | 是 |
+| `g11_collection_gap_20261111.json` | **采集中断量化**：两路最后采样 08:53:09/08:53:07，至 16:07 中断 434 分钟，11-11 09:00 起无任何 sql_stat 采样行、15:00 桶整桶无数据 | 1705 | 是 |
+| `g11_rootcause_20261111.json` | **根因审计**：宿主主机 09:10:45 重启 → 时序库容器 09:09:16 停止（主库与时序库同端口）→ 采集器/Web 进程消失 → 11-11 连驱与落桶双缺失；含 TSDB 恢复动作与影响面 | 2356 | 是 |
+| `reproduce_g11_verify_20261111.py` | 11-11 落桶只读核验脚本（TSDB 恢复后手动复核用） | 2587 | 是 |
+| `reproduce_g11_gap_20261111.py` | 采集中断量化脚本（逐小时 rows 分布 + 最后采样时刻 + 11-11 全天样本统计） | 2382 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |
@@ -68,5 +74,10 @@ python reproduce_g11_periodic_gate.py --cid 18 --cid2 19 `
 # G-11 首日人工连驱（2026-11-09 15:05–15:50）：计划任务自动触发 + 只读落库核验
 python C:\dispatcher\g11_daily_drive.py            # 驱动（只跑 workload run 模式）
 python C:\dispatcher\g11_verify_buckets.py           # 只读核验 15 点桶落库与采集间隙
+
+# G-11 第三轮核验（2026-11-11 16:05–16:07）：连驱未执行 + 采集中断取证（全程只读，不驱动负载）
+# 前置：时序库容器需可用（11-11 因宿主主机重启停止，已恢复后复核）
+python reproduce_g11_verify_20261111.py             # 只读核验 11-11 15 点桶落库与采集间隙
+python reproduce_g11_gap_20261111.py                 # 量化采集中断（逐小时 rows + 最后采样时刻）
 
 原始运行副本保留在本机 `C:\dispatcher\probe_out\`，**不入库**；仓库 `.gitignore` 含 `*.log`，故日志类证据入库时统一改名为 `.txt`（沿用 DB-005 先例）。

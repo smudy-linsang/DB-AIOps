@@ -1,0 +1,15 @@
+{
+  "event": "drive_20261111_not_executed",
+  "recorded_at": "2026-11-11T16:05:00+08:00",
+  "scheduled_task": "MMMan-DBAIOps-G11DailyDrive",
+  "task_to_run": "<platform-python> C:\\dispatcher\\g11_daily_drive.py",
+  "last_run_time": "2026/11/11 15:05:02",
+  "last_result": 1,
+  "next_run_time": "2026/11/12 15:05:00",
+  "task_status": "Ready",
+  "drive_log_has_20261111_entries": false,
+  "drive_log_last_entry_at": "2026-11-10 15:50:04",
+  "expected_events_absent": ["drive_start", "drive_instance_done(cid=19)", "drive_instance_done(cid=18)", "drive_done"],
+  "verdict": "drive_not_executed_no_log_record",
+  "note": "计划任务于 2026-11-11 15:05:02 触发，Last Result=1（非 0）。驱动日志无任何 2026-11-11 条目：脚本在写出 drive_start 之前即失败退出——g11_daily_drive.py 的 load_targets() 需 Django 连主库 db_monitor，而主库与时序库同处 5432 的 timescaledb 容器，该容器已于 09:09:16 停止（详见 g11_rootcause_20261111.json），故 11-11 的连驱在取凭据阶段即失败、两路 workload run 均未启动。本轮不补跑负载（任务单明确只做核验与上板）。"
+}

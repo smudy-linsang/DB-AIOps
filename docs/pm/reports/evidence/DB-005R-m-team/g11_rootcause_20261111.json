@@ -1,0 +1,44 @@
+{
+  "event": "rootcause_audit",
+  "recorded_at": "2026-11-11T16:07:00+08:00",
+  "read_only": true,
+  "summary": "宿主主机重启导致时序库容器停止，采集器/Web 随之退出，11-11 连驱未执行、15 点桶未落库",
+  "host_boot_time": "2026-11-11T09:10:45+08:00",
+  "timescaledb_container": {
+    "name": "db-aiops-timescaledb",
+    "status_at_audit": "Exited(255)",
+    "finished_at_utc": "2026-11-11T01:09:16.184002995Z",
+    "finished_at_local": "2026-11-11T09:09:16+08:00",
+    "oom_killed": false,
+    "ports": "<platform-port>",
+    "note": "同一容器同时承载平台主库 db_monitor 与时序库 timeseriesdb（同端口），容器停止即同时打掉两者"
+  },
+  "collector": {
+    "pid_expected": 48048,
+    "pid_present_at_audit": false,
+    "log_file": "collector_resident.log",
+    "log_last_write_local": "2026-11-11T08:53:03+08:00",
+    "err_last_write_local": "2026-11-11T08:53:09+08:00",
+    "verdict": "采集进程随宿主主机重启消失（非人工重启、非本轮操作所致）；最后采样 08:53:09"
+  },
+  "web": {
+    "pid_expected": 54884,
+    "pid_present_at_audit": false,
+    "platform_port_listening": false,
+    "verdict": "Web 进程随宿主主机重启消失（非人工重启、非本轮操作所致）"
+  },
+  "tsdb_restore": {
+    "action": "docker start <timescaledb-container>",
+    "at_local": "2026-11-11T16:05:30+08:00",
+    "result": "Up (healthy)，平台端口可达，只读核验得以执行",
+    "note": "仅恢复只读核验所需依赖；未启动采集器与 Web（其重启会重置采集器 DeltaTracker、打断连续性，属 PM 裁决事项）"
+  },
+  "impact": {
+    "drive_20261111": "未执行（Last Result=1，驱动日志无当日条目）",
+    "bucket_20261111_15h": "两路 exec_in_expected_bucket 均为 0，桶不存在（15:00 桶无任何 sql_stat 行）",
+    "bucket_verify_1605": "计划任务 16:05 触发，脚本内 TSDB 不可用，记录 {instances:{}, error:'TSDB 不可用'}",
+    "collection_gap": "两路最后采样 08:53:09/08:53:07，至 16:07 已中断 434 分钟",
+    "days_3_rejudge": "判定窗 [11-09 09:50, 11-12 09:50) 内 15 点桶仅 2 个（11-09、11-10），11-11 缺失，days=3 不成立",
+    "plate_defect": "无平台代码缺陷证据；本次为宿主主机重启导致的运行时中断，不计缺陷单"
+  }
+}

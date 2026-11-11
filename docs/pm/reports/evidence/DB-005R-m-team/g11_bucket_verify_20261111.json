@@ -1,0 +1,38 @@
+{
+  "at": "2026-11-11T16:06:32.378125+08:00",
+  "date": "2026-11-11",
+  "event": "bucket_verify",
+  "script": "C:\\dispatcher\\probe_out\\g11_verify_20261111_manual.py",
+  "scheduled_task": "MMMan-DBAIOps-G11BucketVerify (16:05 触发时 TSDB 不可用，manual 复核在 TSDB 恢复后执行)",
+  "read_only": true,
+  "instances": {
+    "18": {
+      "instance": "<instance-proxy>",
+      "max_time": "2026-11-11 00:53:07.704130+00:00",
+      "rows_total": 95372,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-05T20:00:00+08:00": 5960,
+        "2026-11-06T15:00:00+08:00": 5798,
+        "2026-11-09T15:00:00+08:00": 21587,
+        "2026-11-10T15:00:00+08:00": 21617
+      },
+      "expected_15h_bucket": "2026-11-11T15:00:00+08:00",
+      "exec_in_expected_bucket": 0
+    },
+    "19": {
+      "instance": "<instance-mysql>",
+      "max_time": "2026-11-11 00:53:09.847785+00:00",
+      "rows_total": 86599,
+      "gap_count_gt_180s_30min": 0,
+      "workload_digest_hour_buckets": {
+        "2026-11-06T15:00:00+08:00": 5722,
+        "2026-11-09T15:00:00+08:00": 21587,
+        "2026-11-10T15:00:00+08:00": 21617
+      },
+      "expected_15h_bucket": "2026-11-11T15:00:00+08:00",
+      "exec_in_expected_bucket": 0
+    }
+  },
+  "conclusion": "第三轮（11-11）连驱未在平台侧落库：两路 workload digest 1581b156… 在 11-11 15:00 本地小时桶 exec 均为 0，桶内无 workload digest 记录（15 点桶在两路 digest 的小时桶字典中均不存在）。gap_count_gt_180s_30min = 0 的口径限定：该指标只统计「已入库采样点之间的相邻间隔」，不覆盖「最后采样点之后未再采集」的中断——两路最后采样分别为 08:53:09/08:53:07，其后至 16:06 已中断约 434 分钟（详见 g11_collection_gap_20261111.json）。累计 15 点运行日维持 cid=19 = 3（11-06、11-09、11-10）、cid=18 = 3（11-06、11-09、11-10；11-05 20:00 桶按 hour_share=0.8 不计入候选小时），11-11 未新增运行日。"
+}
