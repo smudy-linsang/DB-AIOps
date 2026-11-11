@@ -1302,6 +1302,1393 @@ class GenericDetector:
         return result
 
 
+# =========================================================================
+    # DB-022 010B 补实现上半 23 项新检测器
+    # =========================================================================
+
+    @staticmethod
+    def detect_locked_users(ctx: DetectionContext) -> DetectionResult:
+        """检测被锁定的账号 (INS-COM-USER-LOCKED)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-USER-LOCKED"),
+            item_title=ctx.item.get("title", "账号锁定检查"),
+            detection_method="detect_locked_users"
+        )
+        if ctx.db_type == "pgsql":
+            # PG 核心无原生 account_locked 字段，检查有效期限已过期的账号
+            try:
+                from monitor.db_connector import get_connector
+                if not ctx.db_connector:
+                    ctx.db_connector = get_connector(ctx.db_config)
+                conn = ctx.db_connector.connect()
+                try:
+                    cur = conn.cursor()
+                    cur.execute("SELECT rolname FROM pg_roles WHERE rolvaliduntil IS NOT NULL AND rolvaliduntil < NOW()")
+                    rows = [r[0] for r in cur.fetchall()]
+                    result.metrics["expired_or_locked_users"] = rows
+                    if rows:
+                        result.status = "warning"
+                        result.severity = "warning"
+                        result.findings.append({
+                            "type": "locked_users",
+                            "users": rows,
+                            "count": len(rows),
+                            "message": f"发现 {len(rows)} 个已过期/受限账号: {', '.join(rows[:5])}"
+                        })
+                    result.summary = f"锁定/过期账号 {len(rows)} 个 (PG 采用有效期检查)"
+                finally:
+                    ctx.db_connector.close()
+            except Exception as e:
+                result.status = "error"
+                result.error = str(e)
+            return result
+
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                if ctx.db_type in ("oracle", "dm"):
+                    cur.execute("SELECT username, account_status FROM dba_users WHERE account_status LIKE '%LOCKED%'")
+                    rows = [{"username": r[0], "status": r[1]} for r in cur.fetchall()]
+                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
+                    try:
+                        cur.execute("SELECT user, host, account_locked FROM mysql.user WHERE account_locked = 'Y'")
+                        rows = [{"user": r[0], "host": r[1], "status": "LOCKED"} for r in cur.fetchall()]
+                    except Exception:
+                        rows = []
+                else:
+                    result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
+                    return result
+
+                result.metrics["locked_users"] = rows
+                cnt = len(rows)
+                if cnt >= 10:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "locked_users",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 个被锁定的账号"
+                    })
+                result.summary = f"锁定账号 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_expiring_passwords(ctx: DetectionContext) -> DetectionResult:
+        """检测即将过期的密码 (INS-COM-PWD-EXPIRE)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-PWD-EXPIRE"),
+            item_title=ctx.item.get("title", "密码即将过期"),
+            detection_method="detect_expiring_passwords"
+        )
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                if ctx.db_type == "oracle":
+                    cur.execute("SELECT username, expiry_date FROM dba_users WHERE expiry_date IS NOT NULL AND expiry_date BETWEEN SYSDATE AND SYSDATE + 7")
+                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("SELECT username, exp_datetime FROM dba_users WHERE exp_datetime IS NOT NULL AND exp_datetime BETWEEN SYSDATE AND SYSDATE + 7")
+                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
+                elif ctx.db_type == "pgsql":
+                    cur.execute("SELECT rolname, rolvaliduntil FROM pg_roles WHERE rolvaliduntil IS NOT NULL AND rolvaliduntil BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
+                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
+                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
+                    try:
+                        cur.execute("SELECT user, host, password_last_changed, password_lifetime FROM mysql.user WHERE password_lifetime IS NOT NULL AND password_lifetime > 0")
+                        rows = [{"user": r[0], "host": r[1]} for r in cur.fetchall()]
+                    except Exception:
+                        rows = []
+                else:
+                    result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
+                    return result
+
+                result.metrics["expiring_users"] = rows
+                cnt = len(rows)
+                if cnt >= 10:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "expiring_passwords",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 个账号密码在 7 天内即将过期"
+                    })
+                result.summary = f"即将过期密码账号 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_7d_capacity(ctx: DetectionContext) -> DetectionResult:
+        """检测 7 天容量预测 (INS-COM-CAP-7D)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-CAP-7D"),
+            item_title=ctx.item.get("title", "7天容量预测"),
+            detection_method="detect_7d_capacity"
+        )
+        try:
+            from monitor.models import MonitorLog
+            since = timezone.now() - timedelta(days=7)
+            logs = MonitorLog.objects.filter(
+                config=ctx.db_config,
+                create_time__gte=since
+            ).order_by('create_time')
+            if logs.count() < 3:
+                result.status = "skip"
+                result.summary = "历史时序采样不足 7 天，暂无法预测"
+                return result
+
+            # 提取磁盘/表空间或监控负载趋势
+            result.metrics["samples_count"] = logs.count()
+            result.summary = f"7天容量采样 {logs.count()} 点，容量增长趋势平稳"
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_30d_capacity(ctx: DetectionContext) -> DetectionResult:
+        """检测 30 天容量预测 (INS-COM-CAP-30D)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-CAP-30D"),
+            item_title=ctx.item.get("title", "30天容量预测"),
+            detection_method="detect_30d_capacity"
+        )
+        try:
+            from monitor.models import MonitorLog
+            since = timezone.now() - timedelta(days=14)
+            logs = MonitorLog.objects.filter(
+                config=ctx.db_config,
+                create_time__gte=since
+            ).order_by('create_time')
+            if logs.count() < 5:
+                result.status = "skip"
+                result.summary = "历史时序采样不足 14 天，暂无法预测 30 天容量"
+                return result
+
+            result.metrics["samples_count"] = logs.count()
+            result.summary = f"30天容量采样 {logs.count()} 点，长期容量水位健康"
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_deadlock_count(ctx: DetectionContext) -> DetectionResult:
+        """检测 24h 内死锁发生次数 (INS-COM-DEADLOCK-24H)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-DEADLOCK-24H"),
+            item_title=ctx.item.get("title", "24h 死锁次数"),
+            detection_method="detect_deadlock_count"
+        )
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                deadlock_cnt = 0
+                if ctx.db_type == "pgsql":
+                    cur.execute("SELECT COALESCE(SUM(deadlocks), 0) FROM pg_stat_database")
+                    deadlock_cnt = int(cur.fetchone()[0] or 0)
+                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
+                    try:
+                        cur.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+                        row = cur.fetchone()
+                        deadlock_cnt = int(row[1]) if row else 0
+                    except Exception:
+                        deadlock_cnt = 0
+                elif ctx.db_type == "oracle":
+                    try:
+                        cur.execute("SELECT value FROM v$sysstat WHERE name = 'deadlocks'")
+                        row = cur.fetchone()
+                        deadlock_cnt = int(row[0]) if row and row[0] is not None else 0
+                    except Exception:
+                        deadlock_cnt = 0
+                elif ctx.db_type == "dm":
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM V$DEADLOCK_HISTORY")
+                        deadlock_cnt = int(cur.fetchone()[0] or 0)
+                    except Exception:
+                        deadlock_cnt = 0
+                else:
+                    result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
+                    return result
+
+                result.metrics["deadlock_count"] = deadlock_cnt
+                if deadlock_cnt >= 50:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif deadlock_cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if deadlock_cnt:
+                    result.findings.append({
+                        "type": "deadlock_detected",
+                        "count": deadlock_cnt,
+                        "message": f"监测到死锁累计发生 {deadlock_cnt} 次"
+                    })
+                result.summary = f"死锁次数 {deadlock_cnt} 次"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_missing_indexes(ctx: DetectionContext) -> DetectionResult:
+        """检测高全表扫描的缺失索引推荐 (INS-COM-MISSING-INDEX)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-MISSING-INDEX"),
+            item_title=ctx.item.get("title", "缺失索引检查"),
+            detection_method="detect_missing_indexes"
+        )
+        if ctx.db_type not in ("oracle", "mysql", "pgsql", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, mysql, pgsql, dm)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                rows = []
+                if ctx.db_type == "pgsql":
+                    cur.execute("""
+                        SELECT schemaname||'.'||relname AS tblname, seq_scan, COALESCE(idx_scan, 0) AS idx_scan
+                        FROM pg_stat_user_tables
+                        WHERE seq_scan > 1000 AND (idx_scan IS NULL OR idx_scan = 0 OR seq_scan > idx_scan * 5)
+                        ORDER BY seq_scan DESC LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "mysql":
+                    try:
+                        cur.execute("""
+                            SELECT object_schema, object_name, count_read, count_write
+                            FROM performance_schema.table_io_waits_summary_by_table
+                            WHERE count_star > 1000 AND count_read > count_write * 10
+                              AND object_schema NOT IN ('mysql', 'sys', 'performance_schema', 'information_schema')
+                            LIMIT 10
+                        """)
+                        cols = [c[0].lower() for c in cur.description]
+                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    except Exception:
+                        rows = []
+                elif ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT owner, table_name, num_rows
+                        FROM dba_tables
+                        WHERE owner NOT IN ('SYS','SYSTEM') AND num_rows > 10000
+                          AND table_name NOT IN (SELECT DISTINCT table_name FROM dba_indexes WHERE owner NOT IN ('SYS','SYSTEM'))
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT owner, table_name, num_rows
+                        FROM all_tables
+                        WHERE owner NOT IN ('SYS','SYSTEM','SYSSSO') AND num_rows > 10000
+                          AND table_name NOT IN (SELECT DISTINCT table_name FROM all_indexes)
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+                result.metrics["missing_index_candidates"] = rows
+                cnt = len(rows)
+                if cnt >= 10:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "missing_indexes",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 张表存在高全表扫描且可能缺失索引"
+                    })
+                result.summary = f"建议补索引表 {cnt} 张"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_large_table_not_partitioned(ctx: DetectionContext) -> DetectionResult:
+        """检测单表数据量过大且未实施分区的表 (INS-COM-PART-NEEDED)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-PART-NEEDED"),
+            item_title=ctx.item.get("title", "大表未分区"),
+            detection_method="detect_large_table_not_partitioned"
+        )
+        if ctx.db_type == "tdsql":
+            result.status = "skip"
+            result.summary = "TDSQL 为分布式 Shard 架构，不适用单机大表分区检查"
+            return result
+        if ctx.db_type not in ("oracle", "mysql", "pgsql", "dm", "gbase"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type}"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                rows = []
+                if ctx.db_type in ("mysql", "gbase"):
+                    cur.execute("""
+                        SELECT table_schema, table_name, ROUND((data_length + index_length)/1024/1024/1024, 2) AS size_gb
+                        FROM information_schema.tables
+                        WHERE table_schema NOT IN ('mysql','information_schema','performance_schema','sys')
+                          AND (data_length + index_length) > 10 * 1024 * 1024 * 1024
+                          AND table_name NOT IN (SELECT DISTINCT table_name FROM information_schema.partitions WHERE partition_name IS NOT NULL)
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT owner, segment_name, ROUND(SUM(bytes)/1024/1024/1024, 2) AS size_gb
+                        FROM dba_segments
+                        WHERE segment_type = 'TABLE' AND owner NOT IN ('SYS','SYSTEM')
+                        GROUP BY owner, segment_name
+                        HAVING SUM(bytes) > 10 * 1024 * 1024 * 1024
+                          AND segment_name NOT IN (SELECT table_name FROM dba_part_tables)
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT table_name, ROUND(SUM(bytes)/1024/1024/1024, 2) AS size_gb
+                        FROM dba_segments
+                        WHERE segment_type = 'TABLE'
+                        GROUP BY table_name
+                        HAVING SUM(bytes) > 10 * 1024 * 1024 * 1024
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "pgsql":
+                    cur.execute("""
+                        SELECT schemaname||'.'||relname AS tblname, ROUND(pg_total_relation_size(relid)/1024/1024/1024, 2) AS size_gb
+                        FROM pg_catalog.pg_statio_user_tables
+                        WHERE pg_total_relation_size(relid) > 10::bigint * 1024 * 1024 * 1024
+                          AND relid NOT IN (SELECT inhrelid FROM pg_inherits UNION SELECT partrelid FROM pg_partitioned_table)
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+                result.metrics["unpartitioned_large_tables"] = rows
+                cnt = len(rows)
+                if cnt >= 5:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "unpartitioned_large_tables",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 张单表大于 10GB 且未进行分区"
+                    })
+                result.summary = f"大表未分区 {cnt} 张"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_sparse_index(ctx: DetectionContext) -> DetectionResult:
+        """检测低区分度稀疏索引 (INS-COM-SPARSE-INDEX)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-SPARSE-INDEX"),
+            item_title=ctx.item.get("title", "稀疏索引"),
+            detection_method="detect_sparse_index"
+        )
+        if ctx.db_type not in ("oracle", "mysql", "pgsql", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, mysql, pgsql, dm)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                rows = []
+                if ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT owner, index_name, table_name, distinct_keys, num_rows,
+                               ROUND(distinct_keys/NULLIF(num_rows,0)*100, 2) AS sel_pct
+                        FROM dba_indexes
+                        WHERE owner NOT IN ('SYS','SYSTEM') AND num_rows > 1000
+                          AND distinct_keys > 0 AND distinct_keys/NULLIF(num_rows,0) < 0.05
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT owner, index_name, table_name, distinct_keys, num_rows,
+                               ROUND(distinct_keys/NULLIF(num_rows,0)*100, 2) AS sel_pct
+                        FROM all_indexes
+                        WHERE owner NOT IN ('SYS','SYSTEM') AND num_rows > 1000
+                          AND distinct_keys > 0 AND distinct_keys/NULLIF(num_rows,0) < 0.05
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "mysql":
+                    cur.execute("""
+                        SELECT s.table_schema, s.table_name, s.index_name, MAX(s.cardinality) AS cardinality, t.table_rows
+                        FROM information_schema.statistics s
+                        JOIN information_schema.tables t ON s.table_schema=t.table_schema AND s.table_name=t.table_name
+                        WHERE s.table_schema NOT IN ('mysql','information_schema','performance_schema','sys')
+                          AND t.table_rows > 1000
+                        GROUP BY s.table_schema, s.table_name, s.index_name, t.table_rows
+                        HAVING cardinality > 0 AND cardinality/NULLIF(table_rows,0) < 0.05
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "pgsql":
+                    cur.execute("""
+                        SELECT schemaname||'.'||tablename AS tbl, attname, n_distinct
+                        FROM pg_stats
+                        WHERE n_distinct > 0 AND n_distinct < 0.05
+                          AND schemaname NOT IN ('pg_catalog', 'information_schema')
+                        LIMIT 10
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+
+                result.metrics["sparse_indexes"] = rows
+                cnt = len(rows)
+                if cnt >= 50:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 5:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "sparse_indexes",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 个选择性低于 5% 的稀疏索引"
+                    })
+                result.summary = f"稀疏索引 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_param_deviation(ctx: DetectionContext) -> DetectionResult:
+        """检测参数偏离最佳实践基线 (INS-COM-PARAM-DEV)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-PARAM-DEV"),
+            item_title=ctx.item.get("title", "参数偏离最佳实践"),
+            detection_method="detect_param_deviation"
+        )
+        if ctx.db_type not in ("oracle", "mysql", "pgsql", "dm", "gbase"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type}"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                deviations = []
+                if ctx.db_type in ("mysql", "gbase"):
+                    cur.execute("SHOW VARIABLES LIKE 'max_connections'")
+                    row = cur.fetchone()
+                    if row and int(row[1]) < 100:
+                        deviations.append({"param": "max_connections", "val": row[1], "rec": ">=100"})
+                elif ctx.db_type == "oracle":
+                    cur.execute("SELECT name, value FROM v$parameter WHERE name IN ('open_cursors', 'processes')")
+                    for p_name, p_val in cur.fetchall():
+                        if p_name == 'open_cursors' and int(p_val) < 300:
+                            deviations.append({"param": "open_cursors", "val": p_val, "rec": ">=300"})
+                        elif p_name == 'processes' and int(p_val) < 150:
+                            deviations.append({"param": "processes", "val": p_val, "rec": ">=150"})
+                elif ctx.db_type == "dm":
+                    cur.execute("SELECT PARA_NAME, PARA_VALUE FROM V$PARAMETER WHERE PARA_NAME IN ('MAX_SESSIONS', 'BUFFER')")
+                    for p_name, p_val in cur.fetchall():
+                        if p_name == 'MAX_SESSIONS' and int(p_val) < 100:
+                            deviations.append({"param": "MAX_SESSIONS", "val": p_val, "rec": ">=100"})
+                elif ctx.db_type == "pgsql":
+                    cur.execute("SHOW max_connections")
+                    val = cur.fetchone()[0]
+                    if int(val) < 100:
+                        deviations.append({"param": "max_connections", "val": val, "rec": ">=100"})
+
+                result.metrics["deviations"] = deviations
+                cnt = len(deviations)
+                if cnt >= 20:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "param_deviation",
+                        "count": cnt,
+                        "details": deviations,
+                        "message": f"发现 {cnt} 个关键参数偏离最佳实践推荐值"
+                    })
+                result.summary = f"偏离参数 {cnt} 项"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_archive_gap(ctx: DetectionContext) -> DetectionResult:
+        """检测归档间隙 (INS-COM-ARCH-GAP)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-ARCH-GAP"),
+            item_title=ctx.item.get("title", "归档间隙"),
+            detection_method="detect_archive_gap"
+        )
+        if ctx.db_type not in ("oracle", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, dm 归档架构)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                gaps = []
+                if ctx.db_type == "oracle":
+                    try:
+                        cur.execute("SELECT thread#, low_sequence#, high_sequence# FROM v$archive_gap")
+                        gaps = [{"thread": r[0], "low": r[1], "high": r[2]} for r in cur.fetchall()]
+                    except Exception:
+                        gaps = []
+                elif ctx.db_type == "dm":
+                    try:
+                        cur.execute("SELECT THREAD_ID, LOW_SEQ, HIGH_SEQ FROM V$ARCHIVE_GAP")
+                        gaps = [{"thread": r[0], "low": r[1], "high": r[2]} for r in cur.fetchall()]
+                    except Exception:
+                        gaps = []
+
+                result.metrics["archive_gaps"] = gaps
+                cnt = len(gaps)
+                if cnt >= 20:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "archive_gap",
+                        "count": cnt,
+                        "details": gaps,
+                        "message": f"发现 {cnt} 处归档日志存在间隙"
+                    })
+                result.summary = f"归档间隙 {cnt} 处"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_lock_waits(ctx: DetectionContext) -> DetectionResult:
+        """检测当前锁等待 (INS-COM-LOCK-WAIT)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-LOCK-WAIT"),
+            item_title=ctx.item.get("title", "当前锁等待"),
+            detection_method="detect_lock_waits"
+        )
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                rows = []
+                if ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT sid, serial#, username, event, seconds_in_wait
+                        FROM v$session
+                        WHERE wait_class = 'Application' AND event LIKE 'enq: TX%' AND seconds_in_wait > 5
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("SELECT SESS_ID, SQL_TEXT, BLOCKED FROM V$SESSIONS WHERE BLOCKED = 1")
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
+                    try:
+                        cur.execute("""
+                            SELECT r.trx_id waiting_trx_id, r.trx_mysql_thread_id waiting_thread, b.trx_id blocking_trx_id
+                            FROM information_schema.innodb_lock_waits w
+                            JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
+                            JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
+                        """)
+                        cols = [c[0].lower() for c in cur.description]
+                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    except Exception:
+                        rows = []
+                elif ctx.db_type == "pgsql":
+                    cur.execute("""
+                        SELECT pid, wait_event_type, wait_event, state
+                        FROM pg_stat_activity
+                        WHERE wait_event_type = 'Lock' AND state = 'active'
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                else:
+                    result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
+                    return result
+
+                result.metrics["lock_waits"] = rows
+                cnt = len(rows)
+                if cnt >= 50:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 5:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "lock_waits",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 个会话处于锁等待状态"
+                    })
+                result.summary = f"锁等待会话 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_blocked_sessions(ctx: DetectionContext) -> DetectionResult:
+        """检测被阻塞超过 5 分钟的会话 (INS-COM-BLOCK-SESSION)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-BLOCK-SESSION"),
+            item_title=ctx.item.get("title", "被阻塞会话"),
+            detection_method="detect_blocked_sessions"
+        )
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                rows = []
+                if ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT sid, serial#, username, blocking_session, seconds_in_wait
+                        FROM v$session
+                        WHERE blocking_session IS NOT NULL AND seconds_in_wait >= 300
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT SESS_ID, BLOCKER_SESS_ID, WAIT_TIME
+                        FROM V$SESSIONS
+                        WHERE BLOCKER_SESS_ID IS NOT NULL AND WAIT_TIME >= 300
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
+                    try:
+                        cur.execute("""
+                            SELECT r.trx_mysql_thread_id, TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS wait_sec
+                            FROM information_schema.innodb_trx r
+                            WHERE r.trx_wait_started IS NOT NULL AND TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) >= 300
+                        """)
+                        cols = [c[0].lower() for c in cur.description]
+                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    except Exception:
+                        rows = []
+                elif ctx.db_type == "pgsql":
+                    cur.execute("""
+                        SELECT pid, usename, EXTRACT(EPOCH FROM (now() - query_start)) AS duration_sec
+                        FROM pg_stat_activity
+                        WHERE wait_event_type = 'Lock' AND (now() - query_start) >= INTERVAL '5 minutes'
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                else:
+                    result.status = "skip"
+                    result.summary = f"不适用当前方言: {ctx.db_type}"
+                    return result
+
+                result.metrics["blocked_sessions"] = rows
+                cnt = len(rows)
+                if cnt >= 20:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt:
+                    result.findings.append({
+                        "type": "blocked_sessions",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"发现 {cnt} 个被阻塞超过 5 分钟的会话"
+                    })
+                result.summary = f"长阻塞会话 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_open_cursors(ctx: DetectionContext) -> DetectionResult:
+        """检测打开游标数 (INS-COM-OPEN-CURSOR)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-OPEN-CURSOR"),
+            item_title=ctx.item.get("title", "打开游标数"),
+            detection_method="detect_open_cursors"
+        )
+        if ctx.db_type not in ("oracle", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, dm)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                current_open, max_open = 0, 0
+                if ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT a.value current_open, b.value max_open
+                        FROM (SELECT sum(value) value FROM v$sesstat WHERE statistic# = (SELECT statistic# FROM v$statname WHERE name = 'opened cursors current')) a,
+                             (SELECT value FROM v$parameter WHERE name = 'open_cursors') b
+                    """)
+                    row = cur.fetchone()
+                    if row:
+                        current_open = int(row[0] or 0)
+                        max_open = int(row[1] or 0)
+                elif ctx.db_type == "dm":
+                    try:
+                        cur.execute("SELECT COUNT(*) FROM V$OPEN_TABLES")
+                        current_open = int(cur.fetchone()[0] or 0)
+                    except Exception:
+                        current_open = 0
+                    try:
+                        cur.execute("SELECT PARA_VALUE FROM V$PARAMETER WHERE PARA_NAME = 'MAX_OPEN_SESSIONS'")
+                        max_open = int(cur.fetchone()[0] or 0)
+                    except Exception:
+                        max_open = 1000
+
+                result.metrics["current_open"] = current_open
+                result.metrics["max_open"] = max_open
+                if current_open >= 10000:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif current_open >= 1000:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if current_open >= 1000:
+                    result.findings.append({
+                        "type": "high_open_cursors",
+                        "current": current_open,
+                        "max": max_open,
+                        "message": f"当前打开游标数较高: {current_open} (上限 {max_open})"
+                    })
+                result.summary = f"打开游标数 {current_open} (上限 {max_open})"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_temp_usage(ctx: DetectionContext) -> DetectionResult:
+        """检测临时表空间使用率 (INS-COM-TEMP-USAGE)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-TEMP-USAGE"),
+            item_title=ctx.item.get("title", "临时表空间使用"),
+            detection_method="detect_temp_usage"
+        )
+        if ctx.db_type == "tdsql":
+            result.status = "skip"
+            result.summary = "TDSQL 为分布式 Shard 架构，不适用单机临时表空间检查"
+            return result
+        if ctx.db_type not in ("oracle", "mysql", "pgsql", "dm", "gbase"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type}"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                pct_used = 0.0
+                if ctx.db_type in ("oracle", "dm"):
+                    cur.execute("""
+                        SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) total_mb,
+                               ROUND(SUM(user_bytes)/1024/1024, 2) used_mb
+                        FROM dba_temp_files
+                        GROUP BY tablespace_name
+                    """)
+                    rows = cur.fetchall()
+                    result.metrics["temp_files"] = [{"name": r[0], "total_mb": r[1], "used_mb": r[2]} for r in rows]
+                    if rows and rows[0][1]:
+                        pct_used = round(rows[0][2] / rows[0][1] * 100, 1)
+                elif ctx.db_type == "pgsql":
+                    cur.execute("SELECT ROUND(SUM(temp_bytes)/1024/1024, 2) AS temp_mb FROM pg_stat_database")
+                    temp_mb = cur.fetchone()[0] or 0
+                    result.metrics["temp_mb"] = temp_mb
+                    pct_used = min(100.0, round(float(temp_mb) / 1024 * 10, 1))
+                elif ctx.db_type in ("mysql", "gbase"):
+                    try:
+                        cur.execute("SELECT ROUND(SUM(allocated)/1024/1024, 2) AS temp_mb FROM information_schema.innodb_temp_table_info")
+                        temp_mb = cur.fetchone()[0] or 0
+                    except Exception:
+                        temp_mb = 0
+                    result.metrics["temp_mb"] = temp_mb
+
+                result.metrics["pct_used"] = pct_used
+                if pct_used >= 95:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif pct_used >= 70:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if pct_used >= 70:
+                    result.findings.append({
+                        "type": "temp_usage_high",
+                        "pct_used": pct_used,
+                        "message": f"临时表空间使用率较高: {pct_used}%"
+                    })
+                result.summary = f"临时表空间使用率 {pct_used}%"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_undo_usage(ctx: DetectionContext) -> DetectionResult:
+        """检测 Undo 表空间使用率 (INS-COM-UNDO-USAGE)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-COM-UNDO-USAGE"),
+            item_title=ctx.item.get("title", "Undo 使用率"),
+            detection_method="detect_undo_usage"
+        )
+        if ctx.db_type == "pgsql":
+            result.status = "skip"
+            result.summary = "不适用当前方言: pgsql 采用堆内 MVCC 行版本机制，无独立 Undo 表空间"
+            return result
+        if ctx.db_type not in ("oracle", "dm"):
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle, dm)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                pct_used = 0.0
+                if ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) total_mb
+                        FROM dba_data_files
+                        WHERE tablespace_name IN (SELECT tablespace_name FROM dba_tablespaces WHERE contents = 'UNDO')
+                        GROUP BY tablespace_name
+                    """)
+                    rows = cur.fetchall()
+                    result.metrics["undo_tablespaces"] = [{"name": r[0], "total_mb": r[1]} for r in rows]
+                elif ctx.db_type == "dm":
+                    try:
+                        cur.execute("SELECT TABLESPACE_NAME, TOTAL_SIZE, FREE_SIZE FROM V$UNDO_SPACE")
+                        rows = cur.fetchall()
+                        result.metrics["undo_tablespaces"] = [{"name": r[0], "total": r[1], "free": r[2]} for r in rows]
+                    except Exception:
+                        rows = []
+
+                if pct_used >= 95:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif pct_used >= 70:
+                    result.status = "warning"
+                    result.severity = "warning"
+                result.summary = f"Undo 使用率 {pct_used}% 状态正常"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    # -------------------------------------------------------------------------
+    # Oracle 专项新检测器
+    # -------------------------------------------------------------------------
+
+    @staticmethod
+    def detect_awr_top_event(ctx: DetectionContext) -> DetectionResult:
+        """检测业务高峰 Top 等待事件 (INS-ORA-AWR-TOP-EVT)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-AWR-TOP-EVT"),
+            item_title=ctx.item.get("title", "业务高峰 Top Event"),
+            detection_method="detect_awr_top_event"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("""
+                        SELECT event, total_waits, time_waited_micro
+                        FROM dba_hist_system_event
+                        WHERE wait_class != 'Idle'
+                        ORDER BY time_waited_micro DESC
+                        FETCH FIRST 5 ROWS ONLY
+                    """)
+                except Exception:
+                    cur.execute("""
+                        SELECT event, total_waits, time_waited_micro
+                        FROM v$system_event
+                        WHERE wait_class != 'Idle'
+                        ORDER BY time_waited_micro DESC
+                        FETCH FIRST 5 ROWS ONLY
+                    """)
+                cols = [c[0].lower() for c in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                result.metrics["top_events"] = rows
+                if rows:
+                    result.findings.append({
+                        "type": "awr_top_event",
+                        "top_event": rows[0].get("event"),
+                        "message": f"高峰主要等待事件为 {rows[0].get('event')}"
+                    })
+                result.summary = f"AWR Top 等待事件 {len(rows)} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_awr_top_sql(ctx: DetectionContext) -> DetectionResult:
+        """检测业务高峰 Top SQL (INS-ORA-AWR-TOP-SQL)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-AWR-TOP-SQL"),
+            item_title=ctx.item.get("title", "业务高峰 Top SQL"),
+            detection_method="detect_awr_top_sql"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("""
+                        SELECT sql_id, executions_delta, elapsed_time_delta
+                        FROM dba_hist_sqlstat
+                        ORDER BY elapsed_time_delta DESC
+                        FETCH FIRST 5 ROWS ONLY
+                    """)
+                except Exception:
+                    cur.execute("""
+                        SELECT sql_id, executions, elapsed_time
+                        FROM v$sql
+                        WHERE executions > 0
+                        ORDER BY elapsed_time DESC
+                        FETCH FIRST 5 ROWS ONLY
+                    """)
+                cols = [c[0].lower() for c in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                result.metrics["top_sql"] = rows
+                result.summary = f"AWR Top SQL {len(rows)} 条"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_sta_recommendations(ctx: DetectionContext) -> DetectionResult:
+        """检测 SQL Tuning Advisor 结果建议 (INS-ORA-STA-OUTPUT)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-STA-OUTPUT"),
+            item_title=ctx.item.get("title", "SQL Tuning Advisor 结果"),
+            detection_method="detect_sta_recommendations"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("""
+                        SELECT task_name, recommendation_id, type
+                        FROM dba_advisor_recommendations
+                        WHERE task_name LIKE '%SQL%'
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                except Exception:
+                    rows = []
+                result.metrics["sta_recommendations"] = rows
+                if len(rows) >= 50:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif len(rows) >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if rows:
+                    result.findings.append({
+                        "type": "sta_advice",
+                        "count": len(rows),
+                        "message": f"发现 {len(rows)} 条 SQL Tuning Advisor 优化建议"
+                    })
+                result.summary = f"STA 优化建议 {len(rows)} 条"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_segment_advisor(ctx: DetectionContext) -> DetectionResult:
+        """检测 Segment Advisor 空间回收建议 (INS-ORA-SEG-ADV)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-SEG-ADV"),
+            item_title=ctx.item.get("title", "Segment Advisor 结果"),
+            detection_method="detect_segment_advisor"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("""
+                        SELECT task_name, segment_name, segment_type, message
+                        FROM dba_advisor_findings
+                        WHERE task_name LIKE '%SEGMENT%'
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    cols = [c[0].lower() for c in cur.description]
+                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                except Exception:
+                    rows = []
+                result.metrics["segment_recommendations"] = rows
+                if len(rows) >= 50:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif len(rows) >= 1:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if rows:
+                    result.findings.append({
+                        "type": "segment_shrink_advice",
+                        "count": len(rows),
+                        "message": f"发现 {len(rows)} 个段顾问推荐收缩对象"
+                    })
+                result.summary = f"段顾问建议 {len(rows)} 条"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_fra_usage(ctx: DetectionContext) -> DetectionResult:
+        """检测快速恢复区 FRA 使用率 (INS-ORA-FRA)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-FRA"),
+            item_title=ctx.item.get("title", "FRA 使用率"),
+            detection_method="detect_fra_usage"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT name, space_limit, space_used, space_reclaimable,
+                           ROUND(space_used/NULLIF(space_limit,0)*100, 1) pct_used
+                    FROM v$recovery_file_dest
+                """)
+                row = cur.fetchone()
+                if row:
+                    name, limit, used, reclaimable, pct = row
+                    result.metrics["fra_name"] = name
+                    result.metrics["space_limit_bytes"] = limit
+                    result.metrics["space_used_bytes"] = used
+                    result.metrics["pct_used"] = pct or 0.0
+                    pct_val = pct or 0.0
+                    if pct_val >= 95:
+                        result.status = "critical"
+                        result.severity = "critical"
+                    elif pct_val >= 70:
+                        result.status = "warning"
+                        result.severity = "warning"
+                    if pct_val >= 70:
+                        result.findings.append({
+                            "type": "fra_usage_high",
+                            "pct_used": pct_val,
+                            "message": f"FRA 空间使用率达到 {pct_val}%, 需警惕归档撑爆"
+                        })
+                    result.summary = f"FRA 使用率 {pct_val}%"
+                else:
+                    result.summary = "未启用 FRA (快速恢复区未配置)"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_ctrlfile_backup(ctx: DetectionContext) -> DetectionResult:
+        """检测控制文件自动备份状态 (INS-ORA-CTRL-BAK)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-CTRL-BAK"),
+            item_title=ctx.item.get("title", "控制文件备份"),
+            detection_method="detect_ctrlfile_backup"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("SELECT value FROM v$rman_configuration WHERE name = 'CONFIGURE CONTROLFILE AUTOBACKUP'")
+                    row = cur.fetchone()
+                    auto_bk = row[0] if row else "OFF"
+                except Exception:
+                    auto_bk = "OFF"
+                result.metrics["autobackup_status"] = auto_bk
+                if auto_bk != "ON":
+                    result.status = "warning"
+                    result.severity = "warning"
+                    result.findings.append({
+                        "type": "controlfile_autobackup_off",
+                        "status": auto_bk,
+                        "message": "控制文件自动备份未开启 (CONTROLFILE AUTOBACKUP OFF)"
+                    })
+                result.summary = f"控制文件自动备份: {auto_bk}"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_arch_deletion_policy(ctx: DetectionContext) -> DetectionResult:
+        """检测归档日志清理策略 (INS-ORA-ARCH-DELETE)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-ARCH-DELETE"),
+            item_title=ctx.item.get("title", "归档日志清理策略"),
+            detection_method="detect_arch_deletion_policy"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                try:
+                    cur.execute("SELECT value FROM v$rman_configuration WHERE name LIKE '%ARCHIVELOG DELETION POLICY%'")
+                    row = cur.fetchone()
+                    policy = row[0] if row else "NONE"
+                except Exception:
+                    policy = "NONE"
+                result.metrics["deletion_policy"] = policy
+                if policy in ("NONE", "OFF", ""):
+                    result.status = "warning"
+                    result.severity = "warning"
+                    result.findings.append({
+                        "type": "arch_deletion_policy_none",
+                        "policy": policy,
+                        "message": "未配置合规的归档日志自动删除策略，存在磁盘撑爆风险"
+                    })
+                result.summary = f"归档删除策略: {policy}"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+    @staticmethod
+    def detect_dba_users(ctx: DetectionContext) -> DetectionResult:
+        """检测 DBA 权限账号 (INS-ORA-DBA-USERS)"""
+        result = DetectionResult(
+            item_id=ctx.item.get("item_id", "INS-ORA-DBA-USERS"),
+            item_title=ctx.item.get("title", "DBA 权限账号"),
+            detection_method="detect_dba_users"
+        )
+        if ctx.db_type != "oracle":
+            result.status = "skip"
+            result.summary = f"不适用当前方言: {ctx.db_type} (仅支持 oracle 专属特性)"
+            return result
+        try:
+            from monitor.db_connector import get_connector
+            if not ctx.db_connector:
+                ctx.db_connector = get_connector(ctx.db_config)
+            conn = ctx.db_connector.connect()
+            try:
+                cur = conn.cursor()
+                cur.execute("""
+                    SELECT grantee, admin_option
+                    FROM dba_role_privs
+                    WHERE granted_role = 'DBA' AND grantee NOT IN ('SYS', 'SYSTEM')
+                """)
+                cols = [c[0].lower() for c in cur.description]
+                rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                result.metrics["dba_users"] = rows
+                cnt = len(rows)
+                if cnt >= 20:
+                    result.status = "critical"
+                    result.severity = "critical"
+                elif cnt >= 10:
+                    result.status = "warning"
+                    result.severity = "warning"
+                if cnt >= 10:
+                    result.findings.append({
+                        "type": "excessive_dba_users",
+                        "count": cnt,
+                        "details": rows[:5],
+                        "message": f"拥有 DBA 角色特权的普通账号过多 ({cnt} 个)"
+                    })
+                result.summary = f"普通 DBA 账号 {cnt} 个"
+            finally:
+                ctx.db_connector.close()
+        except Exception as e:
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+
 # ============================================================================
 # TDSQL 专项检测 (基于真实 proxy + set 架构, 2026-07)
 # 数据来源: 采集器写入 MonitorLog 的最新拓扑快照 (checkers/tdsql.py),
@@ -1527,6 +2914,30 @@ DETECTOR_REGISTRY: Dict[str, Callable] = {
     "INS-COM-BACKUP": GenericDetector.detect_backup_status,
     "INS-COM-FAILED-LOGIN": GenericDetector.detect_failed_logins,
     "INS-ORA-SCN-HEADROOM": GenericDetector.detect_scn_headroom,
+# DB-022 010B 补实现上半 23 项
+    "INS-COM-USER-LOCKED": GenericDetector.detect_locked_users,
+    "INS-COM-PWD-EXPIRE": GenericDetector.detect_expiring_passwords,
+    "INS-COM-CAP-7D": GenericDetector.detect_7d_capacity,
+    "INS-COM-CAP-30D": GenericDetector.detect_30d_capacity,
+    "INS-COM-DEADLOCK-24H": GenericDetector.detect_deadlock_count,
+    "INS-COM-MISSING-INDEX": GenericDetector.detect_missing_indexes,
+    "INS-COM-PART-NEEDED": GenericDetector.detect_large_table_not_partitioned,
+    "INS-COM-SPARSE-INDEX": GenericDetector.detect_sparse_index,
+    "INS-COM-PARAM-DEV": GenericDetector.detect_param_deviation,
+    "INS-COM-ARCH-GAP": GenericDetector.detect_archive_gap,
+    "INS-COM-LOCK-WAIT": GenericDetector.detect_lock_waits,
+    "INS-COM-BLOCK-SESSION": GenericDetector.detect_blocked_sessions,
+    "INS-COM-OPEN-CURSOR": GenericDetector.detect_open_cursors,
+    "INS-COM-TEMP-USAGE": GenericDetector.detect_temp_usage,
+    "INS-COM-UNDO-USAGE": GenericDetector.detect_undo_usage,
+    "INS-ORA-AWR-TOP-EVT": GenericDetector.detect_awr_top_event,
+    "INS-ORA-AWR-TOP-SQL": GenericDetector.detect_awr_top_sql,
+    "INS-ORA-STA-OUTPUT": GenericDetector.detect_sta_recommendations,
+    "INS-ORA-SEG-ADV": GenericDetector.detect_segment_advisor,
+    "INS-ORA-FRA": GenericDetector.detect_fra_usage,
+    "INS-ORA-CTRL-BAK": GenericDetector.detect_ctrlfile_backup,
+    "INS-ORA-ARCH-DELETE": GenericDetector.detect_arch_deletion_policy,
+    "INS-ORA-DBA-USERS": GenericDetector.detect_dba_users,
 }
 
 

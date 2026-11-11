@@ -529,3 +529,163 @@ class DamengDriverVisibilityTests(TestCase):
         self.assertEqual(dm_runs[0].get('conclusion'), 'DM 检测器未注册：缺 dmPython')
 
 
+
+
+@tag('unit')
+class InspectionBatch2Part1ImplementationTests(TestCase):
+    """DB-022: 010B 补实现上半 23 项新检测器与注册表验证。"""
+
+    def setUp(self):
+        self.mysql_db = make_db('insp-b2-mysql', port=3306, db_type='mysql')
+        self.oracle_db = make_db('insp-b2-oracle', port=1521, db_type='oracle')
+        self.pgsql_db = make_db('insp-b2-pg', port=5432, db_type='pgsql')
+        self.tdsql_db = make_db('insp-b2-tdsql', port=3308, db_type='tdsql')
+        self.items_23 = [
+            'INS-COM-USER-LOCKED',
+            'INS-COM-PWD-EXPIRE',
+            'INS-COM-CAP-7D',
+            'INS-COM-CAP-30D',
+            'INS-COM-DEADLOCK-24H',
+            'INS-COM-MISSING-INDEX',
+            'INS-COM-PART-NEEDED',
+            'INS-COM-SPARSE-INDEX',
+            'INS-COM-PARAM-DEV',
+            'INS-COM-ARCH-GAP',
+            'INS-COM-LOCK-WAIT',
+            'INS-COM-BLOCK-SESSION',
+            'INS-COM-OPEN-CURSOR',
+            'INS-COM-TEMP-USAGE',
+            'INS-COM-UNDO-USAGE',
+            'INS-ORA-AWR-TOP-EVT',
+            'INS-ORA-AWR-TOP-SQL',
+            'INS-ORA-STA-OUTPUT',
+            'INS-ORA-SEG-ADV',
+            'INS-ORA-FRA',
+            'INS-ORA-CTRL-BAK',
+            'INS-ORA-ARCH-DELETE',
+            'INS-ORA-DBA-USERS',
+        ]
+
+    def test_registry_contains_all_23_new_items(self):
+        """验证 23 项新检测器均在 DETECTOR_REGISTRY 中登记且总键数达到 57。"""
+        from monitor.inspection_executor import DETECTOR_REGISTRY
+        self.assertGreaterEqual(len(DETECTOR_REGISTRY), 57)
+        for item_id in self.items_23:
+            self.assertIn(item_id, DETECTOR_REGISTRY, f'规则 {item_id} 未在 DETECTOR_REGISTRY 中登记')
+            self.assertTrue(callable(DETECTOR_REGISTRY[item_id]), f'规则 {item_id} 对应的检测器不可调用')
+
+    def test_dialect_aware_graceful_skips(self):
+        """验证方言不适用项优雅返回 skip 并带有明确说明。"""
+        from monitor.inspection_executor import DetectionContext, DETECTOR_REGISTRY
+
+        # 1. UNDO-USAGE on pgsql -> skip (堆内 MVCC 无独立 Undo)
+        ctx_pg_undo = DetectionContext(
+            db_config={'id': self.pgsql_db.id, 'name': self.pgsql_db.name, 'db_type': 'pgsql'},
+            db_type='pgsql',
+            item={'item_id': 'INS-COM-UNDO-USAGE', 'title': 'Undo 使用率'}
+        )
+        res_pg_undo = DETECTOR_REGISTRY['INS-COM-UNDO-USAGE'](ctx_pg_undo)
+        self.assertEqual(res_pg_undo.status, 'skip')
+        self.assertIn('堆内 MVCC', res_pg_undo.summary)
+
+        # 2. PART-NEEDED & TEMP-USAGE on TDSQL -> skip (分布式 Shard 架构)
+        for item_id in ['INS-COM-PART-NEEDED', 'INS-COM-TEMP-USAGE']:
+            ctx_tdsql = DetectionContext(
+                db_config={'id': self.tdsql_db.id, 'name': self.tdsql_db.name, 'db_type': 'tdsql'},
+                db_type='tdsql',
+                item={'item_id': item_id, 'title': item_id}
+            )
+            res = DETECTOR_REGISTRY[item_id](ctx_tdsql)
+            self.assertEqual(res.status, 'skip')
+            self.assertIn('分布式 Shard', res.summary)
+
+        # 3. ARCH-GAP & OPEN-CURSOR on MySQL / PG -> skip (仅支持 oracle, dm)
+        for item_id in ['INS-COM-ARCH-GAP', 'INS-COM-OPEN-CURSOR']:
+            for dbt in ['mysql', 'pgsql']:
+                ctx = DetectionContext(
+                    db_config={'id': 1, 'name': 'test', 'db_type': dbt},
+                    db_type=dbt,
+                    item={'item_id': item_id, 'title': item_id}
+                )
+                res = DETECTOR_REGISTRY[item_id](ctx)
+                self.assertEqual(res.status, 'skip')
+
+        # 4. Oracle 专属 8 项在 MySQL 下优雅 skip
+        ora_items = [
+            'INS-ORA-AWR-TOP-EVT', 'INS-ORA-AWR-TOP-SQL', 'INS-ORA-STA-OUTPUT',
+            'INS-ORA-SEG-ADV', 'INS-ORA-FRA', 'INS-ORA-CTRL-BAK',
+            'INS-ORA-ARCH-DELETE', 'INS-ORA-DBA-USERS',
+        ]
+        for item_id in ora_items:
+            ctx = DetectionContext(
+                db_config={'id': self.mysql_db.id, 'name': self.mysql_db.name, 'db_type': 'mysql'},
+                db_type='mysql',
+                item={'item_id': item_id, 'title': item_id}
+            )
+            res = DETECTOR_REGISTRY[item_id](ctx)
+            self.assertEqual(res.status, 'skip', f'{item_id} 在 MySQL 下未能优雅 skip')
+
+    def test_mock_query_detection_results(self):
+        """验证检测器在目标库查询正常/异常时的 Finding 和 Metrics 解析。"""
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+
+        class FakeCursor:
+            def __init__(self, fetchall_data=None, fetchone_data=None, description=None):
+                self._fa = fetchall_data or []
+                self._fo = fetchone_data
+                self.description = description or [('col1',), ('col2',)]
+            def execute(self, sql, params=None):
+                pass
+            def fetchall(self):
+                return self._fa
+            def fetchone(self):
+                return self._fo
+
+        class FakeConn:
+            def __init__(self, cur):
+                self._cur = cur
+            def cursor(self):
+                return self._cur
+            def close(self):
+                pass
+
+        class FakeConnector:
+            def __init__(self, cur):
+                self._conn = FakeConn(cur)
+            def connect(self):
+                return self._conn
+            def close(self):
+                pass
+
+        # 1. detect_locked_users 发现锁定用户
+        fc_locked = FakeConnector(FakeCursor(fetchall_data=[('app_user', 'LOCKED', None)]))
+        ctx_locked = DetectionContext(
+            db_config={'id': self.oracle_db.id, 'name': self.oracle_db.name, 'db_type': 'oracle'},
+            db_type='oracle',
+            item={'item_id': 'INS-COM-USER-LOCKED', 'title': '账号锁定检查'},
+            db_connector=fc_locked
+        )
+        res_locked = GenericDetector.detect_locked_users(ctx_locked)
+        self.assertEqual(res_locked.status, 'warning')
+        self.assertIn('app_user', str(res_locked.findings))
+
+        # 2. detect_dba_users 发现 DBA 账号
+        fc_dba = FakeConnector(FakeCursor(fetchall_data=[('SYSTEM', 'YES'), ('SCOTT', 'NO')]))
+        ctx_dba = DetectionContext(
+            db_config={'id': self.oracle_db.id, 'name': self.oracle_db.name, 'db_type': 'oracle'},
+            db_type='oracle',
+            item={'item_id': 'INS-ORA-DBA-USERS', 'title': 'DBA 权限账号'},
+            db_connector=fc_dba
+        )
+        res_dba = GenericDetector.detect_dba_users(ctx_dba)
+        self.assertEqual(res_dba.status, 'ok')
+        self.assertEqual(len(res_dba.metrics.get('dba_users', [])), 2)
+
+    def test_executor_run_single_for_all_23_items(self):
+        """验证 InspectionExecutor._run_single 对 23 项均能正常派发无未捕获异常。"""
+        executor = InspectionExecutor()
+        for item_id in self.items_23:
+            item = {'item_id': item_id, 'title': f'Title of {item_id}'}
+            res = executor._run_single(self.mysql_db, item, 'daily')
+            self.assertIsNotNone(res)
+            self.assertIn(res.status, ('ok', 'warning', 'critical', 'skip', 'error'))
