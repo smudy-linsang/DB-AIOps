@@ -1,0 +1,140 @@
+{
+ "event": "g11_per_instance_coverage",
+ "at": "2026-11-11T17:31:54.931371+08:00",
+ "window_minutes": 30,
+ "tables": {
+  "sql_stat": {
+   "1": {
+    "rows_30min": 500,
+    "max_time_local": "2026-11-11T17:31:18.840472+08:00"
+   },
+   "2": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "3": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "9": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "10": {
+    "rows_30min": 513,
+    "max_time_local": "2026-11-11T17:31:16.512942+08:00"
+   },
+   "11": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "15": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "16": {
+    "rows_30min": 116,
+    "max_time_local": "2026-11-11T17:31:16.492924+08:00"
+   },
+   "18": {
+    "rows_30min": 327,
+    "max_time_local": "2026-11-11T17:31:20.578181+08:00"
+   },
+   "19": {
+    "rows_30min": 303,
+    "max_time_local": "2026-11-11T17:30:32.529411+08:00"
+   }
+  },
+  "metric_point": {
+   "1": {
+    "rows_30min": 2884,
+    "max_time_local": "2026-11-11T17:31:18.849266+08:00"
+   },
+   "2": {
+    "rows_30min": 918,
+    "max_time_local": "2026-11-11T17:30:30.483987+08:00"
+   },
+   "3": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "9": {
+    "rows_30min": 0,
+    "max_time_local": null
+   },
+   "10": {
+    "rows_30min": 1766,
+    "max_time_local": "2026-11-11T17:31:16.528964+08:00"
+   },
+   "11": {
+    "rows_30min": 754,
+    "max_time_local": "2026-11-11T17:31:18.223846+08:00"
+   },
+   "15": {
+    "rows_30min": 754,
+    "max_time_local": "2026-11-11T17:31:18.316402+08:00"
+   },
+   "16": {
+    "rows_30min": 1766,
+    "max_time_local": "2026-11-11T17:31:16.514431+08:00"
+   },
+   "18": {
+    "rows_30min": 1239,
+    "max_time_local": "2026-11-11T17:31:20.584206+08:00"
+   },
+   "19": {
+    "rows_30min": 1665,
+    "max_time_local": "2026-11-11T17:30:32.535352+08:00"
+   }
+  },
+  "collection_snapshot": {
+   "1": {
+    "rows_30min": 26,
+    "max_time_local": "2026-11-11T17:31:18.899500+08:00"
+   },
+   "2": {
+    "rows_30min": 19,
+    "max_time_local": "2026-11-11T17:30:30.575593+08:00"
+   },
+   "3": {
+    "rows_30min": 30,
+    "max_time_local": "2026-11-11T17:31:15.285504+08:00"
+   },
+   "9": {
+    "rows_30min": 30,
+    "max_time_local": "2026-11-11T17:31:15.200149+08:00"
+   },
+   "10": {
+    "rows_30min": 30,
+    "max_time_local": "2026-11-11T17:31:16.539738+08:00"
+   },
+   "11": {
+    "rows_30min": 29,
+    "max_time_local": "2026-11-11T17:31:18.271387+08:00"
+   },
+   "15": {
+    "rows_30min": 29,
+    "max_time_local": "2026-11-11T17:31:18.349735+08:00"
+   },
+   "16": {
+    "rows_30min": 30,
+    "max_time_local": "2026-11-11T17:31:16.527400+08:00"
+   },
+   "18": {
+    "rows_30min": 21,
+    "max_time_local": "2026-11-11T17:31:20.593738+08:00"
+   },
+   "19": {
+    "rows_30min": 15,
+    "max_time_local": "2026-11-11T17:30:32.587554+08:00"
+   }
+  }
+ },
+ "summary": {
+  "sql_stat_instances_with_rows": 5,
+  "metric_point_instances_with_rows": 8,
+  "collection_snapshot_instances_with_rows": 10,
+  "instances_total": 10,
+  "note": "sql_stat 为 MySQL 家族 performance_schema digest 表，PG/Oracle/DM/GBase 不产生该表行；collection_snapshot 覆盖全部实例，才是跨方言的采集面判据。"
+ }
+}

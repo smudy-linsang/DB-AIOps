@@ -2,7 +2,7 @@
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 48 份**（含本清单与 `manifest.json`）：30 份实测产物 + 16 份可复现脚本 + 本清单 + manifest。**实测产物（30 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 50 份**（含本清单与 `manifest.json`）：31 份实测产物 + 17 份可复现脚本 + 本清单 + manifest。**实测产物（31 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -39,6 +39,8 @@
 | `g11_recovery_cadence_20261111.json` | 采样节奏核验：cid=19 130s 双读（+20 行、最大间隔 124.4s；配置 collect_interval_sec=60s）与 10 个纳管实例 collect_interval_sec 清单 | 2027 | 是 |
 | `g11_recovery_cadence_20261111.py` | 采样节奏核验脚本（只读） | 3135 | 是 |
 | `g11_evidence_mask_20261111.py` | 入库证据脱敏器（本地地址/端口/实例名按 cid 掩码；映射不嵌入真实实例名与账号） | 3384 | 是 |
+| `g11_per_instance_coverage_20261111.json` | **全纳管实例采集覆盖实测**（近 30 分钟）：sql_stat 有行 5/10（MySQL 家族 digest 表口径）、metric_point 有行 8/10、collection_snapshot 有行 **10/10** ⇒ 10 个实例全部在采集 | 3364 | 是 |
+| `g11_per_instance_coverage_20261111.py` | 全纳管实例采集覆盖实测脚本（只读，三张表口径对照） | 2916 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |
