@@ -1,8 +1,8 @@
-**结论：有条件通过**（v1.0。下半 34 项检测器已实现、已登记、脚本游标逐项实测了命中 / 未命中 / 方言 skip / 查询异常。MySQL 系 5 项与 PostgreSQL 6 项另在本机 MariaDB 10.11 与 PostgreSQL 16.15 上执行过。Oracle 16 项、达梦 4 项、GBase 3 项没有可连接的实库，SQL 未在对应引擎上跑过。这是条件，不是把「函数可调用」写成通过。）
+**结论：有条件通过**（v1.1。下半 34 项检测器已实现、已登记、脚本游标逐项实测了命中 / 未命中 / 方言 skip / 查询异常。MySQL 系 5 项与 PostgreSQL 6 项另在本机 MariaDB 10.11 与 PostgreSQL 16.15 上执行过。Oracle 16 项、达梦 4 项、GBase 3 项没有可连接的实库，SQL 未在对应引擎上跑过。main 头 `b3927d4` 的 7 个 CI job 全绿；Oracle 方言 job 测的是既有采集方言用例，不是这 16 条新巡检 SQL。这是条件，不是把「函数可调用」写成通过。）
 
 # DB-023 010B 补实现——下半 34 项交付报告
 
-- **版本**：v1.0
+- **版本**：v1.1
 - **任务单**：`docs/pm/orders/DB-023-010B补实现-下半.md`（v1.0）
 - **执行人**：GorkMan
 - **接单回执**：`docs/pm/reports/DB-023-ack-gorkman.md`（2026-11-10 23:17 America/Los_Angeles，commit `164a46d`）
@@ -148,7 +148,21 @@
 
 ### 4. CI
 
-代码推送后回填。见版本记录。
+推送头 `b3927d485ab1de67bf906dc7b687e1de3185ab6a` 上 9 个检查全部成功（2026-11-11 07:37 UTC 触发）。其中 CI 工作流 7 个 job 全绿：
+
+| 检查 | 结论 |
+|---|---|
+| 静态检查 | success |
+| 单元测试（无外部依赖） | success |
+| 集成测试（PostgreSQL） | success |
+| 方言测试（MySQL/PG） | success |
+| 方言测试（Oracle） | success |
+| 安全扫描 | success |
+| 前端构建与测试 | success |
+
+另有 `O DB-AIOps automatic review` 与 `A autorun dispatch` 成功。CI 运行页：https://github.com/smudy-linsang/DB-AIOps/actions/runs/42980803777
+
+方言 job 跑的是既有 `monitor.tests_dialect`（Oracle 为 `OracleDialectTests`），不是这 34 个新检测器。Oracle job 绿灯不能当成 16 条 Oracle 巡检 SQL 已在实库执行。
 
 ---
 
@@ -169,3 +183,4 @@
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-10 | GorkMan | 交付报告。时间为 America/Los_Angeles。CI 结果待推送后回填 |
+| v1.1 | 2026-11-10 23:41 | GorkMan | 回填 CI：头 `b3927d4` 上 7 个 CI job 与另外 2 个检查全部 success。Oracle 方言 job 不计入本单 16 项实库 |
