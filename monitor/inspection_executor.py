@@ -2941,6 +2941,23 @@ DETECTOR_REGISTRY: Dict[str, Callable] = {
 }
 
 
+def _register_db023_detectors():
+    """登记 DB-023 下半 34 项。
+
+    放在字面量外面，避免和 DB-022 同时改上面这张表时互相覆盖。
+    执行入口仍是 InspectionExecutor._run_single，不新开通道。
+    """
+    from monitor.inspection_detectors_010b import DB023_DETECTORS
+
+    overlap = sorted(set(DETECTOR_REGISTRY).intersection(DB023_DETECTORS))
+    if overlap:
+        raise RuntimeError(f'DB-023 注册键与既有检测器冲突: {overlap}')
+    DETECTOR_REGISTRY.update(DB023_DETECTORS)
+
+
+_register_db023_detectors()
+
+
 # ============================================================================
 # 巡检执行器
 # ============================================================================
