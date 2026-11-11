@@ -1,0 +1,142 @@
+{
+ "event": "g11_recovery_probe",
+ "read_a_at": "2026-11-11T17:08:17.582567+08:00",
+ "read_b_at": "2026-11-11T17:09:22.741679+08:00",
+ "interval_seconds": 65.2,
+ "read_a": {
+  "1": {
+   "max_time_local": "2026-11-11T17:06:21.814399+08:00",
+   "rows_last_5min": 40,
+   "rows_total": 40
+  },
+  "10": {
+   "max_time_local": "2026-11-11T17:07:16.422516+08:00",
+   "rows_last_5min": 48,
+   "rows_total": 52
+  },
+  "16": {
+   "max_time_local": "2026-11-11T17:07:16.437227+08:00",
+   "rows_last_5min": 16,
+   "rows_total": 20
+  },
+  "18": {
+   "max_time_local": "2026-11-11T17:06:24.807253+08:00",
+   "rows_last_5min": 44,
+   "rows_total": 95436
+  },
+  "19": {
+   "max_time_local": "2026-11-11T17:06:24.842476+08:00",
+   "rows_last_5min": 40,
+   "rows_total": 86659
+  },
+  "_metric_point": {
+   "max_time_local": "2026-11-11T17:07:19.936349+08:00",
+   "rows_total": 1568325
+  },
+  "_collection_snapshot": {
+   "max_time_local": "2026-11-11T17:08:15.254146+08:00",
+   "rows_total": 122594
+  }
+ },
+ "read_b": {
+  "1": {
+   "max_time_local": "2026-11-11T17:09:20.599831+08:00",
+   "rows_last_5min": 80,
+   "rows_total": 80
+  },
+  "10": {
+   "max_time_local": "2026-11-11T17:09:17.441032+08:00",
+   "rows_last_5min": 68,
+   "rows_total": 92
+  },
+  "16": {
+   "max_time_local": "2026-11-11T17:09:17.464013+08:00",
+   "rows_last_5min": 20,
+   "rows_total": 28
+  },
+  "18": {
+   "max_time_local": "2026-11-11T17:09:22.480558+08:00",
+   "rows_last_5min": 66,
+   "rows_total": 95462
+  },
+  "19": {
+   "max_time_local": "2026-11-11T17:08:27.187334+08:00",
+   "rows_last_5min": 61,
+   "rows_total": 86680
+  },
+  "_metric_point": {
+   "max_time_local": "2026-11-11T17:09:22.486466+08:00",
+   "rows_total": 1569218
+  },
+  "_collection_snapshot": {
+   "max_time_local": "2026-11-11T17:09:22.496253+08:00",
+   "rows_total": 122611
+  }
+ },
+ "advance": {
+  "1": {
+   "read_a_max_time": "2026-11-11T17:06:21.814399+08:00",
+   "read_b_max_time": "2026-11-11T17:09:20.599831+08:00",
+   "advanced_seconds": 178.8,
+   "rows_last_5min": [
+    40,
+    80
+   ]
+  },
+  "10": {
+   "read_a_max_time": "2026-11-11T17:07:16.422516+08:00",
+   "read_b_max_time": "2026-11-11T17:09:17.441032+08:00",
+   "advanced_seconds": 121.0,
+   "rows_last_5min": [
+    48,
+    68
+   ]
+  },
+  "16": {
+   "read_a_max_time": "2026-11-11T17:07:16.437227+08:00",
+   "read_b_max_time": "2026-11-11T17:09:17.464013+08:00",
+   "advanced_seconds": 121.0,
+   "rows_last_5min": [
+    16,
+    20
+   ]
+  },
+  "18": {
+   "read_a_max_time": "2026-11-11T17:06:24.807253+08:00",
+   "read_b_max_time": "2026-11-11T17:09:22.480558+08:00",
+   "advanced_seconds": 177.7,
+   "rows_last_5min": [
+    44,
+    66
+   ]
+  },
+  "19": {
+   "read_a_max_time": "2026-11-11T17:06:24.842476+08:00",
+   "read_b_max_time": "2026-11-11T17:08:27.187334+08:00",
+   "advanced_seconds": 122.3,
+   "rows_last_5min": [
+    40,
+    61
+   ]
+  },
+  "_metric_point": {
+   "read_a_max_time": "2026-11-11T17:07:19.936349+08:00",
+   "read_b_max_time": "2026-11-11T17:09:22.486466+08:00",
+   "advanced_seconds": 122.6,
+   "rows_last_5min": [
+    null,
+    null
+   ]
+  },
+  "_collection_snapshot": {
+   "read_a_max_time": "2026-11-11T17:08:15.254146+08:00",
+   "read_b_max_time": "2026-11-11T17:09:22.496253+08:00",
+   "advanced_seconds": 67.2,
+   "rows_last_5min": [
+    null,
+    null
+   ]
+  }
+ },
+ "verdict": "采样时间持续前推"
+}

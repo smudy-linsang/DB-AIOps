@@ -1,0 +1,95 @@
+{
+ "event": "g11_recovery_cadence",
+ "configs": [
+  {
+   "id": 1,
+   "name": "<instance-1>",
+   "db_type": "mysql",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 2,
+   "name": "<instance-2>",
+   "db_type": "pgsql",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 3,
+   "name": "<instance-3>",
+   "db_type": "oracle",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 9,
+   "name": "<instance-9>",
+   "db_type": "dm",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 10,
+   "name": "<instance-10>",
+   "db_type": "tdsql",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 11,
+   "name": "<instance-11>",
+   "db_type": "gbase",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 15,
+   "name": "<instance-15>",
+   "db_type": "gbase",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 16,
+   "name": "<instance-16>",
+   "db_type": "tdsql",
+   "port": "<platform-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 18,
+   "name": "<instance-proxy>",
+   "db_type": "tdsql",
+   "port": "<proxy-port>",
+   "collect_interval_sec": 60
+  },
+  {
+   "id": 19,
+   "name": "<instance-mysql>",
+   "db_type": "mysql",
+   "port": "<mysql-port>",
+   "collect_interval_sec": 60
+  }
+ ],
+ "cid19": {
+  "read_before_at": "2026-11-11T17:15:41.214750+08:00",
+  "read_after_at": "2026-11-11T17:17:51.253107+08:00",
+  "wait_seconds": 130,
+  "rows_before": 86742,
+  "rows_after": 86762,
+  "new_rows": 20,
+  "max_time_before": "2026-11-11T17:14:29.480331+08:00",
+  "max_time_after": "2026-11-11T17:16:33.859231+08:00",
+  "sample_times_recent": [
+   "2026-11-11T17:12:27.953460+08:00",
+   "2026-11-11T17:14:29.480331+08:00",
+   "2026-11-11T17:16:33.859231+08:00"
+  ],
+  "intervals_sec": [
+   121.526871,
+   124.3789
+  ],
+  "max_interval_sec": 124.3789
+ }
+}

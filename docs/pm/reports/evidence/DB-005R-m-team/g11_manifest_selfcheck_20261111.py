@@ -15,7 +15,13 @@ MP = os.path.join(D, 'manifest.json')
 NEW_FILES = ['g11_bucket_verify_20261111.json', 'g11_collection_gap_20261111.json',
              'g11_drive_20261111.json', 'g11_rootcause_20261111.json',
              'reproduce_g11_gap_20261111.py', 'reproduce_g11_verify_20261111.py',
-             'g11_recheck_20261111.json', 'g11_manifest_selfcheck_20261111.py']
+             'g11_recheck_20261111.json', 'g11_manifest_selfcheck_20261111.py',
+             # 2026-11-11 恢复轮新增证据（恢复取证 + 前推核验 + 通路端到端 + 采样节奏 + 脱敏器）
+             'g11_recovery_20261111.json', 'reproduce_g11_recovery_20261111.py',
+             'g11_recovery_probe_20261111.json', 'g11_recovery_probe_20261111.py',
+             'g11_recovery_digest_probe_20261111.json', 'g11_recovery_digest_probe_20261111.py',
+             'g11_recovery_cadence_20261111.json', 'g11_recovery_cadence_20261111.py',
+             'g11_evidence_mask_20261111.py']
 
 m = json.loads(open(MP, encoding='utf-8').read())
 files = m['files']

@@ -1,0 +1,59 @@
+{
+ "event": "g11_recovery_digest_probe",
+ "probe_select_1": [
+  {
+   "cid": 19,
+   "name": "<instance-mysql>",
+   "host": "<local-host>",
+   "port": "<mysql-port>",
+   "select_1": "ok"
+  },
+  {
+   "cid": 18,
+   "name": "<instance-proxy>",
+   "host": "<local-host>",
+   "port": "<proxy-port>",
+   "select_1": "ok"
+  }
+ ],
+ "read_before_at": "2026-11-11T17:14:19.845455+08:00",
+ "read_after_at": "2026-11-11T17:15:39.902940+08:00",
+ "wait_seconds": 80.1,
+ "before": {
+  "19": {
+   "rows_total": 86721,
+   "max_time_local": "2026-11-11T17:12:27.953460+08:00"
+  },
+  "18": {
+   "rows_total": 95502,
+   "max_time_local": "2026-11-11T17:12:25.791495+08:00"
+  }
+ },
+ "after": {
+  "19": {
+   "rows_total": 86742,
+   "max_time_local": "2026-11-11T17:14:29.480331+08:00"
+  },
+  "18": {
+   "rows_total": 95527,
+   "max_time_local": "2026-11-11T17:15:21.971343+08:00"
+  }
+ },
+ "delta": {
+  "19": {
+   "rows_before": 86721,
+   "rows_after": 86742,
+   "new_rows": 21,
+   "max_time_before": "2026-11-11T17:12:27.953460+08:00",
+   "max_time_after": "2026-11-11T17:14:29.480331+08:00"
+  },
+  "18": {
+   "rows_before": 95502,
+   "rows_after": 95527,
+   "new_rows": 25,
+   "max_time_before": "2026-11-11T17:12:25.791495+08:00",
+   "max_time_after": "2026-11-11T17:15:21.971343+08:00"
+  }
+ },
+ "verdict": "PASS：cid=19/18 采集通路端到端可用（新行落库）"
+}

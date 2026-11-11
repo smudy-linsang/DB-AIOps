@@ -2,15 +2,15 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 39,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 38 份（含 README-evidence.md）。目录实有文件数 = file_count = 39。",
- "total_bytes": 331171,
- "total_bytes_note": "files 列表 38 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 48,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 47 份（含 README-evidence.md）。目录实有文件数 = file_count = 48。",
+ "total_bytes": 390749,
+ "total_bytes_note": "files 列表 47 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "README-evidence.md",
    "desc": "证据清单与复现命令说明",
-   "bytes": 10766,
+   "bytes": 13125,
    "masked": false
   },
   {
@@ -98,6 +98,12 @@
    "masked": true
   },
   {
+   "file": "g11_evidence_mask_20261111.py",
+   "desc": "入库证据脱敏器（本地地址/端口/实例名按 cid 掩码；映射不嵌入真实实例名与账号）",
+   "bytes": 3384,
+   "masked": true
+  },
+  {
    "file": "g11_gate_math.json",
    "desc": "G-11 判定窗边界复刻：按 monitor/sql_compare.py::detect_daily 真实实现复刻，枚举 5 个判定时刻 x days=3/4/5/7 x cid=18/19 的判定结果（证明 days=3 复判必须落在 11-12 15:00 前）",
    "bytes": 19970,
@@ -112,7 +118,7 @@
   {
    "file": "g11_manifest_selfcheck_20261111.py",
    "desc": "manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描",
-   "bytes": 2897,
+   "bytes": 3417,
    "masked": true
   },
   {
@@ -125,6 +131,48 @@
    "file": "g11_recheck_20261111.json",
    "desc": "G-11 11-11 复核轮独立复验记录（16:2x 第二会话）：重跑落桶只读核验、重跑 manifest 自洽脚本、重跑 reconcile（no drift）、主机重启与容器/PID 存活性复核、计划任务 Last Result 复核",
    "bytes": 5435,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_20261111.json",
+   "desc": "恢复取证（2026-11-11 恢复轮）：采集器/Web 新 PID 与启动时刻、逐小时写入分布（证明无负载也持续写基线行）、中断→恢复缺口量化、新窗口装置与相关计划任务清单",
+   "bytes": 27105,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_cadence_20261111.json",
+   "desc": "采样节奏核验：cid=19 130s 双读（+41 行、最大间隙 123s）与各纳管实例 collect_interval_sec 清单",
+   "bytes": 2027,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_cadence_20261111.py",
+   "desc": "采样节奏核验脚本（只读）",
+   "bytes": 3135,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_digest_probe_20261111.json",
+   "desc": "G-11 目标实例采集通路端到端证明：对两路探针各执行一条只读 SELECT 1 后采集是否落出新行（cid18 端到端通过；cid19 因落行节奏约 120s 未在 80s 窗口内命中）",
+   "bytes": 1409,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_digest_probe_20261111.py",
+   "desc": "G-11 目标实例采集通路端到端证明脚本（只读，不跑 workload）",
+   "bytes": 4566,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_probe_20261111.json",
+   "desc": "恢复后双读采样前推核验（间隔 65s：sql_stat / metric_point / collection_snapshot 前后对照）",
+   "bytes": 3478,
+   "masked": true
+  },
+  {
+   "file": "g11_recovery_probe_20261111.py",
+   "desc": "恢复后双读采样前推核验脚本（只读）",
+   "bytes": 3353,
    "masked": true
   },
   {
@@ -173,6 +221,12 @@
    "file": "reproduce_g11_periodic_gate.py",
    "desc": "G-11 二轮诊断脚本（v1.2）：扫描 sql-periodic 的 days 门槛表现 + 只读核算每 digest 实际运行日数",
    "bytes": 8390,
+   "masked": true
+  },
+  {
+   "file": "reproduce_g11_recovery_20261111.py",
+   "desc": "恢复取证可复现脚本（只读：进程/计划任务/DRIVE_DATES/sql_stat 连续性与逐小时写入分布）",
+   "bytes": 8242,
    "masked": true
   },
   {
@@ -237,7 +291,7 @@
   }
  ],
  "scan_hits": 0,
- "scan_scope": "26 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json）—— 沿用 v1.0 口径",
+ "scan_scope": "30 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json）—— 沿用 v1.0 口径",
  "scan_note": "11-10 连驱入库后重新扫描，命中 0。另说明：8 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
  "scan_list": [
   "127.0.0.1",

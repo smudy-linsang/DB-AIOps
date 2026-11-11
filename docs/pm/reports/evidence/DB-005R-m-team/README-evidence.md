@@ -2,7 +2,7 @@
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 39 份**（含本清单与 `manifest.json`）：26 份实测产物 + 11 份可复现脚本 + 本清单 + manifest。**实测产物（26 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 48 份**（含本清单与 `manifest.json`）：30 份实测产物 + 16 份可复现脚本 + 本清单 + manifest。**实测产物（30 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -29,7 +29,16 @@
 | `reproduce_g11_verify_20261111.py` | 11-11 落桶只读核验脚本（TSDB 恢复后手动复核用） | 2587 | 是 |
 | `reproduce_g11_gap_20261111.py` | 采集中断量化脚本（逐小时 rows 分布 + 最后采样时刻 + 11-11 全天样本统计） | 2382 | 是 |
 | `g11_recheck_20261111.json` | **11-11 独立复核轮复验记录**（16:2x 第二会话）：重跑落桶只读核验、重跑 manifest 自洽脚本、重跑 reconcile（no drift）、宿主主机重启与容器/PID 存活性复核、计划任务 Last Result 复核 | 5435 | 是 |
-| `g11_manifest_selfcheck_20261111.py` | manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描 | 2897 | 是 |
+| `g11_manifest_selfcheck_20261111.py` | manifest 自洽性独立复核脚本（只读）：目录实有文件数 vs file_count、逐文件字节 vs total_bytes、scan_scope 份数 vs 数据类实数、新增证据敏感串扫描 | 3417 | 是 |
+| `g11_recovery_20261111.json` | **恢复取证（2026-11-11 恢复轮）**：采集器/Web 新 PID 与启动时刻、逐小时写入分布（证明无业务负载也持续写基线行 ⇒ 08:53 后无行＝采集器进程已死）、中断→恢复缺口量化（489.2 分钟）、新窗口装置与相关计划任务清单 | 27105 | 是 |
+| `reproduce_g11_recovery_20261111.py` | 恢复取证可复现脚本（只读：进程/计划任务/DRIVE_DATES/sql_stat 连续性与逐小时写入分布） | 8242 | 是 |
+| `g11_recovery_probe_20261111.json` | 恢复后双读采样前推核验（间隔 65s：sql_stat / metric_point / collection_snapshot 前后对照） | 3478 | 是 |
+| `g11_recovery_probe_20261111.py` | 恢复后双读采样前推核验脚本（只读） | 3353 | 是 |
+| `g11_recovery_digest_probe_20261111.json` | **G-11 目标实例采集通路端到端证明**：对两路探针各执行一条只读 SELECT 1 后采集是否落出新行（verdict=PASS；cid=19 +21 行、cid=18 +25 行 ⇒ 采集通路端到端可用） | 1409 | 是 |
+| `g11_recovery_digest_probe_20261111.py` | G-11 目标实例采集通路端到端证明脚本（只读，不跑 workload） | 4566 | 是 |
+| `g11_recovery_cadence_20261111.json` | 采样节奏核验：cid=19 130s 双读（+20 行、最大间隔 124.4s；配置 collect_interval_sec=60s）与 10 个纳管实例 collect_interval_sec 清单 | 2027 | 是 |
+| `g11_recovery_cadence_20261111.py` | 采样节奏核验脚本（只读） | 3135 | 是 |
+| `g11_evidence_mask_20261111.py` | 入库证据脱敏器（本地地址/端口/实例名按 cid 掩码；映射不嵌入真实实例名与账号） | 3384 | 是 |
 | `s1_run_A_client_summary.txt` | 场景A（索引在位）客户端侧 workload 汇总 | 1562 | 否 |
 | `s1_run_B_client_summary.txt` | 场景B（索引已删）客户端侧 workload 汇总 | 1575 | 否 |
 | `s1_lockwait_injection.txt` | 锁等待注入记录（A 持锁 20s / B 等锁） | 95 | 否 |
@@ -86,5 +95,12 @@ python reproduce_g11_gap_20261111.py                 # 量化采集中断（逐�
 python reproduce_g11_verify_20261111.py             # 复跑落桶核验（exec=0、桶不存在）
 python g11_manifest_selfcheck_20261111.py          # manifest 四项口径自洽复核（逐文件差异 0）
 python C:\dispatcher\g11_reconcile_and_commit.py   # manifest 订正（无漂移则不提交）
+
+# G-11 恢复轮（2026-11-11 16:59–17:1x）：恢复采集器与 Web + 放开新窗口闸门（全程只读，不驱动负载）
+python reproduce_g11_recovery_20261111.py     # 恢复取证：新 PID / 逐小时写入分布 / 中断缺口量化 / 装置与计划任务
+python g11_recovery_probe_20261111.py        # 恢复后双读（65s）采样前推核验
+python g11_recovery_digest_probe_20261111.py # G-11 目标实例采集通路端到端证明（只读 SELECT 1）
+python g11_recovery_cadence_20261111.py     # 采样节奏核验（130s 双读 + 各实例采集周期）
+python g11_evidence_mask_20261111.py        # 入库副本脱敏（本地地址/端口/实例名按 cid 掩码）
 
 原始运行副本保留在本机 `C:\dispatcher\probe_out\`，**不入库**；仓库 `.gitignore` 含 `*.log`，故日志类证据入库时统一改名为 `.txt`（沿用 DB-005 先例）。
