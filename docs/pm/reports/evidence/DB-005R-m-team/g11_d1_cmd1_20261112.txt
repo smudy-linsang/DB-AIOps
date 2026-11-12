@@ -1,0 +1,17 @@
+=== cid=18 ===
+  retention min=2026-11-05 12:32:58.414492+00:00 max=2026-11-12 01:48:25.415126+00:00 rows=105655
+  max_run_days=3 candidates=32
+  days=3 required=3 http=200 items=0
+  days=4 required=3 http=200 items=0
+  days=5 required=4 http=200 items=0
+  days=6 required=5 http=200 items=0
+  days=7 required=5 http=200 items=0
+=== cid=19 ===
+  retention min=2026-11-06 07:26:59.714245+00:00 max=2026-11-12 01:49:41.271533+00:00 rows=96839
+  max_run_days=3 candidates=24
+  days=3 required=3 http=200 items=0
+  days=4 required=3 http=200 items=0
+  days=5 required=4 http=200 items=0
+  days=6 required=5 http=200 items=0
+  days=7 required=5 http=200 items=0
+WROTE C:\dispatcher\probe_out\g11_periodic_gate_d1_d3.json

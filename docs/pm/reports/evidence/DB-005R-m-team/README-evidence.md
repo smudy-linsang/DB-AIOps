@@ -1,8 +1,8 @@
-# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10 + 11-11 落桶核验与中断取证）
+# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10 + 11-11 落桶核验与中断取证 + 11-12 D1 日周期复判）
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 52 份**（含本清单与 `manifest.json`）：32 份实测产物 + 18 份可复现脚本 + 本清单 + manifest。**实测产物（32 份数据类文件）敏感扫描命中 0**（沿用 v1.0 口径，清单见 `manifest.json` 的 `scan_list` / `scan_scope`）。脚本与本清单内出现的 `127.0.0.1` / `8009` / `MTEAM_PW=<…>` / `'Bearer ' + token` 等为**占位默认值与代码片段**，不含任何真实凭据值。
+**共 59 份**（含本清单与 `manifest.json`）：38 份实测产物 + 19 份可复现脚本 + 本清单 + manifest。**实测产物（38 份数据类文件）敏感扫描命中 0**
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -57,6 +57,13 @@
 
 | `g11_instance_coverage_20261111.json` | 纳管实例采集覆盖复算：逐实例 sql_stat / metric_point 覆盖与「无行」归因（PG 缺 pg_stat_statements、Oracle common 用户口令过期 ORA-65162、DM 缺 dmPython、GBase 无 performance_schema digest 口径）＋ gbase healthcheck 配置假阴性三步定性 | 4804 | 是 |
 | `reproduce_g11_instance_coverage_20261111.py` | 纳管实例采集覆盖复算脚本（只读；实例名按 cid 掩码，不落端口/口令/地址） | 4746 | 是 |
+| `db005r_g11_day_baseline_20261112.json` | **G-11 D1 三轮复判（v1.3，2026-11-12 09:50，计划任务 `MMMan-DBAIOps-G11Rejudge-D1` 自动触发、Last Result=0）**：cid=18/19 采集连续性（48h 窗、间隙 >180s 处数与样本）+ `baseline=day` / `baseline=week` / `sql-periodic` 同一接口同一命令重跑的完整输出 | 33622 | 是 |
+| `db005r_g11_day_baseline_20261112_compact.json` | G-11 D1 三轮复判的**精简版**输出（入库证据口径） | 14294 | 是 |
+| `g11_periodic_gate_20261112.json` | **G-11 日周期门槛机理诊断（D1 轮）**：`sql-periodic` days=3/4/5/6/7 端点扫描（全部 `items_returned=0`）+ 按平台同规则复刻核算每 digest **实际运行日数** + 全留存覆盖与逐本地日期行数 | 27424 | 是 |
+| `g11_d1_summary_20261112.json` | D1 轮次 summary（内容取自已脱敏子对象）：`slot` / `rcs`（两脚本均 0）/ 两路接口判定摘要 + `side_effects` 口令轮换记录 | 11868 | 是 |
+| `g11_d1_cmd0_20261112.txt` | D1 轮次 `day_baseline` 脚本 stdout（原 `.log` 按仓库 `*.gitignore` 约定改名为 `.txt`）：两路 continuity 摘要与三次接口调用回显 | 1214 | 否 |
+| `g11_d1_cmd1_20261112.txt` | D1 轮次 `periodic_gate` 脚本 stdout（原 `.log` 按仓库 `*.gitignore` 约定改名为 `.txt`）：两路 `retention` / `max_run_days` 与 days=3..7 端点扫描回显 | 733 | 否 |
+| `db005r_g11_rerun.py` | **G-11 复判轮次驱动脚本**（宿主机侧）：按 `--slot` 依次执行 `day_baseline` 与 `periodic_gate` 两个只读脚本；口令随机值只经环境变量传入、不落盘。含本地地址/端口占位默认值、无任何真实凭据（脚本类按本清单口径豁免敏感扫描） | 6488 | 否 |
 
 ## 复现命令
 
@@ -107,5 +114,15 @@ python g11_recovery_probe_20261111.py        # 恢复后双读（65s）采样前
 python g11_recovery_digest_probe_20261111.py # G-11 目标实例采集通路端到端证明（只读 SELECT 1）
 python g11_recovery_cadence_20261111.py     # 采样节奏核验（130s 双读 + 各实例采集周期）
 python g11_evidence_mask_20261111.py        # 入库副本脱敏（本地地址/端口/实例名按 cid 掩码）
+
+# G-11 D1 日周期复判（2026-11-12 09:50）：同一脚本、同一接口、同一命令，仅换 --slot 标签
+python db005r_g11_rerun.py --slot d1_d3
+
+# 等价直调（同一脚本、同一参数）
+$env:BASE = 'http://127.0.0.1:8009'
+python reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 7 --out 'C:/dispatcher/probe_out/db005r_g11_d1_d3.json' --compact-out 'C:/dispatcher/probe_out/db005r_g11_d1_d3_compact.json'
+python reproduce_g11_periodic_gate.py --cid 18 --cid2 19 --out 'C:/dispatcher/probe_out/g11_periodic_gate_d1_d3.json'
+
+> ★`--periodic-days`（默认 7）只影响 day_baseline 的**描述字段**；D1 的 days=3 判定由 `reproduce_g11_periodic_gate.py` 内部 sweep days=3..7 产出，判定结论见 `g11_periodic_gate_20261112.json` 的 `endpoint_sweep`。
 
 原始运行副本保留在本机 `C:\dispatcher\probe_out\`，**不入库**；仓库 `.gitignore` 含 `*.log`，故日志类证据入库时统一改名为 `.txt`（沿用 DB-005 先例）。

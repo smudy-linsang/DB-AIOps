@@ -1,0 +1,444 @@
+{
+  "slot": "d1_d3",
+  "generated_at": "2026-11-12T09:50:00.876490+08:00",
+  "rcs": [
+    0,
+    0
+  ],
+  "command_line": "C:\\DB-AIOps\\.venv\\Scripts\\python.exe C:\\DB-AIOps\\docs\\pm\\reports\\evidence\\DB-005R-m-team\\reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 7 --out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3.json --compact-out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3_compact.json",
+  "note": "口令随机值只经环境变量传入，未落盘/未入库/未入证据",
+  "day_baseline": {
+    "18": {
+      "side_effects": [
+        "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
+      ],
+      "regression_day": {
+        "http": 200,
+        "counts": {
+          "regressed": 0,
+          "new": 1,
+          "improved": 0,
+          "gone": 4,
+          "stable": 20
+        },
+        "baseline_note": null,
+        "items_returned": 5
+      },
+      "regression_week": {
+        "http": 200,
+        "counts": {
+          "regressed": 0,
+          "new": 21,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "items_returned": 21
+      },
+      "periodic": {
+        "http": 200,
+        "days": 7,
+        "items_returned": 0,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        }
+      },
+      "continuity": {
+        "rows": 25248,
+        "distinct_digests": 25,
+        "gap_count_gt_180s": 1,
+        "first_time_point": "2026-11-10 01:51:08.148677+00:00",
+        "last_time_point": "2026-11-12 01:48:25.415126+00:00"
+      }
+    },
+    "19": {
+      "side_effects": [
+        "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
+      ],
+      "regression_day": {
+        "http": 200,
+        "counts": {
+          "regressed": 0,
+          "new": 1,
+          "improved": 0,
+          "gone": 4,
+          "stable": 20
+        },
+        "baseline_note": null,
+        "items_returned": 5
+      },
+      "regression_week": {
+        "http": 200,
+        "counts": {
+          "regressed": 0,
+          "new": 21,
+          "improved": 0,
+          "gone": 0,
+          "stable": 0
+        },
+        "baseline_note": "基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信",
+        "items_returned": 21
+      },
+      "periodic": {
+        "http": 200,
+        "days": 7,
+        "items_returned": 0,
+        "rule": {
+          "hour_share": 0.8,
+          "max_hours": 6,
+          "day_share": 0.7
+        }
+      },
+      "continuity": {
+        "rows": 24352,
+        "distinct_digests": 25,
+        "gap_count_gt_180s": 1,
+        "first_time_point": "2026-11-10 01:51:10.822532+00:00",
+        "last_time_point": "2026-11-12 01:49:41.271533+00:00"
+      }
+    }
+  },
+  "periodic_gate": {
+    "18": {
+      "max_run_days": 3,
+      "retention": {
+        "min_time": "2026-11-05 12:32:58.414492+00:00",
+        "max_time": "2026-11-12 01:48:25.415126+00:00",
+        "rows": 105655,
+        "distinct_digests": 52
+      },
+      "endpoint_sweep": [
+        {
+          "days": 3,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 4,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 5,
+          "required_run_days": 4,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 6,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 7,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        }
+      ],
+      "top_candidates": [
+        {
+          "digest": "1581b156e40f",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 54962,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 5798,
+              "total_ms": 2046
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 21587,
+              "total_ms": 7414
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 21617,
+              "total_ms": 6119
+            }
+          ],
+          "sql_text_sample": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "6171e5b3b12f",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 8016,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 818,
+              "total_ms": 7923
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 3153,
+              "total_ms": 63250
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 3141,
+              "total_ms": 57169
+            }
+          ],
+          "sql_text_sample": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "403d6015f4e5",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 2749,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 278,
+              "total_ms": 3957
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 1122,
+              "total_ms": 17617
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 1075,
+              "total_ms": 13629
+            }
+          ],
+          "sql_text_sample": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "5f9188806d79",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 2727,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 296,
+              "total_ms": 10806
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 1050,
+              "total_ms": 41829
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 1085,
+              "total_ms": 43526
+            }
+          ],
+          "sql_text_sample": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "d1b44b0c19af",
+          "run_days": 2,
+          "hours": [
+            14,
+            17
+          ],
+          "total_exec": 22,
+          "runs": [
+            {
+              "run_day": "2026-11-09",
+              "exec": 14,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-11",
+              "exec": 6,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "SELECT ?"
+        }
+      ]
+    },
+    "19": {
+      "max_run_days": 3,
+      "retention": {
+        "min_time": "2026-11-06 07:26:59.714245+00:00",
+        "max_time": "2026-11-12 01:49:41.271533+00:00",
+        "rows": 96839,
+        "distinct_digests": 44
+      },
+      "endpoint_sweep": [
+        {
+          "days": 3,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 4,
+          "required_run_days": 3,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 5,
+          "required_run_days": 4,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 6,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        },
+        {
+          "days": 7,
+          "required_run_days": 5,
+          "http": 200,
+          "items_returned": 0
+        }
+      ],
+      "top_candidates": [
+        {
+          "digest": "1581b156e40f",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 48926,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 5722,
+              "total_ms": 2024
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 21587,
+              "total_ms": 7413
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 21617,
+              "total_ms": 6117
+            }
+          ],
+          "sql_text_sample": "SELECT `id` FROM `orders` WHERE `id` = ? AND `user_id` = ?"
+        },
+        {
+          "digest": "6171e5b3b12f",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 7097,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 803,
+              "total_ms": 7916
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 3153,
+              "total_ms": 63251
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 3141,
+              "total_ms": 57165
+            }
+          ],
+          "sql_text_sample": "SELECT `id` , `amount` FROM `orders` WHERE `user_id` = ? ORDER BY `created_at` DESC LIMIT ?"
+        },
+        {
+          "digest": "403d6015f4e5",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 2473,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 276,
+              "total_ms": 3914
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 1122,
+              "total_ms": 17618
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 1075,
+              "total_ms": 13628
+            }
+          ],
+          "sql_text_sample": "SELECT COUNT ( * ) FROM `orders` WHERE `created_at` >= NOW ( ) - INTERVAL ? SQL_TSI_HOUR"
+        },
+        {
+          "digest": "5f9188806d79",
+          "run_days": 3,
+          "hours": [
+            15
+          ],
+          "total_exec": 2427,
+          "runs": [
+            {
+              "run_day": "2026-11-06",
+              "exec": 292,
+              "total_ms": 10672
+            },
+            {
+              "run_day": "2026-11-09",
+              "exec": 1050,
+              "total_ms": 41827
+            },
+            {
+              "run_day": "2026-11-10",
+              "exec": 1085,
+              "total_ms": 43526
+            }
+          ],
+          "sql_text_sample": "SELECT STATUS , COUNT ( * ) , SUM ( `amount` ) FROM `orders` GROUP BY STATUS"
+        },
+        {
+          "digest": "d1b44b0c19af",
+          "run_days": 2,
+          "hours": [
+            14,
+            17
+          ],
+          "total_exec": 22,
+          "runs": [
+            {
+              "run_day": "2026-11-09",
+              "exec": 14,
+              "total_ms": 0
+            },
+            {
+              "run_day": "2026-11-11",
+              "exec": 6,
+              "total_ms": 0
+            }
+          ],
+          "sql_text_sample": "SELECT ?"
+        }
+      ]
+    }
+  }
+}
