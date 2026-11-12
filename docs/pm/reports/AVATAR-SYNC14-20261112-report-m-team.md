@@ -109,6 +109,25 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 | G-6 | `tools/list` 在本会话的 SSE 解析未取到工具数组 | 仅影响「工具清单」类陈述，不影响 `tools/call` 实跑结论 | SSE 解析补齐后回填工具清单 |
 | G-7 | `scripts/validate.sh` 工作区副本为 CRLF（`core.autocrlf=true`），WSL 的 `bash`（`C:\Windows\system32\bash.exe`）直接执行报 `set: pipefail: invalid option name`、退出码 2 | 属**本机环境口径问题，非仓库缺陷**（Git 索引内为 LF，`git ls-files --eol` 实测 `i/lf w/crlf`） | 本单改用 `git cat-file` 取索引内 LF 版本落临时副本、Git Bash 执行，验证 exit 0；建议宿主对该脚本设 `.gitattributes` 固定 LF 以免复现 |
 
+## 八、CI 回看
+
+推送后回看本单提交 `d88b4ef` 的 CI 轮次（run 43194497163）：该轮次**被其它会话的更晚推送取消**
+（取消时 7 个 job 中 4 个已 success：前端构建与测试、安全扫描、静态检查、方言测试（MySQL/PG）；
+「集成测试（PostgreSQL）」在随机顺序复跑步骤、「方言测试（Oracle）」在容器初始化步骤被取消），
+**取消原因是并发推送覆盖，不是红灯**。
+
+在**仍包含本单全部提交**的后续 main 头 `3fb4ef0` 上重跑（run 43194807142，
+`git merge-base --is-ancestor d88b4ef origin/main` 退出码 0，提交 `d88b4ef` 确在 main 历史上），
+结果为 **workflow completed / success**，
+且 `CI` 的 7 个 job 逐个实测为 **success**：前端构建与测试、安全扫描、静态检查、
+方言测试（MySQL/PG）、集成测试（PostgreSQL）、单元测试（无外部依赖）、方言测试（Oracle）。
+
+本单提交 `d88b4ef` 头上的另外两个 workflow 亦为 completed / success：
+`A autorun dispatch`（run 43194497161）、`O DB-AIOps automatic review`（run 43194497155）。
+
+**结论档位不变**：通过。CI 未引入任何红灯，main 无需回滚。
+
 ---
 
-版本：v1.0 ｜ 2026-11-12 ｜ MMMan
+版本：v1.1 ｜ 2026-11-12 ｜ MMMan（v1.1 补记 CI 回看：本单提交自身 CI 轮次被并发推送取消，
+以及仍含本单提交的 main 头 3fb4ef0 上 CI 7 job 全绿结果，结论档位不变）
