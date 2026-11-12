@@ -118,6 +118,12 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 
 **结论档位不变**：通过。CI 全绿未引入任何红灯，main 无需回滚。
 
+**如实补记（本 v1.1 提交自身的 CI 轮次被取消）**：本报告 v1.1 的提交 `554c2a3` 触发的 CI 轮次（run 43189622515）
+在运行中被**其它会话的更晚推送**（`eb075c6`）取消，被取消时 7 个 job 中 6 个已 success，
+仅「集成测试（PostgreSQL）」处于 cancelled 状态。**取消原因是并发推送覆盖，不是红灯**。
+当前 main 头 `eb075c6`（**包含本单两个提交**，`git merge-base --is-ancestor 554c2a3 origin/main` 退出码 0）上重跑结果为
+三个 workflow 全部 completed / success、`CI` 7 个 job 逐个 success（含集成测试（PostgreSQL）），即 main 现态为全绿。
+
 ---
 
-版本：v1.1 ｜ 2026-11-12 ｜ MMMan（v1.1 补记 CI 回看结果，结论档位不变）
+版本：v1.2 ｜ 2026-11-12 ｜ MMMan（v1.2 补记 v1.1 轮次 CI 被并发推送取消一事与当前 main 头重跑全绿结果，结论档位不变）
