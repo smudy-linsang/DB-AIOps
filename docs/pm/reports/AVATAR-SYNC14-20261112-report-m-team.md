@@ -125,9 +125,13 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 本单提交 `d88b4ef` 头上的另外两个 workflow 亦为 completed / success：
 `A autorun dispatch`（run 43194497161）、`O DB-AIOps automatic review`（run 43194497155）。
 
+**再补记（v1.2）**：本报告 v1.1 提交 `e078bf9` 触发的 CI 轮次（run 43195662780）同样**被其它会话的更晚推送取消**（无 failed 红灯）。
+随后 main 头推进到 `e956690`（**仍含本单全部两个提交** `d88b4ef`/`e078bf9`，两次 `git merge-base --is-ancestor` 退出码均为 0），
+该头上三个 workflow 全部 completed / success、`CI` 7 个 job 逐个 **success**（含集成测试（PostgreSQL）与方言测试（Oracle））
+⇒ **main 现态全绿，无红灯、无回滚需要**。
+
 **结论档位不变**：通过。CI 未引入任何红灯，main 无需回滚。
 
 ---
 
-版本：v1.1 ｜ 2026-11-12 ｜ MMMan（v1.1 补记 CI 回看：本单提交自身 CI 轮次被并发推送取消，
-以及仍含本单提交的 main 头 3fb4ef0 上 CI 7 job 全绿结果，结论档位不变）
+版本：v1.2 ｜ 2026-11-12 ｜ MMMan（v1.2 补记 v1.1 轮次 CI 被并发推送取消一事与当前 main 头 e956690 重跑全绿结果，结论档位不变）
