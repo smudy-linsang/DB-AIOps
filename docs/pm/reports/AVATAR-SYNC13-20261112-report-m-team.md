@@ -105,8 +105,19 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 
 ## 八、CI 回看
 
-推送后回看 head `7347a62`（`cc960e5..7347a62`）的 CI 结果，见 v1.1 补记。
+推送后回看 head `d4d1066`（`cc960e5..d4d1066`），三个 workflow **全部 completed / success**：
+
+| workflow | run | 状态 |
+|---|---|---|
+| `A autorun dispatch` | 43189114634 | completed / success |
+| `O DB-AIOps automatic review` | 43189114619 | completed / success |
+| `CI` | 43189114625 | completed / success |
+
+`CI` 的 7 个 job 逐个实测为 **success**：安全扫描、静态检查、前端构建与测试、方言测试（Oracle）、
+方言测试（MySQL/PG）、单元测试（无外部依赖）、集成测试（PostgreSQL）。
+
+**结论档位不变**：通过。CI 全绿未引入任何红灯，main 无需回滚。
 
 ---
 
-版本：v1.0 ｜ 2026-11-12 ｜ MMMan
+版本：v1.1 ｜ 2026-11-12 ｜ MMMan（v1.1 补记 CI 回看结果，结论档位不变）
