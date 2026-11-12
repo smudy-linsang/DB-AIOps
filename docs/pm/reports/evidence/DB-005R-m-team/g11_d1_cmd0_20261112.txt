@@ -2,11 +2,11 @@
   regression_day(http=200) counts={'regressed': 0, 'new': 1, 'improved': 0, 'gone': 4, 'stable': 20} baseline_note=None items=5
   regression_week(http=200) counts={'regressed': 0, 'new': 21, 'improved': 0, 'gone': 0, 'stable': 0} baseline_note=基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信
   periodic(http=200) items=0 rule={'hour_share': 0.8, 'max_hours': 6, 'day_share': 0.7}
-  continuity: rows=25248 digests=25 gaps>180s=1 baseline_win_rows=14965
+  continuity: rows=25268 digests=25 gaps>180s=1 baseline_win_rows=14881
 === cid=19 ===
   regression_day(http=200) counts={'regressed': 0, 'new': 1, 'improved': 0, 'gone': 4, 'stable': 20} baseline_note=None items=5
   regression_week(http=200) counts={'regressed': 0, 'new': 21, 'improved': 0, 'gone': 0, 'stable': 0} baseline_note=基线时段内没有任何 SQL 统计数据（采集尚未覆盖该时段或已过保留期），「新增」判定不可信
   periodic(http=200) items=0 rule={'hour_share': 0.8, 'max_hours': 6, 'day_share': 0.7}
-  continuity: rows=24352 digests=25 gaps>180s=1 baseline_win_rows=14112
+  continuity: rows=24352 digests=25 gaps>180s=1 baseline_win_rows=14032
 WROTE C:\dispatcher\probe_out\db005r_g11_d1_d3.json
 WROTE C:\dispatcher\probe_out\db005r_g11_d1_d3_compact.json

@@ -1,22 +1,22 @@
 {
-  "generated_at": "2026-11-12T01:50:02.807295+00:00",
+  "generated_at": "2026-11-12T01:58:43.923433+00:00",
   "side_effects": [
     "本地开发账号口令已重置并用于登录（随机值，不写入证据）"
   ],
   "base": "http://<local-host>:<platform-port>",
   "window": "24h",
-  "periodic_days": 7,
+  "periodic_days": 3,
   "instances": {
     "18": {
       "continuity": {
         "config_id": 18,
-        "now": "2026-11-12T01:50:02.831432+00:00",
+        "now": "2026-11-12T01:58:43.926437+00:00",
         "lookback_hours": 48,
-        "min_time": "2026-11-10 01:51:08.148677+00:00",
-        "max_time": "2026-11-12 01:48:25.415126+00:00",
-        "rows": 25248,
+        "min_time": "2026-11-10 01:59:06.291612+00:00",
+        "max_time": "2026-11-12 01:58:22.554047+00:00",
+        "rows": 25268,
         "distinct_digests": 25,
-        "distinct_time_points": 1555,
+        "distinct_time_points": 1556,
         "gap_count_gt_180s": 1,
         "gaps_sample": [
           {
@@ -25,20 +25,20 @@
             "seconds": 29353
           }
         ],
-        "first_time_point": "2026-11-10 01:51:08.148677+00:00",
-        "last_time_point": "2026-11-12 01:48:25.415126+00:00",
+        "first_time_point": "2026-11-10 01:59:06.291612+00:00",
+        "last_time_point": "2026-11-12 01:58:22.554047+00:00",
         "baseline_day_window": {
-          "from": "2026-11-10T01:50:02.831432+00:00",
-          "to": "2026-11-11T01:50:02.831432+00:00",
-          "rows": 14965,
+          "from": "2026-11-10T01:58:43.926437+00:00",
+          "to": "2026-11-11T01:58:43.926437+00:00",
+          "rows": 14881,
           "distinct_digests": 24,
-          "min_time": "2026-11-10 01:51:08.148677+00:00",
+          "min_time": "2026-11-10 01:59:06.291612+00:00",
           "max_time": "2026-11-11 00:53:07.704130+00:00"
         },
         "current_24h_window": {
-          "from": "2026-11-11T01:50:02.831432+00:00",
-          "to": "2026-11-12T01:50:02.831432+00:00",
-          "rows": 10283,
+          "from": "2026-11-11T01:58:43.926437+00:00",
+          "to": "2026-11-12T01:58:43.926437+00:00",
+          "rows": 10387,
           "distinct_digests": 21
         }
       },
@@ -48,13 +48,13 @@
         "http": 200,
         "kind": "昨日同时段环比 (baseline=day)",
         "window": {
-          "from": "2026-11-11T01:50:03.138199+00:00",
-          "to": "2026-11-12T01:50:03.138199+00:00"
+          "from": "2026-11-11T01:58:44.040944+00:00",
+          "to": "2026-11-12T01:58:44.040944+00:00"
         },
         "baseline": {
           "kind": "day",
-          "from": "2026-11-10T01:50:03.138199+00:00",
-          "to": "2026-11-11T01:50:03.138199+00:00"
+          "from": "2026-11-10T01:58:44.040944+00:00",
+          "to": "2026-11-11T01:58:44.040944+00:00"
         },
         "counts": {
           "regressed": 0,
@@ -159,13 +159,13 @@
         "http": 200,
         "kind": "上周同时段环比 (baseline=week)",
         "window": {
-          "from": "2026-11-11T01:50:03.773054+00:00",
-          "to": "2026-11-12T01:50:03.773054+00:00"
+          "from": "2026-11-11T01:58:44.191115+00:00",
+          "to": "2026-11-12T01:58:44.191115+00:00"
         },
         "baseline": {
           "kind": "week",
-          "from": "2026-11-04T01:50:03.773054+00:00",
-          "to": "2026-11-05T01:50:03.773054+00:00"
+          "from": "2026-11-04T01:58:44.191115+00:00",
+          "to": "2026-11-05T01:58:44.191115+00:00"
         },
         "counts": {
           "regressed": 0,
@@ -187,11 +187,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 103099,
+            "impact_ms": 104110,
             "current": {
-              "exec": 1089,
-              "total_ms": 103099,
-              "avg_ms": 94.673,
+              "exec": 1100,
+              "total_ms": 104110,
+              "avg_ms": 94.645,
               "rows_examined_per_exec": 9542.0,
               "lock_ms_per_exec": 0.0
             },
@@ -203,11 +203,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 77283,
+            "impact_ms": 77983,
             "current": {
-              "exec": 511,
-              "total_ms": 77283,
-              "avg_ms": 151.239,
+              "exec": 516,
+              "total_ms": 77983,
+              "avg_ms": 151.13,
               "rows_examined_per_exec": 159962.0,
               "lock_ms_per_exec": 0.0
             },
@@ -219,11 +219,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 74204,
+            "impact_ms": 74955,
             "current": {
-              "exec": 578,
-              "total_ms": 74204,
-              "avg_ms": 128.381,
+              "exec": 584,
+              "total_ms": 74955,
+              "avg_ms": 128.348,
               "rows_examined_per_exec": 14237.0,
               "lock_ms_per_exec": 0.0
             },
@@ -235,11 +235,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 63720,
+            "impact_ms": 64230,
             "current": {
-              "exec": 511,
-              "total_ms": 63720,
-              "avg_ms": 124.697,
+              "exec": 516,
+              "total_ms": 64230,
+              "avg_ms": 124.477,
               "rows_examined_per_exec": 9552.0,
               "lock_ms_per_exec": 0.0
             },
@@ -251,11 +251,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 51310,
+            "impact_ms": 51768,
             "current": {
-              "exec": 511,
-              "total_ms": 51310,
-              "avg_ms": 100.411,
+              "exec": 516,
+              "total_ms": 51768,
+              "avg_ms": 100.326,
               "rows_examined_per_exec": 157094.0,
               "lock_ms_per_exec": 0.0
             },
@@ -267,11 +267,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 7472,
+            "impact_ms": 7536,
             "current": {
-              "exec": 511,
-              "total_ms": 7472,
-              "avg_ms": 14.622,
+              "exec": 516,
+              "total_ms": 7536,
+              "avg_ms": 14.605,
               "rows_examined_per_exec": 9532.0,
               "lock_ms_per_exec": 0.0
             },
@@ -283,11 +283,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 6874,
+            "impact_ms": 6932,
             "current": {
-              "exec": 511,
-              "total_ms": 6874,
-              "avg_ms": 13.452,
+              "exec": 516,
+              "total_ms": 6932,
+              "avg_ms": 13.434,
               "rows_examined_per_exec": 9532.0,
               "lock_ms_per_exec": 0.0
             },
@@ -299,11 +299,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 518,
+            "impact_ms": 524,
             "current": {
-              "exec": 511,
-              "total_ms": 518,
-              "avg_ms": 1.014,
+              "exec": 516,
+              "total_ms": 524,
+              "avg_ms": 1.016,
               "rows_examined_per_exec": 97.0,
               "lock_ms_per_exec": 0.0
             },
@@ -315,11 +315,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 510,
+            "impact_ms": 516,
             "current": {
-              "exec": 511,
-              "total_ms": 510,
-              "avg_ms": 0.998,
+              "exec": 516,
+              "total_ms": 516,
+              "avg_ms": 1.0,
               "rows_examined_per_exec": 15.0,
               "lock_ms_per_exec": 0.0
             },
@@ -331,10 +331,10 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 285,
+            "impact_ms": 288,
             "current": {
-              "exec": 511,
-              "total_ms": 285,
+              "exec": 516,
+              "total_ms": 288,
               "avg_ms": 0.558,
               "rows_examined_per_exec": 314.0,
               "lock_ms_per_exec": 0.0
@@ -347,11 +347,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 204,
+            "impact_ms": 207,
             "current": {
-              "exec": 578,
-              "total_ms": 204,
-              "avg_ms": 0.353,
+              "exec": 584,
+              "total_ms": 207,
+              "avg_ms": 0.354,
               "rows_examined_per_exec": 4.5,
               "lock_ms_per_exec": 0.0
             },
@@ -363,11 +363,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 147,
+            "impact_ms": 148,
             "current": {
-              "exec": 511,
-              "total_ms": 147,
-              "avg_ms": 0.288,
+              "exec": 516,
+              "total_ms": 148,
+              "avg_ms": 0.287,
               "rows_examined_per_exec": 4.7,
               "lock_ms_per_exec": 0.0
             },
@@ -381,9 +381,9 @@
             "exec_ratio": null,
             "impact_ms": 102,
             "current": {
-              "exec": 511,
+              "exec": 516,
               "total_ms": 102,
-              "avg_ms": 0.2,
+              "avg_ms": 0.198,
               "rows_examined_per_exec": 2.8,
               "lock_ms_per_exec": 0.0
             },
@@ -395,11 +395,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 50,
+            "impact_ms": 52,
             "current": {
-              "exec": 511,
-              "total_ms": 50,
-              "avg_ms": 0.098,
+              "exec": 516,
+              "total_ms": 52,
+              "avg_ms": 0.101,
               "rows_examined_per_exec": 0.0,
               "lock_ms_per_exec": 0.0
             },
@@ -411,11 +411,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 40,
+            "impact_ms": 41,
             "current": {
-              "exec": 511,
-              "total_ms": 40,
-              "avg_ms": 0.078,
+              "exec": 516,
+              "total_ms": 41,
+              "avg_ms": 0.079,
               "rows_examined_per_exec": 1.8,
               "lock_ms_per_exec": 0.0
             },
@@ -429,7 +429,7 @@
             "exec_ratio": null,
             "impact_ms": 24,
             "current": {
-              "exec": 511,
+              "exec": 516,
               "total_ms": 24,
               "avg_ms": 0.047,
               "rows_examined_per_exec": 1.4,
@@ -445,7 +445,7 @@
             "exec_ratio": null,
             "impact_ms": 6,
             "current": {
-              "exec": 511,
+              "exec": 516,
               "total_ms": 6,
               "avg_ms": 0.012,
               "rows_examined_per_exec": 1.0,
@@ -461,7 +461,7 @@
             "exec_ratio": null,
             "impact_ms": 5,
             "current": {
-              "exec": 578,
+              "exec": 584,
               "total_ms": 5,
               "avg_ms": 0.009,
               "rows_examined_per_exec": 1.0,
@@ -477,7 +477,7 @@
             "exec_ratio": null,
             "impact_ms": 5,
             "current": {
-              "exec": 511,
+              "exec": 516,
               "total_ms": 5,
               "avg_ms": 0.01,
               "rows_examined_per_exec": 1.0,
@@ -493,7 +493,7 @@
             "exec_ratio": null,
             "impact_ms": 4,
             "current": {
-              "exec": 511,
+              "exec": 516,
               "total_ms": 4,
               "avg_ms": 0.008,
               "rows_examined_per_exec": 0.0,
@@ -522,10 +522,10 @@
       },
       "periodic": {
         "config_id": 18,
-        "query": "/api/v1/databases/18/perf/sql-periodic/?days=7",
+        "query": "/api/v1/databases/18/perf/sql-periodic/?days=3",
         "http": 200,
         "kind": "日周期 SQL (sql-periodic)",
-        "days": 7,
+        "days": 3,
         "rule": {
           "hour_share": 0.8,
           "max_hours": 6,
@@ -538,10 +538,10 @@
     "19": {
       "continuity": {
         "config_id": 19,
-        "now": "2026-11-12T01:50:05.010974+00:00",
+        "now": "2026-11-12T01:58:44.373524+00:00",
         "lookback_hours": 48,
-        "min_time": "2026-11-10 01:51:10.822532+00:00",
-        "max_time": "2026-11-12 01:49:41.271533+00:00",
+        "min_time": "2026-11-10 01:59:08.194653+00:00",
+        "max_time": "2026-11-12 01:57:30.675981+00:00",
         "rows": 24352,
         "distinct_digests": 25,
         "distinct_time_points": 1213,
@@ -553,20 +553,20 @@
             "seconds": 29353
           }
         ],
-        "first_time_point": "2026-11-10 01:51:10.822532+00:00",
-        "last_time_point": "2026-11-12 01:49:41.271533+00:00",
+        "first_time_point": "2026-11-10 01:59:08.194653+00:00",
+        "last_time_point": "2026-11-12 01:57:30.675981+00:00",
         "baseline_day_window": {
-          "from": "2026-11-10T01:50:05.010974+00:00",
-          "to": "2026-11-11T01:50:05.010974+00:00",
-          "rows": 14112,
+          "from": "2026-11-10T01:58:44.373524+00:00",
+          "to": "2026-11-11T01:58:44.373524+00:00",
+          "rows": 14032,
           "distinct_digests": 24,
-          "min_time": "2026-11-10 01:51:10.822532+00:00",
+          "min_time": "2026-11-10 01:59:08.194653+00:00",
           "max_time": "2026-11-11 00:53:09.847785+00:00"
         },
         "current_24h_window": {
-          "from": "2026-11-11T01:50:05.010974+00:00",
-          "to": "2026-11-12T01:50:05.010974+00:00",
-          "rows": 10240,
+          "from": "2026-11-11T01:58:44.373524+00:00",
+          "to": "2026-11-12T01:58:44.373524+00:00",
+          "rows": 10320,
           "distinct_digests": 21
         }
       },
@@ -576,13 +576,13 @@
         "http": 200,
         "kind": "昨日同时段环比 (baseline=day)",
         "window": {
-          "from": "2026-11-11T01:50:05.148216+00:00",
-          "to": "2026-11-12T01:50:05.148216+00:00"
+          "from": "2026-11-11T01:58:44.437529+00:00",
+          "to": "2026-11-12T01:58:44.437529+00:00"
         },
         "baseline": {
           "kind": "day",
-          "from": "2026-11-10T01:50:05.148216+00:00",
-          "to": "2026-11-11T01:50:05.148216+00:00"
+          "from": "2026-11-10T01:58:44.437529+00:00",
+          "to": "2026-11-11T01:58:44.437529+00:00"
         },
         "counts": {
           "regressed": 0,
@@ -687,13 +687,13 @@
         "http": 200,
         "kind": "上周同时段环比 (baseline=week)",
         "window": {
-          "from": "2026-11-11T01:50:05.442734+00:00",
-          "to": "2026-11-12T01:50:05.442734+00:00"
+          "from": "2026-11-11T01:58:44.535795+00:00",
+          "to": "2026-11-12T01:58:44.535795+00:00"
         },
         "baseline": {
           "kind": "week",
-          "from": "2026-11-04T01:50:05.442734+00:00",
-          "to": "2026-11-05T01:50:05.442734+00:00"
+          "from": "2026-11-04T01:58:44.535795+00:00",
+          "to": "2026-11-05T01:58:44.535795+00:00"
         },
         "counts": {
           "regressed": 0,
@@ -715,11 +715,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 103164,
+            "impact_ms": 104021,
             "current": {
-              "exec": 1090,
-              "total_ms": 103164,
-              "avg_ms": 94.646,
+              "exec": 1099,
+              "total_ms": 104021,
+              "avg_ms": 94.651,
               "rows_examined_per_exec": 9542.0,
               "lock_ms_per_exec": 0.0
             },
@@ -731,11 +731,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 77438,
+            "impact_ms": 77982,
             "current": {
-              "exec": 512,
-              "total_ms": 77438,
-              "avg_ms": 151.246,
+              "exec": 516,
+              "total_ms": 77982,
+              "avg_ms": 151.128,
               "rows_examined_per_exec": 159962.0,
               "lock_ms_per_exec": 0.0
             },
@@ -747,11 +747,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 74207,
+            "impact_ms": 74825,
             "current": {
-              "exec": 578,
-              "total_ms": 74207,
-              "avg_ms": 128.386,
+              "exec": 583,
+              "total_ms": 74825,
+              "avg_ms": 128.345,
               "rows_examined_per_exec": 14237.0,
               "lock_ms_per_exec": 0.0
             },
@@ -763,11 +763,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 63839,
+            "impact_ms": 64229,
             "current": {
-              "exec": 512,
-              "total_ms": 63839,
-              "avg_ms": 124.686,
+              "exec": 516,
+              "total_ms": 64229,
+              "avg_ms": 124.475,
               "rows_examined_per_exec": 9552.0,
               "lock_ms_per_exec": 0.0
             },
@@ -779,11 +779,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 51401,
+            "impact_ms": 51768,
             "current": {
-              "exec": 512,
-              "total_ms": 51401,
-              "avg_ms": 100.393,
+              "exec": 516,
+              "total_ms": 51768,
+              "avg_ms": 100.326,
               "rows_examined_per_exec": 157094.0,
               "lock_ms_per_exec": 0.0
             },
@@ -795,11 +795,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 7493,
+            "impact_ms": 7539,
             "current": {
-              "exec": 512,
-              "total_ms": 7493,
-              "avg_ms": 14.635,
+              "exec": 516,
+              "total_ms": 7539,
+              "avg_ms": 14.61,
               "rows_examined_per_exec": 9532.0,
               "lock_ms_per_exec": 0.0
             },
@@ -811,11 +811,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 6888,
+            "impact_ms": 6933,
             "current": {
-              "exec": 512,
-              "total_ms": 6888,
-              "avg_ms": 13.453,
+              "exec": 516,
+              "total_ms": 6933,
+              "avg_ms": 13.436,
               "rows_examined_per_exec": 9532.0,
               "lock_ms_per_exec": 0.0
             },
@@ -827,11 +827,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 525,
+            "impact_ms": 530,
             "current": {
-              "exec": 512,
-              "total_ms": 525,
-              "avg_ms": 1.025,
+              "exec": 516,
+              "total_ms": 530,
+              "avg_ms": 1.027,
               "rows_examined_per_exec": 97.0,
               "lock_ms_per_exec": 0.0
             },
@@ -843,11 +843,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 519,
+            "impact_ms": 524,
             "current": {
-              "exec": 512,
-              "total_ms": 519,
-              "avg_ms": 1.014,
+              "exec": 516,
+              "total_ms": 524,
+              "avg_ms": 1.016,
               "rows_examined_per_exec": 15.0,
               "lock_ms_per_exec": 0.0
             },
@@ -859,11 +859,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 285,
+            "impact_ms": 287,
             "current": {
-              "exec": 512,
-              "total_ms": 285,
-              "avg_ms": 0.557,
+              "exec": 516,
+              "total_ms": 287,
+              "avg_ms": 0.556,
               "rows_examined_per_exec": 314.0,
               "lock_ms_per_exec": 0.0
             },
@@ -875,11 +875,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 217,
+            "impact_ms": 220,
             "current": {
-              "exec": 578,
-              "total_ms": 217,
-              "avg_ms": 0.375,
+              "exec": 583,
+              "total_ms": 220,
+              "avg_ms": 0.377,
               "rows_examined_per_exec": 4.5,
               "lock_ms_per_exec": 0.0
             },
@@ -891,11 +891,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 137,
+            "impact_ms": 138,
             "current": {
-              "exec": 512,
-              "total_ms": 137,
-              "avg_ms": 0.268,
+              "exec": 516,
+              "total_ms": 138,
+              "avg_ms": 0.267,
               "rows_examined_per_exec": 4.7,
               "lock_ms_per_exec": 0.0
             },
@@ -909,9 +909,9 @@
             "exec_ratio": null,
             "impact_ms": 91,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 91,
-              "avg_ms": 0.178,
+              "avg_ms": 0.176,
               "rows_examined_per_exec": 2.8,
               "lock_ms_per_exec": 0.0
             },
@@ -925,9 +925,9 @@
             "exec_ratio": null,
             "impact_ms": 47,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 47,
-              "avg_ms": 0.092,
+              "avg_ms": 0.091,
               "rows_examined_per_exec": 0.0,
               "lock_ms_per_exec": 0.0
             },
@@ -939,11 +939,11 @@
             "status": "new",
             "avg_ratio": null,
             "exec_ratio": null,
-            "impact_ms": 34,
+            "impact_ms": 35,
             "current": {
-              "exec": 512,
-              "total_ms": 34,
-              "avg_ms": 0.066,
+              "exec": 516,
+              "total_ms": 35,
+              "avg_ms": 0.068,
               "rows_examined_per_exec": 1.8,
               "lock_ms_per_exec": 0.0
             },
@@ -957,7 +957,7 @@
             "exec_ratio": null,
             "impact_ms": 13,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 13,
               "avg_ms": 0.025,
               "rows_examined_per_exec": 1.4,
@@ -973,7 +973,7 @@
             "exec_ratio": null,
             "impact_ms": 6,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 6,
               "avg_ms": 0.012,
               "rows_examined_per_exec": 1.0,
@@ -989,7 +989,7 @@
             "exec_ratio": null,
             "impact_ms": 5,
             "current": {
-              "exec": 578,
+              "exec": 583,
               "total_ms": 5,
               "avg_ms": 0.009,
               "rows_examined_per_exec": 1.0,
@@ -1005,7 +1005,7 @@
             "exec_ratio": null,
             "impact_ms": 5,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 5,
               "avg_ms": 0.01,
               "rows_examined_per_exec": 1.0,
@@ -1021,7 +1021,7 @@
             "exec_ratio": null,
             "impact_ms": 4,
             "current": {
-              "exec": 512,
+              "exec": 516,
               "total_ms": 4,
               "avg_ms": 0.008,
               "rows_examined_per_exec": 0.0,
@@ -1050,10 +1050,10 @@
       },
       "periodic": {
         "config_id": 19,
-        "query": "/api/v1/databases/19/perf/sql-periodic/?days=7",
+        "query": "/api/v1/databases/19/perf/sql-periodic/?days=3",
         "http": 200,
         "kind": "日周期 SQL (sql-periodic)",
-        "days": 7,
+        "days": 3,
         "rule": {
           "hour_share": 0.8,
           "max_hours": 6,

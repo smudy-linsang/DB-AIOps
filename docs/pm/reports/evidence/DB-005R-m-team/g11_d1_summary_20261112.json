@@ -1,11 +1,12 @@
 {
   "slot": "d1_d3",
-  "generated_at": "2026-11-12T09:50:00.876490+08:00",
+  "generated_at": "2026-11-12T09:58:42.467288+08:00",
   "rcs": [
     0,
     0
   ],
-  "command_line": "C:\\DB-AIOps\\.venv\\Scripts\\python.exe C:\\DB-AIOps\\docs\\pm\\reports\\evidence\\DB-005R-m-team\\reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 7 --out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3.json --compact-out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3_compact.json",
+  "command_line": "C:\\DB-AIOps\\.venv\\Scripts\\python.exe C:\\DB-AIOps\\docs\\pm\\reports\\evidence\\DB-005R-m-team\\reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 3 --out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3.json --compact-out C:\\dispatcher\\probe_out\\db005r_g11_d1_d3_compact.json",
+  "periodic_days": 3,
   "note": "口令随机值只经环境变量传入，未落盘/未入库/未入证据",
   "day_baseline": {
     "18": {
@@ -38,7 +39,7 @@
       },
       "periodic": {
         "http": 200,
-        "days": 7,
+        "days": 3,
         "items_returned": 0,
         "rule": {
           "hour_share": 0.8,
@@ -47,11 +48,11 @@
         }
       },
       "continuity": {
-        "rows": 25248,
+        "rows": 25268,
         "distinct_digests": 25,
         "gap_count_gt_180s": 1,
-        "first_time_point": "2026-11-10 01:51:08.148677+00:00",
-        "last_time_point": "2026-11-12 01:48:25.415126+00:00"
+        "first_time_point": "2026-11-10 01:59:06.291612+00:00",
+        "last_time_point": "2026-11-12 01:58:22.554047+00:00"
       }
     },
     "19": {
@@ -84,7 +85,7 @@
       },
       "periodic": {
         "http": 200,
-        "days": 7,
+        "days": 3,
         "items_returned": 0,
         "rule": {
           "hour_share": 0.8,
@@ -96,8 +97,8 @@
         "rows": 24352,
         "distinct_digests": 25,
         "gap_count_gt_180s": 1,
-        "first_time_point": "2026-11-10 01:51:10.822532+00:00",
-        "last_time_point": "2026-11-12 01:49:41.271533+00:00"
+        "first_time_point": "2026-11-10 01:59:08.194653+00:00",
+        "last_time_point": "2026-11-12 01:57:30.675981+00:00"
       }
     }
   },
@@ -106,8 +107,8 @@
       "max_run_days": 3,
       "retention": {
         "min_time": "2026-11-05 12:32:58.414492+00:00",
-        "max_time": "2026-11-12 01:48:25.415126+00:00",
-        "rows": 105655,
+        "max_time": "2026-11-12 01:58:22.554047+00:00",
+        "rows": 105759,
         "distinct_digests": 52
       },
       "endpoint_sweep": [
@@ -275,8 +276,8 @@
       "max_run_days": 3,
       "retention": {
         "min_time": "2026-11-06 07:26:59.714245+00:00",
-        "max_time": "2026-11-12 01:49:41.271533+00:00",
-        "rows": 96839,
+        "max_time": "2026-11-12 01:57:30.675981+00:00",
+        "rows": 96919,
         "distinct_digests": 44
       },
       "endpoint_sweep": [

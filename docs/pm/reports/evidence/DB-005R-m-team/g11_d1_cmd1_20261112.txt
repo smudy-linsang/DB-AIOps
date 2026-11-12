@@ -1,5 +1,5 @@
 === cid=18 ===
-  retention min=2026-11-05 12:32:58.414492+00:00 max=2026-11-12 01:48:25.415126+00:00 rows=105655
+  retention min=2026-11-05 12:32:58.414492+00:00 max=2026-11-12 01:58:22.554047+00:00 rows=105759
   max_run_days=3 candidates=32
   days=3 required=3 http=200 items=0
   days=4 required=3 http=200 items=0
@@ -7,7 +7,7 @@
   days=6 required=5 http=200 items=0
   days=7 required=5 http=200 items=0
 === cid=19 ===
-  retention min=2026-11-06 07:26:59.714245+00:00 max=2026-11-12 01:49:41.271533+00:00 rows=96839
+  retention min=2026-11-06 07:26:59.714245+00:00 max=2026-11-12 01:57:30.675981+00:00 rows=96919
   max_run_days=3 candidates=24
   days=3 required=3 http=200 items=0
   days=4 required=3 http=200 items=0

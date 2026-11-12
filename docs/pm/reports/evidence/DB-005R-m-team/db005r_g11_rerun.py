@@ -3,7 +3,7 @@
 """DB-005R 补充单：复跑（同一脚本、同一接口、同一命令）。
 
 固定命令（与 v1.1 / v1.2 轮次完全一致）：
-  reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 7
+  reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days <按 slot 口径表 SLOT_PERIODIC_DAYS>
   reproduce_g11_periodic_gate.py --cid 18 --cid2 19
 
 时段标签（--slot 显式给出；由计划任务参数决定，不用时间推断）：
@@ -32,6 +32,12 @@ OUT_DIR = r'C:\dispatcher\probe_out'
 LOG = r'C:\dispatcher\db005r_g11_rerun.log'
 BASE = 'http://127.0.0.1:8009'
 LOCAL_TZ = dt_tz(timedelta(hours=8))
+SLOT_PERIODIC_DAYS = {'d1_d3': 3, 'd2_d3': 3, 'week_c18': 7, 'week_c19': 7, 'week_mature': 7}
+# 口径表来源：DB-005R 补充单《恢复采集与新窗口重证》v1.0（muse 2026-11-11 16:56 签署）
+#   §二.3 D1（11-12 09:50）复判 days=3；§二.4 D2（11-15 09:50）复判 days=3；
+#   §二.5 week_* 上周同时段轮次沿用 days=7。
+# PM 裁决：days=7 在并行双跑下两路皆不可达，days=3 为唯一可达口径（g11_gate_math_magnitudes.json）。
+# 原缺陷：口径表缺失，argparse 缺省 7 静默覆盖 slot 口径 —— D1 曾于 11-12 09:50 以 days=7 跑过一轮。
 
 
 def log(msg):
@@ -56,8 +62,13 @@ def main():
     ap.add_argument('--cid', type=int, default=18)
     ap.add_argument('--cid2', type=int, default=19)
     ap.add_argument('--window', default='24h')
-    ap.add_argument('--periodic-days', type=int, default=7)
+    ap.add_argument('--periodic-days', type=int, default=None,
+                    help='日周期判定天数；缺省按 slot 口径表 SLOT_PERIODIC_DAYS')
     args = ap.parse_args()
+    if args.slot not in SLOT_PERIODIC_DAYS:
+        raise SystemExit('unknown slot=%s: not covered by SLOT_PERIODIC_DAYS; pass --periodic-days explicitly' % args.slot)
+    if args.periodic_days is None:
+        args.periodic_days = SLOT_PERIODIC_DAYS[args.slot]
     os.makedirs(OUT_DIR, exist_ok=True)
     now = datetime.now(LOCAL_TZ)
     tag = args.slot
@@ -78,9 +89,10 @@ def main():
     for i, cmd in enumerate(cmds):
         rc = run(cmd, env, os.path.join(OUT_DIR, 'db005r_g11_%s_cmd%d.log' % (tag, i)))
         rcs.append(rc)
-        log('slot=%s cmd%d rc=%s' % (tag, i, rc))
+        log('slot=%s days=%s cmd%d rc=%s' % (tag, args.periodic_days, i, rc))
     summary = {'slot': tag, 'generated_at': now.isoformat(), 'rcs': rcs,
                'command_line': ' '.join(cmds[0]),
+               'periodic_days': args.periodic_days,
                'note': '口令随机值只经环境变量传入，未落盘/未入库/未入证据'}
     for name, path in (('day_baseline', day_out), ('periodic_gate', gate_out)):
         try:
@@ -117,7 +129,7 @@ def main():
     sum_path = os.path.join(OUT_DIR, 'db005r_g11_%s_summary.json' % tag)
     with open(sum_path, 'w', encoding='utf-8') as fh:
         json.dump(summary, fh, ensure_ascii=False, indent=2, default=str)
-    log('slot=%s DONE rcs=%s -> %s' % (tag, rcs, sum_path))
+    log('slot=%s days=%s DONE rcs=%s -> %s' % (tag, args.periodic_days, rcs, sum_path))
     try:
         print(json.dumps(summary, ensure_ascii=False, indent=2, default=str)[:3000])
     except Exception:
