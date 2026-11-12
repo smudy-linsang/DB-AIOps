@@ -2,15 +2,15 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 59,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 58 份（含 README-evidence.md）。目录实有文件数 = file_count = 59。",
- "total_bytes": 507686,
- "total_bytes_note": "files 列表 58 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 61,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 60 份（含 README-evidence.md）。目录实有文件数 = file_count = 61。",
+ "total_bytes": 512644,
+ "total_bytes_note": "files 列表 60 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "README-evidence.md",
    "desc": "证据清单与复现命令说明",
-   "bytes": 17439,
+   "bytes": 18147,
    "masked": false
   },
   {
@@ -92,6 +92,12 @@
    "masked": true
   },
   {
+   "file": "g11_bucket_verify_20261112.json",
+   "desc": "G-11 新窗口首日连驱落库只读核验（2026-11-12 16:05，任务 MMMan-DBAIOps-G11BucketVerify）：workload digest 1581b156… 在 cid=18/19 的 11-12 15:00 本地小时桶执行量（各 21520）+ 采集间隙（>180s = 0，只覆盖最近 30 分钟）",
+   "bytes": 1580,
+   "masked": true
+  },
+  {
    "file": "g11_collection_gap_20261111.json",
    "desc": "采集中断量化：两路最后采样 08:53:09/08:53:07，至 16:07 中断 434 分钟，11-11 09:00 起无任何 sql_stat 采样行、15:00 桶整桶无数据",
    "bytes": 1705,
@@ -131,6 +137,12 @@
    "file": "g11_drive_20261111.json",
    "desc": "G-11 第三轮人工连驱未执行取证（2026-11-11 15:05:02 计划任务触发、Last Result=1，驱动日志无当日任何条目，两路 workload run 均未启动）",
    "bytes": 1147,
+   "masked": true
+  },
+  {
+   "file": "g11_drive_20261112.json",
+   "desc": "G-11 新窗口首日人工连驱（2026-11-12 15:05-15:50，计划任务 MMMan-DBAIOps-G11DailyDrive 自动触发、Last Result 0）：两路 workload run 模式 rc=0、客户端侧各查询次数与平均耗时（只读 SELECT，无改数据/索引副作用）",
+   "bytes": 2670,
    "masked": true
   },
   {
@@ -357,7 +369,7 @@
   }
  ],
  "scan_hits": 0,
- "scan_scope": "38 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json 及 11-12 D1 复判 6 份）—— 沿用 v1.0 口径",
+ "scan_scope": "40 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json 及 11-12 D1 复判 6 份）—— 沿用 v1.0 口径",
  "scan_note": "11-10 连驱入库后重新扫描，命中 0。另说明：19 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
  "scan_list": [
   "127.0.0.1",

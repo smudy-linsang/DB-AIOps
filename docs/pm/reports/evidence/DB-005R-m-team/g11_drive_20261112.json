@@ -1,0 +1,107 @@
+{
+  "drive_date": "2026-11-12",
+  "window_local": "15:00-16:00 (+08:00)",
+  "driver_script": "C:\\dispatcher\\g11_daily_drive.py",
+  "scheduled_task": "MMMan-DBAIOps-G11DailyDrive",
+  "workload_mode": "run（纯只读 SELECT；不跑 load/index/drop/lockwait/batch）",
+  "task_last_result": 0,
+  "events": [
+    {
+      "event": "drive_start",
+      "minutes": 45,
+      "targets": [
+        {
+          "cid": 19,
+          "instance": "<instance-mysql>",
+          "db": "aiops_probe_shop"
+        },
+        {
+          "cid": 18,
+          "instance": "<instance-proxy>",
+          "db": "aiops_probe_shop"
+        }
+      ],
+      "at": "2026-11-12 15:05:02"
+    },
+    {
+      "event": "drive_instance_done",
+      "cid": 19,
+      "rc": 0,
+      "at": "2026-11-12 15:50:03"
+    },
+    {
+      "event": "drive_instance_done",
+      "cid": 18,
+      "rc": 0,
+      "at": "2026-11-12 15:50:03"
+    },
+    {
+      "event": "drive_done",
+      "results": [
+        {
+          "cid": 19,
+          "rc": 0
+        },
+        {
+          "cid": 18,
+          "rc": 0
+        }
+      ],
+      "at": "2026-11-12 15:50:03"
+    }
+  ],
+  "client_summary": {
+    "19": {
+      "instance": "<instance-mysql>",
+      "queries": [
+        {
+          "name": "agg_no_shardkey",
+          "count": 528,
+          "avg_ms": 44.9
+        },
+        {
+          "name": "pk_lookup",
+          "count": 10777,
+          "avg_ms": 2.5
+        },
+        {
+          "name": "range_no_key",
+          "count": 533,
+          "avg_ms": 18.0
+        },
+        {
+          "name": "slow_user_sort",
+          "count": 1619,
+          "avg_ms": 23.5
+        }
+      ]
+    },
+    "18": {
+      "instance": "<instance-proxy>",
+      "queries": [
+        {
+          "name": "agg_no_shardkey",
+          "count": 526,
+          "avg_ms": 46.9
+        },
+        {
+          "name": "pk_lookup",
+          "count": 10750,
+          "avg_ms": 5.2
+        },
+        {
+          "name": "range_no_key",
+          "count": 553,
+          "avg_ms": 21.6
+        },
+        {
+          "name": "slow_user_sort",
+          "count": 1628,
+          "avg_ms": 26.6
+        }
+      ]
+    }
+  },
+  "side_effects": "只读 SELECT；未改表结构、未改数据、未动索引；未重启采集器(PID 42500，起 2026-11-11 16:59:13)与 Web(PID 19756，起 2026-11-11 17:06:10)；凭据仅经环境变量传入子进程，不落盘、不入库、不入证据、不入日志。",
+  "note": "当日由计划任务 MMMan-DBAIOps-G11DailyDrive 于 15:05:01 自动触发（Last Result 0），未做人工补跑；两路并行＝同一后端双跑，故两路 15 点桶执行量相同（均 21520）。"
+}
