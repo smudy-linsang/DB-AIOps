@@ -124,6 +124,12 @@ watcher 继续留用；**本单对任何 watcher/定时任务/常驻进程均未
 当前 main 头 `eb075c6`（**包含本单两个提交**，`git merge-base --is-ancestor 554c2a3 origin/main` 退出码 0）上重跑结果为
 三个 workflow 全部 completed / success、`CI` 7 个 job 逐个 success（含集成测试（PostgreSQL）），即 main 现态为全绿。
 
+**再补记（本 v1.2 提交自身的 CI 轮次同样被并发推送取消）**：v1.2 提交 `2d3fb69` 触发的 CI 轮次（run 43190556704）
+亦因其它会话更晚推送而被取消，被取消时 7 个 job 中 2 个已 success、5 个 cancelled，**无 failed 红灯**。
+随后 main 头推进到 `ab8c543`（**仍含本单全部四个提交** `7347a62`/`d4d1066`/`554c2a3`/`2d3fb69`，
+`git merge-base --is-ancestor 2d3fb69 origin/main` 退出码 0），该头上三个 workflow 全部 completed / success、
+`CI` 7 个 job 逐个 **success**（含集成测试（PostgreSQL））⇒ **main 现态全绿，无红灯、无回滚需要**。
+
 ---
 
-版本：v1.2 ｜ 2026-11-12 ｜ MMMan（v1.2 补记 v1.1 轮次 CI 被并发推送取消一事与当前 main 头重跑全绿结果，结论档位不变）
+版本：v1.3 ｜ 2026-11-12 ｜ MMMan（v1.3 补记 v1.2 轮次 CI 被并发推送取消一事与当前 main 头 ab8c543 重跑全绿结果，结论档位不变）
