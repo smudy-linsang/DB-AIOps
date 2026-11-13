@@ -1,0 +1,24 @@
+{
+  "container": "db-aiops-timescaledb",
+  "checked_at": "2026-11-13 11:58:08",
+  "max_connections": 100,
+  "superuser_reserved": 3,
+  "total_backends": 17,
+  "client_backends": 8,
+  "by_state": {
+    "idle": 7,
+    "active": 1
+  },
+  "by_application_name": {
+    "db_monitor": 4,
+    "(none)": 3,
+    "psql": 1
+  },
+  "oldest_backend_start": "2026-11-13 02:27:12",
+  "usage_pct": 17.0,
+  "host_tcp_established_by_pid": {
+    "40492": 7
+  },
+  "threshold_pct": 80,
+  "alert": false
+}
