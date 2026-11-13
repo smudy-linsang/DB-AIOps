@@ -1,0 +1,30 @@
+{
+  "title": "DB-023 补充实库补证证据（GorkMan）",
+  "captured_at_host": "2026-11-13T10:34:45+08:00",
+  "captured_at_pst": "2026-11-12T18:34:45-08:00",
+  "channel": "DB-009 verified: DatabaseConfig + monitor.db_connector.get_connector",
+  "host_git_head": "1d8ebbf5f7ca4c005bfe962c6a3f4ceeca911c2a",
+  "mask": "local host / user home / dm port masked; passwords never written",
+  "files": [
+    {
+      "name": "db023_live_results.json",
+      "bytes": 20095,
+      "sha256": "f309c482f17395c0e1aed4c650dc0909d6374e4a21d1e526bb86e018fcdba8c5"
+    },
+    {
+      "name": "db023_live_results.txt",
+      "bytes": 5023,
+      "sha256": "73703c45fd215663d103e97f912ab736fd98af032ca5806389d855e03bfc27e1"
+    },
+    {
+      "name": "db023_gbase_diag.json",
+      "bytes": 7941,
+      "sha256": "05a9cc37b239e4c014b038a484b4d810cbcf538b29db6fff3184ac7aaba94849"
+    },
+    {
+      "name": "db023_extra_inventory.json",
+      "bytes": 12250,
+      "sha256": "7c7dcb94ba0e7e0c050cc800466c76f9cd0cf000d897d790a9bab23d8ebc2375"
+    }
+  ]
+}

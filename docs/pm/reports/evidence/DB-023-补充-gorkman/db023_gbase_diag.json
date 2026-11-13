@@ -1,0 +1,216 @@
+{
+  "captured_at": "2026-11-13T10:37:13+08:00",
+  "id": 11,
+  "service_name_empty": true,
+  "current_db": {
+    "database": null,
+    "version": "8.6.2.43-R7-free.110605"
+  },
+  "databases": [
+    "information_schema",
+    "performance_schema",
+    "gbase",
+    "gclusterdb",
+    "gctmpdb"
+  ],
+  "no_db_queries": [
+    {
+      "name": "node_info",
+      "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+      "ok": false,
+      "error": "OperationalError: (1046, 'No database selected')"
+    },
+    {
+      "name": "table_distribution",
+      "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+      "ok": false,
+      "error": "OperationalError: (1046, 'No database selected')"
+    },
+    {
+      "name": "like_node",
+      "sql": "SELECT TABLE_SCHEMA, TABLE_NAME FROM information_schema.tables WHERE TABLE_NAME LIKE '%node%' OR TABLE_NAME LIKE '%distribut%' OR TABLE_NAME LIKE '%gcluster%'",
+      "ok": true,
+      "row_count": 1,
+      "rows": [
+        {
+          "TABLE_SCHEMA": "gbase",
+          "TABLE_NAME": "table_distribution"
+        }
+      ]
+    }
+  ],
+  "per_database": [
+    {
+      "database": "information_schema",
+      "use": {
+        "ok": true
+      },
+      "queries": [
+        {
+          "name": "node_info",
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "ok": false,
+          "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$node_info' in information_schema\")"
+        },
+        {
+          "name": "table_distribution",
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "ok": false,
+          "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$table_distribution' in information_schema\")"
+        }
+      ]
+    },
+    {
+      "database": "performance_schema",
+      "use": {
+        "ok": true
+      },
+      "queries": [
+        {
+          "name": "node_info",
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "ok": false,
+          "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$node_info' in performance_schema\")"
+        },
+        {
+          "name": "table_distribution",
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "ok": false,
+          "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$table_distribution' in performance_schema\")"
+        }
+      ]
+    },
+    {
+      "database": "gbase",
+      "use": {
+        "ok": true
+      },
+      "queries": [
+        {
+          "name": "node_info",
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gbase.gcluster_v$node_info' doesn't exist\")"
+        },
+        {
+          "name": "table_distribution",
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gbase.gcluster_v$table_distribution' doesn't exist\")"
+        }
+      ]
+    },
+    {
+      "database": "gclusterdb",
+      "use": {
+        "ok": true
+      },
+      "queries": [
+        {
+          "name": "node_info",
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gclusterdb.gcluster_v$node_info' doesn't exist\")"
+        },
+        {
+          "name": "table_distribution",
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gclusterdb.gcluster_v$table_distribution' doesn't exist\")"
+        }
+      ]
+    },
+    {
+      "database": "gctmpdb",
+      "use": {
+        "ok": true
+      },
+      "queries": [
+        {
+          "name": "node_info",
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gctmpdb.gcluster_v$node_info' doesn't exist\")"
+        },
+        {
+          "name": "table_distribution",
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "ok": false,
+          "error": "ProgrammingError: (1146, \"Table 'gctmpdb.gcluster_v$table_distribution' doesn't exist\")"
+        }
+      ]
+    }
+  ],
+  "qualified": [
+    {
+      "database": "information_schema",
+      "view": "gcluster_v$node_info",
+      "sql": "SELECT * FROM `information_schema`.`gcluster_v$node_info` LIMIT 20",
+      "ok": false,
+      "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$node_info' in information_schema\")"
+    },
+    {
+      "database": "information_schema",
+      "view": "gcluster_v$table_distribution",
+      "sql": "SELECT * FROM `information_schema`.`gcluster_v$table_distribution` LIMIT 20",
+      "ok": false,
+      "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$table_distribution' in information_schema\")"
+    },
+    {
+      "database": "performance_schema",
+      "view": "gcluster_v$node_info",
+      "sql": "SELECT * FROM `performance_schema`.`gcluster_v$node_info` LIMIT 20",
+      "ok": false,
+      "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$node_info' in performance_schema\")"
+    },
+    {
+      "database": "performance_schema",
+      "view": "gcluster_v$table_distribution",
+      "sql": "SELECT * FROM `performance_schema`.`gcluster_v$table_distribution` LIMIT 20",
+      "ok": false,
+      "error": "OperationalError: (1109, \"Unknown table 'gcluster_v$table_distribution' in performance_schema\")"
+    },
+    {
+      "database": "gbase",
+      "view": "gcluster_v$node_info",
+      "sql": "SELECT * FROM `gbase`.`gcluster_v$node_info` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gbase.gcluster_v$node_info' doesn't exist\")"
+    },
+    {
+      "database": "gbase",
+      "view": "gcluster_v$table_distribution",
+      "sql": "SELECT * FROM `gbase`.`gcluster_v$table_distribution` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gbase.gcluster_v$table_distribution' doesn't exist\")"
+    },
+    {
+      "database": "gclusterdb",
+      "view": "gcluster_v$node_info",
+      "sql": "SELECT * FROM `gclusterdb`.`gcluster_v$node_info` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gclusterdb.gcluster_v$node_info' doesn't exist\")"
+    },
+    {
+      "database": "gclusterdb",
+      "view": "gcluster_v$table_distribution",
+      "sql": "SELECT * FROM `gclusterdb`.`gcluster_v$table_distribution` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gclusterdb.gcluster_v$table_distribution' doesn't exist\")"
+    },
+    {
+      "database": "gctmpdb",
+      "view": "gcluster_v$node_info",
+      "sql": "SELECT * FROM `gctmpdb`.`gcluster_v$node_info` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gctmpdb.gcluster_v$node_info' doesn't exist\")"
+    },
+    {
+      "database": "gctmpdb",
+      "view": "gcluster_v$table_distribution",
+      "sql": "SELECT * FROM `gctmpdb`.`gcluster_v$table_distribution` LIMIT 20",
+      "ok": false,
+      "error": "ProgrammingError: (1146, \"Table 'gctmpdb.gcluster_v$table_distribution' doesn't exist\")"
+    }
+  ]
+}

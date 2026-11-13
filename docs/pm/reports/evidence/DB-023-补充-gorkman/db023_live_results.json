@@ -1,0 +1,524 @@
+{
+  "captured_at": "2026-11-13T10:34:45+08:00",
+  "captured_at_utc": "2026-11-13T02:34:45+00:00",
+  "host_repo": "C:\\DB-AIOps",
+  "host_git_head": "1d8ebbf5f7ca4c005bfe962c6a3f4ceeca911c2a",
+  "connector": "monitor.db_connector.get_connector (DB-009 verified channel)",
+  "instances": {
+    "dm": {
+      "preferred_id": 9,
+      "candidates": [
+        {
+          "id": 9,
+          "name": "DM_测试库",
+          "db_type": "dm",
+          "is_active": true,
+          "port": "<dm-port>",
+          "preferred": true
+        }
+      ],
+      "chosen": {
+        "id": 9,
+        "name": "DM_测试库",
+        "db_type": "dm",
+        "port": "<dm-port>",
+        "username_len": 6,
+        "password_len": 9
+      },
+      "connected": true,
+      "connect_ms": 74
+    },
+    "gbase": {
+      "preferred_id": 11,
+      "candidates": [
+        {
+          "id": 11,
+          "name": "GBase8A_测试库",
+          "db_type": "gbase",
+          "is_active": true,
+          "port": 5258,
+          "preferred": true
+        },
+        {
+          "id": 15,
+          "name": "probe-gbase",
+          "db_type": "gbase",
+          "is_active": true,
+          "port": 5258,
+          "preferred": false
+        }
+      ],
+      "chosen": {
+        "id": 11,
+        "name": "GBase8A_测试库",
+        "db_type": "gbase",
+        "port": 5258,
+        "username_len": 4,
+        "password_len": 4
+      },
+      "connected": true,
+      "connect_ms": 49
+    }
+  },
+  "identity": {
+    "dm": [
+      {
+        "name": "v_instance",
+        "sql": "SELECT ID_CODE, NAME, STATUS, MODE$, SVR_VERSION FROM V$INSTANCE",
+        "started_at": "2026-11-13T10:34:45+08:00",
+        "ok": false,
+        "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')",
+        "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\npyodbc.ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')\n",
+        "elapsed_ms": 5
+      },
+      {
+        "name": "v_database",
+        "sql": "SELECT NAME, DSC_NODES, ARCH_MODE, ROLE$ FROM V$DATABASE",
+        "started_at": "2026-11-13T10:34:45+08:00",
+        "ok": true,
+        "columns": [
+          "NAME",
+          "DSC_NODES",
+          "ARCH_MODE",
+          "ROLE$"
+        ],
+        "row_count": 1,
+        "rows": [
+          {
+            "NAME": "DAMENG",
+            "DSC_NODES": 1,
+            "ARCH_MODE": "N",
+            "ROLE$": 0
+          }
+        ],
+        "elapsed_ms": 0
+      }
+    ],
+    "gbase": [
+      {
+        "name": "version",
+        "sql": "SELECT VERSION() AS ver",
+        "started_at": "2026-11-13T10:34:45+08:00",
+        "ok": true,
+        "columns": [
+          "ver"
+        ],
+        "row_count": 1,
+        "rows": [
+          {
+            "ver": "8.6.2.43-R7-free.110605"
+          }
+        ],
+        "elapsed_ms": 2
+      },
+      {
+        "name": "database",
+        "sql": "SELECT DATABASE() AS dbname",
+        "started_at": "2026-11-13T10:34:45+08:00",
+        "ok": true,
+        "columns": [
+          "dbname"
+        ],
+        "row_count": 1,
+        "rows": [
+          {
+            "dbname": null
+          }
+        ],
+        "elapsed_ms": 1
+      }
+    ]
+  },
+  "items": [
+    {
+      "item_id": "INS-DM-DSC",
+      "title": "DSC 节点状态",
+      "dialect": "dm",
+      "notes": null,
+      "sql_results": [
+        {
+          "sql": "SELECT DSC_NODES FROM V$DATABASE",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "DSC_NODES"
+          ],
+          "row_count": 1,
+          "rows": [
+            {
+              "DSC_NODES": 1
+            }
+          ],
+          "elapsed_ms": 0,
+          "name": "dsc_nodes"
+        },
+        {
+          "sql": "SELECT EP_SEQNO, EP_NAME, EP_STATUS FROM V$DSC_EP_INFO",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "EP_SEQNO",
+            "EP_NAME",
+            "EP_STATUS"
+          ],
+          "row_count": 0,
+          "rows": [],
+          "elapsed_ms": 1,
+          "name": "dsc_ep_info"
+        },
+        {
+          "sql": "SELECT INST_ID, INST_NAME, STATUS FROM V$DSC_INSTANCES",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": false,
+          "error": "ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$DSC_INSTANCES] (-2106) (SQLExecDirectW)')",
+          "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\npyodbc.ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\\n无效的表或视图名[V$DSC_INSTANCES] (-2106) (SQLExecDirectW)')\n",
+          "elapsed_ms": 0,
+          "name": "dsc_instances"
+        }
+      ],
+      "detector": {
+        "method": "detect_dsc_nodes",
+        "ok": true,
+        "result": {
+          "item_id": "INS-DM-DSC",
+          "item_title": "DSC 节点状态",
+          "detection_method": "detect_dsc_nodes",
+          "status": "skip",
+          "severity": "info",
+          "summary": "DSC_NODES=1，非多节点 DSC，不适用（不用 V$INSTANCE 行数代替节点数）",
+          "error": null,
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 8
+      }
+    },
+    {
+      "item_id": "INS-DM-DW-STANDBY",
+      "title": "主备同步状态",
+      "dialect": "dm",
+      "notes": null,
+      "sql_results": [
+        {
+          "sql": "SELECT ROLE$ FROM V$DATABASE",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "ROLE$"
+          ],
+          "row_count": 1,
+          "rows": [
+            {
+              "ROLE$": 0
+            }
+          ],
+          "elapsed_ms": 0,
+          "name": "role"
+        },
+        {
+          "sql": "SELECT MODE$ FROM V$INSTANCE",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "MODE$"
+          ],
+          "row_count": 1,
+          "rows": [
+            {
+              "MODE$": "NORMAL"
+            }
+          ],
+          "elapsed_ms": 0,
+          "name": "mode"
+        },
+        {
+          "sql": "SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "ARCH_TYPE",
+            "ARCH_DEST",
+            "ARCH_STATUS",
+            "ARCH_SRC"
+          ],
+          "row_count": 0,
+          "rows": [],
+          "elapsed_ms": 0,
+          "name": "arch_status"
+        }
+      ],
+      "detector": {
+        "method": "detect_dw_standby",
+        "ok": true,
+        "result": {
+          "item_id": "INS-DM-DW-STANDBY",
+          "item_title": "主备同步状态",
+          "detection_method": "detect_dw_standby",
+          "status": "skip",
+          "severity": "info",
+          "summary": "未配置 DataWatch 备库，不适用（不把 PRIMARY 标成健康）",
+          "error": null,
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 14
+      }
+    },
+    {
+      "item_id": "INS-DM-ARCH",
+      "title": "归档状态",
+      "dialect": "dm",
+      "notes": null,
+      "sql_results": [
+        {
+          "sql": "SELECT ARCH_MODE FROM V$DATABASE",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "ARCH_MODE"
+          ],
+          "row_count": 1,
+          "rows": [
+            {
+              "ARCH_MODE": "N"
+            }
+          ],
+          "elapsed_ms": 0,
+          "name": "arch_mode"
+        },
+        {
+          "sql": "SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "ARCH_TYPE",
+            "ARCH_DEST",
+            "ARCH_STATUS",
+            "ARCH_SRC"
+          ],
+          "row_count": 0,
+          "rows": [],
+          "elapsed_ms": 0,
+          "name": "arch_status"
+        },
+        {
+          "sql": "SELECT COUNT(*) AS cnt FROM V$ARCH_FILE",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "cnt"
+          ],
+          "row_count": 1,
+          "rows": [
+            {
+              "cnt": 0
+            }
+          ],
+          "elapsed_ms": 0,
+          "name": "arch_file_count"
+        }
+      ],
+      "detector": {
+        "method": "detect_dm_arch",
+        "ok": true,
+        "result": {
+          "item_id": "INS-DM-ARCH",
+          "item_title": "归档状态",
+          "detection_method": "detect_dm_arch",
+          "status": "critical",
+          "severity": "critical",
+          "summary": "归档未开启（ARCH_MODE=N）",
+          "error": null,
+          "findings": [
+            {
+              "type": "dm_arch",
+              "band": "critical",
+              "message": "归档未开启（ARCH_MODE=N）"
+            }
+          ],
+          "metrics": {
+            "grade": 3.0,
+            "threshold_band": "critical",
+            "arch_mode": "N",
+            "arch_files": 0
+          },
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 15
+      }
+    },
+    {
+      "item_id": "INS-DM-RLOG",
+      "title": "RLOG 同步状态",
+      "dialect": "dm",
+      "notes": "SQL 不含 V$RLOG",
+      "sql_results": [
+        {
+          "sql": "SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": true,
+          "columns": [
+            "ARCH_TYPE",
+            "ARCH_DEST",
+            "ARCH_STATUS",
+            "ARCH_SRC"
+          ],
+          "row_count": 0,
+          "rows": [],
+          "elapsed_ms": 0,
+          "name": "arch_status"
+        }
+      ],
+      "detector": {
+        "method": "detect_dm_rlog",
+        "ok": true,
+        "result": {
+          "item_id": "INS-DM-RLOG",
+          "item_title": "RLOG 同步状态",
+          "detection_method": "detect_dm_rlog",
+          "status": "skip",
+          "severity": "info",
+          "summary": "无实时 RLOG 同步对象，不适用（不使用 V$RLOG 偏移或水位冒充同步进度）",
+          "error": null,
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 14
+      }
+    },
+    {
+      "item_id": "INS-GBASE-BALANCE",
+      "title": "节点负载均衡",
+      "dialect": "gbase",
+      "notes": null,
+      "sql_results": [
+        {
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": false,
+          "error": "OperationalError: (1046, 'No database selected')",
+          "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 159, in execute\n    result = self._query(query)\n             ^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 330, in _query\n    conn.query(q)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 582, in query\n    self._affected_rows = self._read_query_result(unbuffered=unbuffered)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 847, in _read_query_result\n    result.read()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 1245, in read\n    first_packet = self.connection._read_packet()\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 803, in _read_packet\n    packet.raise_for_error()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\protocol.py\", line 219, in raise_for_error\n    err.raise_mysql_exception(self._data)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\err.py\", line 154, in raise_mysql_exception\n    raise errorclass(errno, errval, sqlstate=sqlstate)\npymysql.err.OperationalError: (1046, 'No database selected')\n",
+          "elapsed_ms": 4,
+          "name": "node_info"
+        }
+      ],
+      "detector": {
+        "method": "detect_gbase_node_balance",
+        "ok": true,
+        "result": {
+          "item_id": "INS-GBASE-BALANCE",
+          "item_title": "节点负载均衡",
+          "detection_method": "detect_gbase_node_balance",
+          "status": "error",
+          "severity": "info",
+          "summary": "检测失败: (1046, 'No database selected')",
+          "error": "OperationalError: (1046, 'No database selected')",
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 22
+      }
+    },
+    {
+      "item_id": "INS-GBASE-DIST",
+      "title": "数据分布均衡",
+      "dialect": "gbase",
+      "notes": "实库若无此视图或视图名不同，检测结果记 error，不得写成均衡",
+      "sql_results": [
+        {
+          "sql": "SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": false,
+          "error": "OperationalError: (1046, 'No database selected')",
+          "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 159, in execute\n    result = self._query(query)\n             ^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 330, in _query\n    conn.query(q)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 582, in query\n    self._affected_rows = self._read_query_result(unbuffered=unbuffered)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 847, in _read_query_result\n    result.read()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 1245, in read\n    first_packet = self.connection._read_packet()\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 803, in _read_packet\n    packet.raise_for_error()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\protocol.py\", line 219, in raise_for_error\n    err.raise_mysql_exception(self._data)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\err.py\", line 154, in raise_mysql_exception\n    raise errorclass(errno, errval, sqlstate=sqlstate)\npymysql.err.OperationalError: (1046, 'No database selected')\n",
+          "elapsed_ms": 1,
+          "name": "table_distribution"
+        }
+      ],
+      "detector": {
+        "method": "detect_gbase_distribution",
+        "ok": true,
+        "result": {
+          "item_id": "INS-GBASE-DIST",
+          "item_title": "数据分布均衡",
+          "detection_method": "detect_gbase_distribution",
+          "status": "error",
+          "severity": "info",
+          "summary": "检测失败: (1046, 'No database selected')",
+          "error": "OperationalError: (1046, 'No database selected')",
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 36
+      }
+    },
+    {
+      "item_id": "INS-GBASE-NODE-DOWN",
+      "title": "节点宕机",
+      "dialect": "gbase",
+      "notes": "0 行记 error，不得写成无宕机",
+      "sql_results": [
+        {
+          "sql": "SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info",
+          "started_at": "2026-11-13T10:34:45+08:00",
+          "ok": false,
+          "error": "OperationalError: (1046, 'No database selected')",
+          "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 159, in execute\n    result = self._query(query)\n             ^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\cursors.py\", line 330, in _query\n    conn.query(q)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 582, in query\n    self._affected_rows = self._read_query_result(unbuffered=unbuffered)\n                          ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 847, in _read_query_result\n    result.read()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 1245, in read\n    first_packet = self.connection._read_packet()\n                   ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\connections.py\", line 803, in _read_packet\n    packet.raise_for_error()\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\protocol.py\", line 219, in raise_for_error\n    err.raise_mysql_exception(self._data)\n  File \"C:\\DB-AIOps\\.venv\\Lib\\site-packages\\pymysql\\err.py\", line 154, in raise_mysql_exception\n    raise errorclass(errno, errval, sqlstate=sqlstate)\npymysql.err.OperationalError: (1046, 'No database selected')\n",
+          "elapsed_ms": 1,
+          "name": "node_info"
+        }
+      ],
+      "detector": {
+        "method": "detect_gbase_node_down",
+        "ok": true,
+        "result": {
+          "item_id": "INS-GBASE-NODE-DOWN",
+          "item_title": "节点宕机",
+          "detection_method": "detect_gbase_node_down",
+          "status": "error",
+          "severity": "info",
+          "summary": "检测失败: (1046, 'No database selected')",
+          "error": "OperationalError: (1046, 'No database selected')",
+          "findings": [],
+          "metrics": {},
+          "duration_ms": 0,
+          "auto_fixable": false,
+          "auto_fix_hint": null,
+          "confidence": 1.0,
+          "raw_data": null
+        },
+        "elapsed_ms": 18
+      }
+    }
+  ],
+  "finished_at": "2026-11-13T10:34:45+08:00"
+}

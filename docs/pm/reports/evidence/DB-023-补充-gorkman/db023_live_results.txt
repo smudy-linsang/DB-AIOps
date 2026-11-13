@@ -1,0 +1,53 @@
+captured_at=2026-11-13T10:34:45+08:00
+git_head=1d8ebbf5f7ca4c005bfe962c6a3f4ceeca911c2a
+instance dm: connected=True id=9 name=DM_测试库 port="<dm-port>" err=None
+instance gbase: connected=True id=11 name=GBase8A_测试库 port=5258 err=None
+identity[dm]=[{"name": "v_instance", "sql": "SELECT ID_CODE, NAME, STATUS, MODE$, SVR_VERSION FROM V$INSTANCE", "started_at": "2026-11-13T10:34:45+08:00", "ok": false, "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')", "traceback": "Traceback (most recent call last):\n  File \"<user-home>\\db023-supplement\\db023_supplement_live.py\", line 208, in run_sql\n    cur.execute(sql)\npyodbc.ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[STATUS] (-2111) (SQLExecDirectW)')\n", "elapsed_ms": 5}, {"name": "v_database", "sql": "SELECT NAME, DSC_NODES, ARCH_MODE, ROLE$ FROM V$DATABASE", "started_at": "2026-11-13T10:34:45+08:00", "ok": true, "columns": ["NAME", "DSC_NODES", "ARCH_MODE", "ROLE$"], "row_count": 1, "rows": [{"NAME": "DAMENG", "DSC_NOD
+identity[gbase]=[{"name": "version", "sql": "SELECT VERSION() AS ver", "started_at": "2026-11-13T10:34:45+08:00", "ok": true, "columns": ["ver"], "row_count": 1, "rows": [{"ver": "8.6.2.43-R7-free.110605"}], "elapsed_ms": 2}, {"name": "database", "sql": "SELECT DATABASE() AS dbname", "started_at": "2026-11-13T10:34:45+08:00", "ok": true, "columns": ["dbname"], "row_count": 1, "rows": [{"dbname": null}], "elapsed_ms": 1}]
+============================================================
+INS-DM-DSC DSC 节点状态
+  SQL dsc_nodes ok rows=1 data=[{"DSC_NODES": 1}]
+  SQL原文: SELECT DSC_NODES FROM V$DATABASE
+  SQL dsc_ep_info ok rows=0 data=[]
+  SQL原文: SELECT EP_SEQNO, EP_NAME, EP_STATUS FROM V$DSC_EP_INFO
+  SQL dsc_instances FAIL ProgrammingError: ('42S02', '[42S02] 第1 行附近出现错误:\n无效的表或视图名[V$DSC_INSTANCES] (-2106) (SQLExecDirectW)')
+  SQL原文: SELECT INST_ID, INST_NAME, STATUS FROM V$DSC_INSTANCES
+  判定: status=skip severity=info summary=DSC_NODES=1，非多节点 DSC，不适用（不用 V$INSTANCE 行数代替节点数） error=None metrics={}
+============================================================
+INS-DM-DW-STANDBY 主备同步状态
+  SQL role ok rows=1 data=[{"ROLE$": 0}]
+  SQL原文: SELECT ROLE$ FROM V$DATABASE
+  SQL mode ok rows=1 data=[{"MODE$": "NORMAL"}]
+  SQL原文: SELECT MODE$ FROM V$INSTANCE
+  SQL arch_status ok rows=0 data=[]
+  SQL原文: SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS
+  判定: status=skip severity=info summary=未配置 DataWatch 备库，不适用（不把 PRIMARY 标成健康） error=None metrics={}
+============================================================
+INS-DM-ARCH 归档状态
+  SQL arch_mode ok rows=1 data=[{"ARCH_MODE": "N"}]
+  SQL原文: SELECT ARCH_MODE FROM V$DATABASE
+  SQL arch_status ok rows=0 data=[]
+  SQL原文: SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS
+  SQL arch_file_count ok rows=1 data=[{"cnt": 0}]
+  SQL原文: SELECT COUNT(*) AS cnt FROM V$ARCH_FILE
+  判定: status=critical severity=critical summary=归档未开启（ARCH_MODE=N） error=None metrics={'grade': 3.0, 'threshold_band': 'critical', 'arch_mode': 'N', 'arch_files': 0}
+============================================================
+INS-DM-RLOG RLOG 同步状态
+  SQL arch_status ok rows=0 data=[]
+  SQL原文: SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS
+  判定: status=skip severity=info summary=无实时 RLOG 同步对象，不适用（不使用 V$RLOG 偏移或水位冒充同步进度） error=None metrics={}
+============================================================
+INS-GBASE-BALANCE 节点负载均衡
+  SQL node_info FAIL OperationalError: (1046, 'No database selected')
+  SQL原文: SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info
+  判定: status=error severity=info summary=检测失败: (1046, 'No database selected') error=OperationalError: (1046, 'No database selected') metrics={}
+============================================================
+INS-GBASE-DIST 数据分布均衡
+  SQL table_distribution FAIL OperationalError: (1046, 'No database selected')
+  SQL原文: SELECT NODEID, SUM(DATA_SIZE) AS bytes FROM gcluster_v$table_distribution GROUP BY NODEID
+  判定: status=error severity=info summary=检测失败: (1046, 'No database selected') error=OperationalError: (1046, 'No database selected') metrics={}
+============================================================
+INS-GBASE-NODE-DOWN 节点宕机
+  SQL node_info FAIL OperationalError: (1046, 'No database selected')
+  SQL原文: SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED FROM gcluster_v$node_info
+  判定: status=error severity=info summary=检测失败: (1046, 'No database selected') error=OperationalError: (1046, 'No database selected') metrics={}

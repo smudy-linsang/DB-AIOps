@@ -1,0 +1,453 @@
+{
+  "captured_at": "2026-11-13T10:38:12+08:00",
+  "dm": {
+    "queries": [
+      {
+        "sql": "SELECT BANNER FROM V$VERSION",
+        "ok": true,
+        "rows": [
+          {
+            "BANNER": "DM Database Server 64 V8"
+          },
+          {
+            "BANNER": "DB Version: 0x7000d"
+          },
+          {
+            "BANNER": "03134284488-20260330-320063-20200"
+          },
+          {
+            "BANNER": "Msg Version: 1"
+          },
+          {
+            "BANNER": "Gsu level(5) cnt: 102"
+          }
+        ],
+        "row_count": 5
+      },
+      {
+        "sql": "SELECT ID_CODE, NAME, MODE$, SVR_VERSION FROM V$INSTANCE",
+        "ok": true,
+        "rows": [
+          {
+            "ID_CODE": "--03134284488-20260330-320063-20200 Pack2",
+            "NAME": "DAMENG",
+            "MODE$": "NORMAL",
+            "SVR_VERSION": "DM Database Server x64 V8"
+          }
+        ],
+        "row_count": 1
+      },
+      {
+        "sql": "SELECT * FROM V$INSTANCE WHERE 1=0",
+        "ok": true,
+        "rows": [],
+        "row_count": 0
+      },
+      {
+        "sql": "SELECT PARA_NAME, PARA_VALUE FROM V$PARAMETER WHERE PARA_NAME IN ('MAX_SESSIONS','INSTANCE_NAME') OR PARA_NAME LIKE '%VERSION%'",
+        "ok": false,
+        "error": "ProgrammingError: ('42S22', '[42S22] 第1 行附近出现错误:\\n无效的列名[PARA_NAME] (-2111) (SQLExecDirectW)')"
+      }
+    ],
+    "v_instance_cols": [
+      "NAME",
+      "INSTANCE_NAME",
+      "INSTANCE_NUMBER",
+      "HOST_NAME",
+      "SVR_VERSION",
+      "DB_VERSION",
+      "START_TIME",
+      "STATUS$",
+      "MODE$",
+      "OGUID",
+      "DSC_SEQNO",
+      "DSC_ROLE",
+      "BUILD_VERSION",
+      "BUILD_TIME"
+    ]
+  },
+  "gbase": {
+    "queries": [
+      {
+        "sql": "SHOW TABLES FROM `gbase`",
+        "ok": true,
+        "rows": [
+          {
+            "Tables_in_gbase": "audit_log"
+          },
+          {
+            "Tables_in_gbase": "audit_policy"
+          },
+          {
+            "Tables_in_gbase": "cache_access_info"
+          },
+          {
+            "Tables_in_gbase": "columns_priv"
+          },
+          {
+            "Tables_in_gbase": "consumer_group"
+          },
+          {
+            "Tables_in_gbase": "consumer_group_user"
+          },
+          {
+            "Tables_in_gbase": "db"
+          },
+          {
+            "Tables_in_gbase": "db_links"
+          },
+          {
+            "Tables_in_gbase": "event"
+          },
+          {
+            "Tables_in_gbase": "func"
+          },
+          {
+            "Tables_in_gbase": "general_log"
+          },
+          {
+            "Tables_in_gbase": "host"
+          },
+          {
+            "Tables_in_gbase": "memory_heap_info"
+          },
+          {
+            "Tables_in_gbase": "new_index_conditions"
+          },
+          {
+            "Tables_in_gbase": "new_index_fields"
+          },
+          {
+            "Tables_in_gbase": "password_history"
+          },
+          {
+            "Tables_in_gbase": "plugin"
+          },
+          {
+            "Tables_in_gbase": "proc"
+          },
+          {
+            "Tables_in_gbase": "processlist"
+          },
+          {
+            "Tables_in_gbase": "procs_priv"
+          },
+          {
+            "Tables_in_gbase": "resource_config"
+          },
+          {
+            "Tables_in_gbase": "resource_plan"
+          },
+          {
+            "Tables_in_gbase": "resource_plan_directive"
+          },
+          {
+            "Tables_in_gbase": "resource_pool"
+          },
+          {
+            "Tables_in_gbase": "resource_pool_events"
+          },
+          {
+            "Tables_in_gbase": "resource_pool_usage_history"
+          },
+          {
+            "Tables_in_gbase": "role_edges"
+          },
+          {
+            "Tables_in_gbase": "servers"
+          },
+          {
+            "Tables_in_gbase": "sql_log"
+          },
+          {
+            "Tables_in_gbase": "sql_trace"
+          },
+          {
+            "Tables_in_gbase": "synonyms"
+          },
+          {
+            "Tables_in_gbase": "table_distribution"
+          },
+          {
+            "Tables_in_gbase": "tables_priv"
+          },
+          {
+            "Tables_in_gbase": "time_zone"
+          },
+          {
+            "Tables_in_gbase": "time_zone_leap_second"
+          },
+          {
+            "Tables_in_gbase": "time_zone_name"
+          },
+          {
+            "Tables_in_gbase": "time_zone_transition"
+          },
+          {
+            "Tables_in_gbase": "time_zone_transition_type"
+          },
+          {
+            "Tables_in_gbase": "user"
+          },
+          {
+            "Tables_in_gbase": "user_check"
+          }
+        ],
+        "row_count": 40,
+        "name": "show_tables_gbase"
+      },
+      {
+        "sql": "SHOW TABLES FROM `gclusterdb`",
+        "ok": true,
+        "rows": [],
+        "row_count": 0,
+        "name": "show_tables_gclusterdb"
+      },
+      {
+        "sql": "SHOW TABLES FROM `gctmpdb`",
+        "ok": true,
+        "rows": [],
+        "row_count": 0,
+        "name": "show_tables_gctmpdb"
+      },
+      {
+        "sql": "SHOW TABLES FROM `information_schema`",
+        "ok": true,
+        "rows": [
+          {
+            "Tables_in_information_schema": "CHARACTER_SETS"
+          },
+          {
+            "Tables_in_information_schema": "COLLATIONS"
+          },
+          {
+            "Tables_in_information_schema": "COLLATION_CHARACTER_SET_APPLICABILITY"
+          },
+          {
+            "Tables_in_information_schema": "COLUMNS"
+          },
+          {
+            "Tables_in_information_schema": "COLUMN_PRIVILEGES"
+          },
+          {
+            "Tables_in_information_schema": "ENGINES"
+          },
+          {
+            "Tables_in_information_schema": "EVENTS"
+          },
+          {
+            "Tables_in_information_schema": "FILES"
+          },
+          {
+            "Tables_in_information_schema": "GLOBAL_STATUS"
+          },
+          {
+            "Tables_in_information_schema": "GLOBAL_VARIABLES"
+          },
+          {
+            "Tables_in_information_schema": "KEY_COLUMN_USAGE"
+          },
+          {
+            "Tables_in_information_schema": "PARTITIONS"
+          },
+          {
+            "Tables_in_information_schema": "PLUGINS"
+          },
+          {
+            "Tables_in_information_schema": "PROCESSLIST"
+          },
+          {
+            "Tables_in_information_schema": "PROFILING"
+          },
+          {
+            "Tables_in_information_schema": "REFERENTIAL_CONSTRAINTS"
+          },
+          {
+            "Tables_in_information_schema": "ROUTINES"
+          },
+          {
+            "Tables_in_information_schema": "RESOURCE_POOL_USAGE"
+          },
+          {
+            "Tables_in_information_schema": "SCHEMATA"
+          },
+          {
+            "Tables_in_information_schema": "SCHEMA_PRIVILEGES"
+          },
+          {
+            "Tables_in_information_schema": "SESSION_STATUS"
+          },
+          {
+            "Tables_in_information_schema": "SESSION_VARIABLES"
+          },
+          {
+            "Tables_in_information_schema": "STATISTICS"
+          },
+          {
+            "Tables_in_information_schema": "TABLES"
+          },
+          {
+            "Tables_in_information_schema": "TABLE_CONSTRAINTS"
+          },
+          {
+            "Tables_in_information_schema": "TABLE_PRIVILEGES"
+          },
+          {
+            "Tables_in_information_schema": "TRIGGERS"
+          },
+          {
+            "Tables_in_information_schema": "USER_PRIVILEGES"
+          },
+          {
+            "Tables_in_information_schema": "LOAD_STATUS"
+          },
+          {
+            "Tables_in_information_schema": "LOAD_TRACE"
+          },
+          {
+            "Tables_in_information_schema": "LOAD_RESULT"
+          },
+          {
+            "Tables_in_information_schema": "VIEWS"
+          },
+          {
+            "Tables_in_information_schema": "PRIORITIES"
+          },
+          {
+            "Tables_in_information_schema": "TABLE_LOCKS"
+          },
+          {
+            "Tables_in_information_schema": "MEMORY_HEAP_INFO"
+          },
+          {
+            "Tables_in_information_schema": "CACHE_ACCESS_INFO"
+          },
+          {
+            "Tables_in_information_schema": "SYS_SCN"
+          },
+          {
+            "Tables_in_information_schema": "DML_INFO"
+          },
+          {
+            "Tables_in_information_schema": "ENCRYPTION_CERTIFICATE_STATUS"
+          }
+        ],
+        "row_count": 39,
+        "name": "show_tables_information_schema"
+      },
+      {
+        "sql": "SHOW TABLES FROM `performance_schema`",
+        "ok": true,
+        "rows": [
+          {
+            "Tables_in_performance_schema": "DISK_USAGE_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "CACHE_USAGE_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "CACHE_CELL_STATUS_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "HEAP_USAGE_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "SESSION_MEMORY_USAGE_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "MEMORY_USAGE_INFO"
+          },
+          {
+            "Tables_in_performance_schema": "TABLES"
+          }
+        ],
+        "row_count": 7,
+        "name": "show_tables_performance_schema"
+      },
+      {
+        "sql": "SELECT TABLE_SCHEMA, TABLE_NAME, TABLE_TYPE FROM information_schema.tables WHERE LOWER(TABLE_NAME) LIKE '%node%' OR LOWER(TABLE_NAME) LIKE '%distribut%' OR LOWER(TABLE_NAME) LIKE '%gcluster%' OR LOWER(TABLE_NAME) LIKE '%balance%' OR LOWER(TABLE_NAME) LIKE '%cluster%' OR LOWER(TABLE_NAME) LIKE '%vc_%'",
+        "ok": true,
+        "rows": [
+          {
+            "TABLE_SCHEMA": "gbase",
+            "TABLE_NAME": "table_distribution",
+            "TABLE_TYPE": "BASE TABLE"
+          }
+        ],
+        "row_count": 1,
+        "name": "all_similar"
+      },
+      {
+        "sql": "SHOW COLUMNS FROM `gbase`.`table_distribution`",
+        "ok": true,
+        "rows": [
+          {
+            "Field": "index_name",
+            "Type": "varchar(128)",
+            "Null": "NO",
+            "Key": "PRI",
+            "Default": null,
+            "Extra": ""
+          },
+          {
+            "Field": "dbName",
+            "Type": "varchar(64)",
+            "Null": "NO",
+            "Key": "",
+            "Default": null,
+            "Extra": ""
+          },
+          {
+            "Field": "tbName",
+            "Type": "varchar(64)",
+            "Null": "NO",
+            "Key": "",
+            "Default": null,
+            "Extra": ""
+          },
+          {
+            "Field": "isReplicate",
+            "Type": "varchar(3)",
+            "Null": "NO",
+            "Key": "",
+            "Default": "YES",
+            "Extra": ""
+          },
+          {
+            "Field": "hash_column",
+            "Type": "varchar(64)",
+            "Null": "YES",
+            "Key": "",
+            "Default": null,
+            "Extra": ""
+          },
+          {
+            "Field": "lmt_storage_size",
+            "Type": "bigint(20)",
+            "Null": "YES",
+            "Key": "",
+            "Default": null,
+            "Extra": ""
+          },
+          {
+            "Field": "table_storage_size",
+            "Type": "bigint(20)",
+            "Null": "YES",
+            "Key": "",
+            "Default": null,
+            "Extra": ""
+          }
+        ],
+        "row_count": 7,
+        "name": "desc_table_distribution"
+      },
+      {
+        "sql": "SELECT * FROM `gbase`.`table_distribution` LIMIT 5",
+        "ok": true,
+        "rows": [],
+        "row_count": 0,
+        "name": "sample_table_distribution"
+      }
+    ]
+  }
+}
