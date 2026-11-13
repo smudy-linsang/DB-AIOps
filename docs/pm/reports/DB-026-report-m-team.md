@@ -113,7 +113,7 @@
 
 **b2（可选二期；涉及容器重建，落点在他方工程）**
 
-1. 抬 max_connections 至 200：改 **C:\DB_Monitor\docker-compose.dev.yml** 的 timescaledb 服务加 command（postgres -c max_connections=200）⇒ 落点在本仓之外，属 G-5。
+1. 抬 max_connections 至 200：改 **C:\DB_Monitor\docker-compose.dev.yml** 的 timescaledb 服务加 command（postgres -c max_connections=200）⇒ 落点在本仓之外（属 b2，本次不在获准范围、暂缓）。
 2. 执行：docker compose up -d timescaledb ⇒ command 变更致 config-hash 变化，触发**容器重建（recreate）**而非原地重启；容器 RestartPolicy=no、数据在命名卷内持久。
 3. 影响面：重建动作面重于「重启」（healthcheck 重建、compose 依赖重排）；与 DB-005R §15／§20 既定「原地 docker start、不重建」口径**不同类**，须单独立项并单独登记。
 - **状态（STATUS v1.47）：b2 暂缓，且 compose 文件改动不在本次获准范围** ⇒ 本单不实施 b2。
@@ -132,7 +132,7 @@
 
 1. b1 不动数据即可治本：限流点放在数据库侧、由 PostgreSQL 强制。DB_Monitor 侧换成非 superuser 角色后其连接数被 CONNECTION LIMIT 硬性封顶，代码再怎么泄漏也占不满池，平台侧恒有余量 —— 修的是「为什么会占满」。
 2. b1 对 D2 判定窗零风险：无重启、无采集中断、无数据迁移；而 (a) 要搬走的正是 D2 正在判定的 sql_stat 15:00 桶，还需停采集。
-3. b1 无需再索权：订单任务 2 已授权 D2 后实施（订正 D-8）；仅涉及本仓之外的落点（S3 与 b2）属 G-5 待 muse。
+3. b1 无需再索权：订单任务 2 已授权 D2 后实施（订正 D-8）；涉及本仓之外的落点受 G-5 范围限定 —— **据 STATUS v1.47：b1 的 S3 已获准，b2 暂缓且其 compose 改动不在获准范围**。
 4. (a) 成本最高、收益与 (a′) 等价：(a) 要迁移 1.77 GB 并打断判定窗，(a′) 迁移量为零 ⇒ 二阶段隔离选 (a′)。若用户坚持「必须是 DB-AIOps 独占实例」口径，则 (a) 作终局方案保留，单独请 PM 确认并排在 D2 与 b1 之后。
 
 ## 六、实施步骤（D2 复判 11-15 09:50 之后执行；本轮未执行）
