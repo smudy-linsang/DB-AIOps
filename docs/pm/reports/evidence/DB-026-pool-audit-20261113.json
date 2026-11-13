@@ -1,5 +1,9 @@
 {
   "audit_version": "v2（分侧归组 + client 口径 + 时区标注）",
+  "v1_2_corrections": [
+    "DB-026 报告 §〇 D-3 行原将『含后台裸口径 18.0%』与 11/97 同句并列；18.0% 实为 12:37:35 读数（client 9 + 后台 9 = 18），12:38:20 读数的裸口径为 20.0%（client 11 + 后台 9 = 20）⇒ 报告已按读时点拆开",
+    "v1 首轮（11:58:08）裸口径 17.0% 对应真实 client 口径 8/97 = 8.2474% ⇒ 8.25%（v1.1 报告曾记 8.26%，属舍入/录入级差异，据实并列以 8.25% 为准）"
+  ],
   "audit_script": "scripts/pg_pool_audit.py",
   "corrections_applied": {
     "D_1": "netstat 改为分侧归组：client_side（远端＝5432＝真正占用方）／server_side（本地＝5432）／listening_owners；不再把服务端侧或中继侧属主（wslrelay.exe）当作占用方",
@@ -109,7 +113,8 @@
         "40492": 7
       },
       "defect": "usage_pct 分子含后台进程；host 归组只取服务端侧行 ⇒ 40492 非占用方",
-      "true_client_usage_pct": 8.26
+      "true_client_usage_pct": 8.25,
+      "true_client_usage_pct_note": "8 client / 97 可用槽 = 8.2474% ⇒ 8.25%（v1.1 报告曾记 8.26%，属舍入/录入级差异，与复核方 commit 6464830 所记 8.25% 据实并列，以 8.25% 为准）"
     },
     {
       "checked_at": "2026-11-13 12:37:14",

@@ -16,7 +16,7 @@
 |---|---|---|---|
 | D-1 不据实 | 「指向 5432 的 ESTABLISHED 共 7 条全部归属 PID 40492＝wslrelay.exe，即此刻活着持有连接的是 WSL 侧 DB_Monitor 开发实例」 | **40492 是服务端侧 socket 属主兼 [::1]:5432 的 LISTENING 属主，不是占用方**。客户端侧占用方实测＝采集器链 43592（start_monitor）×7、平台 Web 链 47216（runserver 127.0.0.1:8009）×2、DB_Monitor 开发副本 39072（runserver 0.0.0.0:8000）×1 | netstat -ano 按「远端＝5432＝客户端侧／本地＝5432＝服务端侧」分侧归组；LISTENING 侧：0.0.0.0:5432 与 [::]:5432 属主 36736＝com.docker.backend.exe，[::1]:5432 属主 40492＝wslrelay.exe ⇒ 40492 属中继侧。结论：**本单当前的主要连接持有方是平台自己（采集器+Web 共 9 条），DB_Monitor 侧仅 1 条** |
 | D-2 口径失真 | 巡检脚本 collect_host_holders() 只筛「本地端口＝5432」的行 | 脚本改为 v2：**分侧归组**（client_side／server_side／listening_owners）＋客户端侧 PID 映射进程名与脱敏命令行 ⇒ 订单任务 3「巡检 ESTABLISHED 数、占用方 PID」**已达成** | scripts/pg_pool_audit.py v2 实跑输出：client_side_by_pid {43592:7, 47216:2, 39072:1}、server_side_by_pid {40492:10}、listening_owners_by_pid {36736:2, 40492:1}，并附三个进程的命令行 |
-| D-3 口径失真 | 「total_backends 17/100 ＝ 17.0%」，判据用「占用率 < 80%」 | 占用率改 **client 口径**：分子＝backend_type='client backend'，分母＝max_connections − superuser_reserved_connections＝**97**；含后台进程的裸计数单列（后台进程不占槽，受 max_worker_processes 约束） | v2 实跑：client_backends 11／可用槽 97＝**11.34%**（含后台的裸口径 18.0% 单列）；后台进程实测 9 个。v1 首轮 17.0% 对应真实 client 口径 **8.26%**（证据文件 v1_raw_readings 已原样保留并标注失真） |
+| D-3 口径失真 | 「total_backends 17/100 ＝ 17.0%」，判据用「占用率 < 80%」 | 占用率改 **client 口径**：分子＝backend_type='client backend'，分母＝max_connections − superuser_reserved_connections＝**97**；含后台进程的裸计数单列（后台进程不占槽，受 max_worker_processes 约束） | v2 实跑（读时点 12:38:20）：client_backends 11／可用槽 97＝**11.34%**；同一次读数的含后台裸口径为 **20.0%**（client 11 ＋ 后台 9 ＝ 20，裸计数单列、不作占用数）；后台进程实测 9 个。v1 首轮（11:58:08）裸口径 17.0% 对应真实 client 口径 8/97＝8.2474%⇒**8.25%**（证据文件 v1_raw_readings 已原样保留并标注失真）。★**v1.2 订正**：本行原将「裸口径 18.0%」与 11/97 同句并列，18.0% 实为 12:37:35 读数（client 9 ＋ 后台 9 ＝ 18）之值，属沿用未标注 ⇒ 现按读时点分开；另 v1.1 曾记 8.26%，与复核方 commit 6464830 所记 8.25% 属舍入/录入级差异（8/97＝8.2474%），据实并列、以 8.25% 为准 |
 | D-4 不据实 | 库清单含 test_db_monitor 16 MB | **test_db_monitor 已不存在**：实测 pg_database 仅 5 库（db_monitor 561 MB、timeseriesdb 1210 MB、postgres 9351 kB、template0 7361 kB、template1 8953 kB）；该库系历史遗留，仓库根目录 V3.0_DIALECT_MATRIX.md:87 载有 DROP DATABASE IF EXISTS test_db_monitor | 12:3x 实测 pg_database 列表与体量；复核方所引路径 docs/V3.0_DIALECT_MATRIX.md 实为**仓库根目录** V3.0_DIALECT_MATRIX.md（复核件该处路径标注有误，事实成立） |
 | D-5 落点错记 | 「compose 给 timescaledb 服务加 command」落点在本仓 | **编排落点在本仓之外**：该容器由 **C:\DB_Monitor\docker-compose.dev.yml** 管理（compose project＝db_monitor、working_dir＝C:\DB_Monitor、service＝timescaledb），命名卷实名为 db_monitor_timeseries_data ⇒ 该步骤属 G-5（待 muse 裁决），G-5 范围据此扩至「编排文件改动」 | docker inspect db-aiops-timescaledb 的 labels 与 Mounts 实测；Cmd=["postgres"] ⇒ 追加 command 不破坏 entrypoint（此点 v1.0 表述成立） |
 | D-6 动作面低估 | S1＝「容器重启，全部连接断 5–15 秒」 | S1 实际是**容器重建（recreate）而非原地重启**：command 变更致 config-hash 变化触发重建（现存容器标签含 com.docker.compose.replace），RestartPolicy=no；与 DB-005R §15／§20 既定「原地 docker start、不重建」口径**不同类**，须单独立项并单独登记 | docker inspect labels（config-hash 4b7e9863…、com.docker.compose.replace=db-aiops-timescaledb）、RestartPolicy=no、StartedAt 2026-11-13T01:37:12Z＝本地 09:37:12、RestartCount=0 |
@@ -42,6 +42,8 @@
 4. **(a) 仍不首选**：为 DB-AIOps 迁独立实例要搬 1.77 GB，恰好包含 D2 正在判定的 sql_stat 15:00 桶，还需停采集保一致，风险收益倒挂。
 5. **D2 之前仍只评估与准备**：本轮（含本版订正）未动库、未重启时序库容器/采集器/Web，未改 max_connections。
 6. 遗留缺口 6 条（G-1..G-6），其中 G-5（能否改动本仓之外的 C:\DB_Monitor 工程，范围已扩至含其编排文件）待 muse 裁决。
+
+**关于用户决策的表述口径（两粒度并列，不得单引其一）**：路径归属层（STATUS v1.46，裁决面）＝用户已拍板选治本；当日动作层（DB-005R 回执 L280＋问卷作答记录）＝④暂不处置、只观察、再次占满即回函重拉。★二者并存不互斥，我方不代裁；操作约束取交集执行 —— D2 之前不动库、不改 max_connections、不重启时序库容器/采集器/Web、不擅杀在跑的进程；D2 之后按本单实施授权推进（b1），其中落在他方工程的步骤受 G-5 约束。
 
 ## 二、实测事实基线（v1.1 订正后）
 
@@ -70,7 +72,7 @@
 ### 2.4 连接池占用读数（订正 D-3，client 口径）
 
 - 12:37:35（v2 脚本首次实跑）：client_backends **9**／可用槽 97 ＝ **9.28%**；含后台进程的裸口径 18.0%（后台进程 9 个）；client_side 43592×5、47216×2、39072×1。
-- 12:4x（已落证据文件 corrected_reading）：client_backends **11**／可用槽 97 ＝ **11.34%**；client_side 43592×7、47216×2、39072×1；server_side 40492×10；最老客户端连接 UTC 02:27:12 ＝ 本地 10:27:12（采集器拉起后首条）。
+- 12:38:20（已落证据文件 corrected_reading）：client_backends **11**／可用槽 97 ＝ **11.34%**；同次读数含后台裸口径 **20.0%**（11 ＋ 9 ＝ 20）；client_side 43592×7、47216×2、39072×1；server_side 40492×10；最老客户端连接 UTC 02:27:12 ＝ 本地 10:27:12（采集器拉起后首条）。
 - 结论：连接池**未饱和**，本轮无占满事件可处置。§20 记录的「100/100 占满」为 11-13 08:35 宿主重启后由 DB_Monitor 开发实例造成（DB-005R §20 与 STATUS v1.45 已记录事实），本轮未复现、未重启任何进程。
 
 ## 三、根因判定（v1.1 增补 S-2）
@@ -171,6 +173,7 @@
   2. docs/pm/reports/DB-026-report-m-team.md（v1.0 → v1.1：逐项订正 D-1～D-8、采纳 S-1～S-6、b1/b2 拆分、G-6 新增）；
   3. docs/pm/reports/DB-026-receipt-m-team.md（订正占用方归因与库清单表述）；
   4. docs/pm/reports/evidence/DB-026-pool-audit-20261113.json（订正读数口径并保留 v1 原值供追溯）。
+  5. v1.2 追加订正（据复核方 13:1x 终态回签第三节「据实并列」）：§〇 D-3 行的裸口径按读时点拆开（18.0%→ 20.0%）、v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；§一 补「用户决策两粒度并列」口径；证据文件同步订正 true_client_usage_pct 8.26→8.25 并加注口径说明。**结论档位不变（有条件通过），无待办遗留。**
 - 未改动：docs/pm/STATUS.md、docs/pm/DECISIONS.md（muse 维护面）；未改动任何业务代码；未新增配置项（故不涉及 monitor/appconf.py SPECS 登记）；未改动复核方文件与 DB-005R 回执/母报告。
 - validate（因 G-4 环境口径，以 Windows 解释器直跑 unit 的等价两阶段，结果对应本版提交时点 HEAD）：
   - 红线扫描 .venv\Scripts\python.exe scripts/lint_redlines.py → exit 0（输出「红线约束扫描通过」）；
@@ -183,3 +186,4 @@
 |---|---|---|---|
 | v1.0 | 2026-11-13 | MMMan | DB-026 评估版：两条路径评估、推荐 (b) 主路径 + (a′) 二阶段、实施与回退步骤、D2 前只读巡检与首日读数；结论有条件通过（commit ed02832） |
 | v1.1 | 2026-11-13 | MMMan | 据 DB-026 独立复核（commit 2d6d6c0）逐项订正：D-1 占用方归因（分侧口径，40492 非占用方）、D-2 巡检脚本分侧归组＋进程映射、D-3 占用率改 client 口径（分母扣 3 保留槽）、D-4 库清单剔除已删的 test_db_monitor、D-5 编排落点在本仓之外（他方 compose）、D-6 S1 为容器重建而非原地重启、D-7 时间标注 UTC/本地、D-8 授权口径订正（D2 后实施无需再索权）；采纳 S-1（拆 b1/b2，主路径改 b1）、S-2（新增 G-6）、S-3～S-6；巡检脚本升级 v2 并订正证据口径；结论档位不变（有条件通过） |
+| v1.2 | 2026-11-13 | MMMan | 据复核方 13:1x 终态回签（评估面闭环、条件已满足；复核件自身 3 处错误已由其 commit 6464830 订正）作两项据实并列订正：①§〇 D-3 行「含后台裸口径 18.0%」与 11/97 同句并列属沿用未标注（18.0% 实为 12:37:35 读数）→ 按读时点拆开为 12:38:20 读数的 20.0%；v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；②§一 补「用户决策两粒度并列」口径（路径归属取 STATUS v1.46、当日动作取 L280＋问卷记录，操作约束取交集）；证据文件同步订正。**评估面档位不变（有条件通过），实施面不启动、G-5/G-6/评档待 muse/PM** |
