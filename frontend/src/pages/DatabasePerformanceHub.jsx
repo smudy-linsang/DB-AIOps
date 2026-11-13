@@ -30,7 +30,7 @@ import {
   DataZoomComponent,
 } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 
 import { databaseAPI } from '../services/api';
 import TimeRangeSelector, { TIME_RANGE_PRESETS } from '../components/TimeRangeSelector';

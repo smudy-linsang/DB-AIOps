@@ -4,7 +4,7 @@ import {
 } from 'antd';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts/core';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 import { perfAPI } from '../../services/api';
 import { WAIT_CLASS_ORDER, waitClassColor, waitClassLabel } from './waitClassMeta';
 

@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { ThunderboltOutlined, DiffOutlined, DashboardOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts/core';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 import { Link } from 'react-router-dom';
 import { perfAPI } from '../../services/api';
 import WaitClassTag from './WaitClassTag';

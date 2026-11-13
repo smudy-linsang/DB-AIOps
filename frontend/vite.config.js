@@ -4,6 +4,14 @@ import react from '@vitejs/plugin-react'
 
 export default defineConfig({
   plugins: [react()],
+  resolve: {
+    // Vite 8 (Rolldown) dev 预打包 CJS __esModule 入口会保留 { default } 包装对象，
+    // 统一映射到原生 ESM 入口，避免 ReactEChartsCore 等组件渲染报 Element type is invalid。
+    alias: {
+      'echarts-for-react/lib/core': 'echarts-for-react/esm/core',
+      'antd/locale/zh_CN': 'antd/es/locale/zh_CN',
+    },
+  },
   server: {
     port: 3000,
     proxy: {

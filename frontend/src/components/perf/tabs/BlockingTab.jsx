@@ -5,7 +5,7 @@ import {
 import { ReloadOutlined, StopOutlined } from '@ant-design/icons';
 import dayjs from 'dayjs';
 import * as echarts from 'echarts/core';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
 import KillModal from '../KillModal';

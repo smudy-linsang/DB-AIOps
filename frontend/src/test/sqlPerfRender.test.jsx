@@ -7,7 +7,7 @@ import { describe, it, expect, vi } from 'vitest'
 import { render, screen, waitFor, fireEvent } from '@testing-library/react'
 import { MemoryRouter } from 'react-router-dom'
 
-vi.mock('echarts-for-react/lib/core', () => ({ default: () => null }))
+vi.mock('echarts-for-react/esm/core', () => ({ default: () => null }))
 
 const DETAIL = {
   digest: 'a'.repeat(32), db_type: 'tdsql', sql_text_sample: 'SELECT id, amount FROM orders WHERE user_id = 11',

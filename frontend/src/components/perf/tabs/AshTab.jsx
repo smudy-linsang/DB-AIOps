@@ -5,7 +5,7 @@ import {
 } from 'antd';
 import { CloseOutlined, FilterOutlined } from '@ant-design/icons';
 import * as echarts from 'echarts/core';
-import ReactEChartsCore from 'echarts-for-react/lib/core';
+import ReactEChartsCore from 'echarts-for-react/esm/core';
 import { perfAPI } from '../../../services/api';
 import WaitClassTag from '../WaitClassTag';
 import { withAlive, fmtPerfError } from '../useSafeAsync';

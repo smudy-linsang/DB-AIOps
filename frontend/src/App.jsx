@@ -1,7 +1,7 @@
 import React, { useEffect, useState } from 'react';
 import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-dom';
 import { ConfigProvider, App as AntApp, Result, Button, Spin } from 'antd';
-import zhCN from 'antd/locale/zh_CN';
+import zhCN from 'antd/es/locale/zh_CN';
 
 import EMLayout from './components/EMLayout';
 import ErrorBoundary from './components/ErrorBoundary';
