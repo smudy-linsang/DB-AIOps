@@ -150,6 +150,8 @@
 
 实施窗口建议：11-15 09:50 D2 出结果之后，且避开 15:00–15:10 桶写入时段。b1 四步不含重启，可与 b2 解耦排期。
 
+★**实施物料已备（D2 前只备不执行）**：scripts/db026_b1.ps1（驱动，默认 -Mode Verify 只读；Apply/Rollback 须显式 -Confirm ＋ 环境变量 DB026_ROLE_PASSWORD／DB026_APP_ROLE_PASSWORD 注入口令，缺一即拒绝）、scripts/db026_b1_apply.sql（建 dbmonitor_app CONNECTION LIMIT 30 与 dbaiops_app CONNECTION LIMIT 60 ＋ 两库 public schema 授权，幂等；口令经 psql 变量注入、不落文件不进仓库）、scripts/db026_b1_rollback.sql（REASSIGN/DROP OWNED ＋ DROP ROLE 回退，不动既有表与数据）。★**已实测四道闸门**：Verify 模式 exit 0（纯只读，输出 max_connections 100／reserved 3／可用槽 97）；Apply 缺 -Confirm → 拒绝；Apply -Confirm 但缺口令环境变量 → 拒绝；apply.sql 无 pw 变量 → psql RAISE EXCEPTION、exit 3；**测试全程角色数实测仍为 0（未写库）**。
+
 ## 七、实施后验证方法（v1.1 更新，client 口径 + 前置门禁）
 
 0. **前置门禁（S-4）**：先确认 b1-3 已生效（pg_roles.rolconnlimit＝30、DB_Monitor 副本进程命令行/连接串已切角色），确认前不得制造任何并发；且本项排在 D2 判定窗之外、避开 15:00–15:10。
@@ -187,6 +189,7 @@
   4. docs/pm/reports/evidence/DB-026-pool-audit-20261113.json（订正读数口径并保留 v1 原值供追溯）。
   5. v1.2 追加订正（据复核方 13:1x 终态回签第三节「据实并列」）：§〇 D-3 行的裸口径按读时点拆开（18.0%→ 20.0%）、v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；§一 补「用户决策两粒度并列」口径；证据文件同步订正 true_client_usage_pct 8.26→8.25 并加注口径说明。**结论档位不变（有条件通过），无待办遗留。**
   6. v1.3 基线更新（据 STATUS v1.47 / commit 53a2900）：G-5 获准（限 b1 的 S3）、S-2 采纳平台侧同批实施、b2 暂缓且不在获准范围、用户 12:31 确认「治本照做、D2 之后实施」；据此订正我方 13:2x 函中已过期的「待裁决」状态描述，并补齐平台侧生效前提（切角色＋设限额＋重启生效三件事齐做，证据 settings.py L237／L265）。**结论档位不变（有条件通过）：评估面条件已满足，实施面待 11-15 09:50 D2 之后启动。**
+  7. v1.4 增补实施物料索引（订单任务 2 的「D2 之前…备脚本、备回退」）：新增 scripts/db026_b1.ps1／db026_b1_apply.sql／db026_b1_rollback.sql 三个 D2 后执行件（默认只读校验；Apply/Rollback 四道闸门实测拒绝；测试期未写库、角色数仍为 0）。**报告结论、实施步骤内容与档位均不变**，仅增补物料索引与实测记录。
 - 未改动：docs/pm/STATUS.md、docs/pm/DECISIONS.md（muse 维护面）；未改动任何业务代码；未新增配置项（故不涉及 monitor/appconf.py SPECS 登记）；未改动复核方文件与 DB-005R 回执/母报告。
 - validate（因 G-4 环境口径，以 Windows 解释器直跑 unit 的等价两阶段，结果对应本版提交时点 HEAD）：
   - 红线扫描 .venv\Scripts\python.exe scripts/lint_redlines.py → exit 0（输出「红线约束扫描通过」）；
@@ -201,3 +204,4 @@
 | v1.1 | 2026-11-13 | MMMan | 据 DB-026 独立复核（commit 2d6d6c0）逐项订正：D-1 占用方归因（分侧口径，40492 非占用方）、D-2 巡检脚本分侧归组＋进程映射、D-3 占用率改 client 口径（分母扣 3 保留槽）、D-4 库清单剔除已删的 test_db_monitor、D-5 编排落点在本仓之外（他方 compose）、D-6 S1 为容器重建而非原地重启、D-7 时间标注 UTC/本地、D-8 授权口径订正（D2 后实施无需再索权）；采纳 S-1（拆 b1/b2，主路径改 b1）、S-2（新增 G-6）、S-3～S-6；巡检脚本升级 v2 并订正证据口径；结论档位不变（有条件通过） |
 | v1.2 | 2026-11-13 | MMMan | 据复核方 13:1x 终态回签（评估面闭环、条件已满足；复核件自身 3 处错误已由其 commit 6464830 订正）作两项据实并列订正：①§〇 D-3 行「含后台裸口径 18.0%」与 11/97 同句并列属沿用未标注（18.0% 实为 12:37:35 读数）→ 按读时点拆开为 12:38:20 读数的 20.0%；v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；②§一 补「用户决策两粒度并列」口径（路径归属取 STATUS v1.46、当日动作取 L280＋问卷记录，操作约束取交集）；证据文件同步订正。**评估面档位不变（有条件通过），实施面不启动、G-5/G-6/评档待 muse/PM** |
 | v1.3 | 2026-11-13 | MMMan | 据 STATUS v1.47（commit 53a2900，14:38:02）作基线更新：G-5 获准（仅限 b1 的 S3；compose 改动属 b2、不在获准范围）、S-2 采纳（平台侧同设 CONNECTION LIMIT，与 b1 同批；ORM 滞留列为已知问题）、S-1 b1/b2 拆分（b2 暂缓）、用户 12:31 确认「治本照做、D2 之后实施」；订正我方 13:2x 函中已过期的「待裁决」状态描述，并补齐平台侧生效前提（同批须切角色＋设限额＋重启生效三件事齐做；settings.py L237／L265 默认 superuser）；今日巡检读数 12:38:20／13:04:52／15:28:23 三次（client 9／9／13，末次 13.40%，alert=false，容器与四进程未变）。**结论档位不变（有条件通过）：评估面条件已满足，实施面待 11-15 09:50 D2 之后启动** |
+| v1.4 | 2026-11-13 | MMMan | 增补实施物料索引（订单任务 2「D2 之前…备脚本、备回退」）：新增 scripts/db026_b1.ps1（驱动，默认只读 Verify；Apply/Rollback 须 -Confirm ＋ 环境变量注入口令）、db026_b1_apply.sql（建 dbmonitor_app LIMIT 30 与 dbaiops_app LIMIT 60 ＋ 两库授权，幂等，口令经 psql 变量注入）、db026_b1_rollback.sql（REASSIGN/DROP OWNED ＋ DROP ROLE 回退）；已实测四道闸门并确认测试期未写库（角色数 0）。**结论档位、实施步骤内容均不变（有条件通过），实施仍排在 11-15 09:50 D2 之后** |
