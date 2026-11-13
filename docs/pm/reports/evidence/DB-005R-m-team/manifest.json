@@ -2,15 +2,15 @@
  "order": "DB-005R",
  "generated_by": "M-team (MMMan)",
  "masking": "本机地址/端口/账号/实例名统一掩码为 <local-host> / <platform-port> / <mysql-port> / <proxy-port> / <account> / <instance-proxy> / <instance-mysql>；口令与令牌全程不入证据（口令只经环境变量 MTEAM_PW 传入进程，随机值不落盘；令牌只经 Authorization: Bearer 头在进程内使用，不写入任何文件）。",
- "file_count": 61,
- "file_count_note": "含本 manifest.json 自身；files 列表为其余 60 份（含 README-evidence.md）。目录实有文件数 = file_count = 61。",
- "total_bytes": 512644,
- "total_bytes_note": "files 列表 60 份的字节合计（不含 manifest.json 自身）。",
+ "file_count": 65,
+ "file_count_note": "含本 manifest.json 自身；files 列表为其余 64 份（含 README-evidence.md）。目录实有文件数 = file_count = 65。",
+ "total_bytes": 531364,
+ "total_bytes_note": "files 列表 64 份的字节合计（不含 manifest.json 自身）。",
  "files": [
   {
    "file": "README-evidence.md",
    "desc": "证据清单与复现命令说明",
-   "bytes": 18147,
+   "bytes": 20274,
    "masked": false
   },
   {
@@ -48,6 +48,24 @@
    "desc": "G-11 复判轮次驱动脚本（宿主机侧，含 slot→口径映射表 SLOT_PERIODIC_DAYS：d1_d3／d2_d3＝3、week_*＝7，2026-11-12 10:4x 补入）：按 --slot 依次执行 day_baseline 与 periodic_gate 两个只读脚本；口令随机值只经环境变量传入、不落盘。含本地地址/端口占位默认值，无任何真实凭据（脚本类按 README 口径豁免敏感扫描）",
    "bytes": 7607,
    "masked": false
+  },
+  {
+   "file": "db005r_g11_week_c18_cmd0_20261112.txt",
+   "desc": "W18 轮（11-12 20:35）两路驱动之一 cmd0 失败日志（只读实测产物；已按掩码口径处理本地地址与端口；原 .log 按仓库 *.gitignore 约定改名为 .txt 入库，沿用 D1 轮先例，原始未掩码副本留档 probe_out 不入库）",
+   "bytes": 5486,
+   "masked": true
+  },
+  {
+   "file": "db005r_g11_week_c18_cmd1_20261112.txt",
+   "desc": "W18 轮（11-12 20:35）两路驱动之一 cmd1 失败日志（只读实测产物；已按掩码口径处理本地地址与端口；原 .log 按仓库 *.gitignore 约定改名为 .txt 入库，沿用 D1 轮先例，原始未掩码副本留档 probe_out 不入库）",
+   "bytes": 5496,
+   "masked": true
+  },
+  {
+   "file": "db005r_g11_week_c18_summary_20261112.json",
+   "desc": "W18 轮（11-12 20:35）驱动摘要：rcs=[1,1]、errors 两条级联 FileNotFoundError、command_line 含 --periodic-days 7（口径正确）",
+   "bytes": 868,
+   "masked": true
   },
   {
    "file": "db005r_g13.json",
@@ -254,6 +272,12 @@
    "masked": true
   },
   {
+   "file": "g11_rootcause_20261113.json",
+   "desc": "11-13 上午只读实测根因汇总：W18 轮失败事实、sql_stat 五路中断、Postgres 连接池占满、采集守护两处缺陷与修正、今日三轮风险与待授权处置",
+   "bytes": 4743,
+   "masked": true
+  },
+  {
    "file": "g11_topology_probe.json",
    "desc": "G-11 拓扑与采集管道只读核验：mock proxy 后端指向（与 cid=19 同一后端）+ 近 4h 两路 digest 集合重合度 + 两路采样推进情况",
    "bytes": 2808,
@@ -369,8 +393,8 @@
   }
  ],
  "scan_hits": 0,
- "scan_scope": "40 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json 及 11-12 D1 复判 6 份）—— 沿用 v1.0 口径",
- "scan_note": "11-10 连驱入库后重新扫描，命中 0。另说明：19 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。",
+ "scan_scope": "44 份实测产物（数据类，含 11-09/11-10 连驱 g11_drive_*.json / g11_bucket_verify_*.json、11-12 D1 复判 6 份，及 11-12 W18 轮 3 份＋11-13 根因 1 份）—— 沿用 v1.0 口径",
+ "scan_note": "11-10 连驱入库后重新扫描，命中 0。另说明：19 份可复现脚本与本清单/manifest 内含**占位默认值与代码片段**（如 http://127.0.0.1:8009、MTEAM_PW=<本地开发账号口令>、'Bearer ' + token 拼接代码、掩码目标清单），**不含任何真实口令、令牌或凭据值**；脚本内出现这些串是为可复现所需，非泄漏。 ｜ 11-13 W18 轮入库后重新扫描，命中 0（新增 4 份数据类产物均已按掩码口径处理）。",
  "scan_list": [
   "127.0.0.1",
   "15002",

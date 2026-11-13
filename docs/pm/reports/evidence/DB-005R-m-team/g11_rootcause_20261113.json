@@ -1,0 +1,90 @@
+{
+  "order": "DB-005R",
+  "generated_by": "M-team (MMMan)",
+  "generated_at": "2026-11-13 10:20",
+  "topic": "W18 轮（11-12 20:35）失败事实与 11-13 上午数据面实测根因（只读实测汇总）",
+  "w18_round": {
+    "task": "MMMan-DBAIOps-G11Rejudge-W18",
+    "last_run": "2026-11-12 20:35:00",
+    "last_task_result": 0,
+    "slot": "week_c18",
+    "periodic_days": 7,
+    "cmd_rcs": [
+      1,
+      1
+    ],
+    "judgment": "无判定产物（无 day_baseline json、无 periodic_gate json）",
+    "root_cause": "时序库连接被拒：psycopg2 OperationalError Connection refused (0x0000274D/10061)",
+    "errors_note": "summary 的两条 FileNotFoundError 为级联（上游产物未生成）"
+  },
+  "interruption_window": {
+    "timeseries_unreachable_from": "2026-11-12 19:22",
+    "collector_log_last_write": "2026-11-12 19:23:16",
+    "collector_last_alive": "2026-11-12 19:22:11",
+    "web_last_alive": "2026-11-12 19:21:35",
+    "watchdog_relaunch_web": "2026-11-12 23:31:36",
+    "watchdog_relaunch_collector": "2026-11-12 23:37:11",
+    "collector_err_bytes": 3448928,
+    "collector_err_lines": 28674
+  },
+  "not_detected_mechanisms": [
+    "计划任务 Last Result=0 只反映调度成功、不反映脚本 rc（rc=1 仅落 rerun 日志，无告警通道）",
+    "兜底扫描器判据仅 orders/avatars/日章节三态，不读 rerun 日志 ⇒ rc=1 不在其观测面",
+    "权威方 20:41 只读事实源与我方 20:47:51 复核轮均未执行（两会话 11-12 17:5x 后无新动作）"
+  ],
+  "no_original_window_replay": "只读驱动按运行时刻重算窗口（week_c18 判定窗 [11-05 20:35, 11-12 20:35]）⇒ 今日复跑不复现原窗，不得用于补记 W18 判定",
+  "host_restart": {
+    "boot_time": "2026-11-13 08:35:54",
+    "source": "Win32_OperatingSystem.LastBootUpTime",
+    "collector_pid_42500": "DEAD",
+    "web_pid_19756": "DEAD"
+  },
+  "sql_stat": {
+    "rows_total": 263961,
+    "max_time": "2026-11-12 19:23:17",
+    "per_cid_max_time": {
+      "1": "2026-11-12 19:22:28",
+      "10": "2026-11-12 19:23:17",
+      "16": "2026-11-12 19:23:17",
+      "18": "2026-11-12 19:22:28",
+      "19": "2026-11-12 19:22:35"
+    },
+    "mechanism": "sql_stat 增量采集依赖常驻采集器进程的内存 delta 状态；常驻实例缺席则增量永不再增"
+  },
+  "collection_snapshot": {
+    "rows_total": 135743,
+    "max_time": "2026-11-13 10:10:45",
+    "note": "快照面今日在写 ⇒ 采集器进程本体存活，断的仅依赖常驻 delta 的 sql_stat 一路"
+  },
+  "pg_connections": {
+    "established": 100,
+    "max_connections": 100,
+    "holder": "DB_Monitor 开发实例（C:/DB_Monitor/.venv 的 manage.py runserver，绑定本地平台端口；由 Antigravity IDE language server 经 WSL 启动）",
+    "holder_pid": 21728,
+    "first_observed": "2026-11-13 10:14",
+    "error": "FATAL: sorry, too many clients already",
+    "note": "该错误在采集器 err 日志中仅 2 次且均在 10:14 拉起时 ⇒ 耗尽为 11-13 宿主重启后新出现，与 11-12 19:23 中断非同一因"
+  },
+  "watchdog_fixes": [
+    "存活探针排除瞬时 --once 单轮（原正则会匹配 start_monitor --once）",
+    "pending_until 由仅存 HH:MM:SS 改为存完整时间戳并按日期比较；旧纯时刻形态视为已过期（修正前今日 08:47-10:12 每轮均 skip: backoff until 23:49:16）",
+    "备份 C:/dispatcher/mman_collector_watchdog.py.bak-20261113-101418；py_compile exit 0；属装置层，不改业务代码、不入库"
+  ],
+  "platform_web": {
+    "expected_port": "<platform-port>",
+    "listening_today": false,
+    "note": "平台 API 端口（<platform-port>）无监听 ⇒ G-11 判定链的平台 API 端点当前不可达"
+  },
+  "today_rounds_risk": {
+    "15:05 DailyDrive": "预期失败（平台 API 缺席 + 采集器缺席 + 连接池饱和）",
+    "15:35 W19": "预期失败（同上；且不可替代 W18 原窗判定）",
+    "16:05 BucketVerify": "预期空桶（复现 11-11 缺桶形态）",
+    "D2_impact": "11-15 09:50 D2 判定窗 [11-12 09:50, 11-15 09:50) 内 11-13/11-14 两块预计缺失 ⇒ D2 判定基础受损"
+  },
+  "pending_authorization": [
+    "用户侧关闭 Antigravity IDE 中 DB_Monitor 的 runserver 实例（最小干预、无数据损失）",
+    "重启 Postgres 容器释放计数（治标，占用方会重连再占满）",
+    "治本：DB-AIOps 分配独立 Postgres 实例或调高 max_connections，并给占用方设连接池上限（涉业务配置，需授权）"
+  ],
+  "masking": "本机地址与端口统一掩码为 <local-host> / <platform-port>；口令与令牌全程不入证据。"
+}

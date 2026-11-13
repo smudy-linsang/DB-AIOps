@@ -1,0 +1,15 @@
+{
+  "slot": "week_c18",
+  "generated_at": "2026-11-12T20:35:00.755831+08:00",
+  "rcs": [
+    1,
+    1
+  ],
+  "command_line": "C:\\DB-AIOps\\.venv\\Scripts\\python.exe C:\\DB-AIOps\\docs\\pm\\reports\\evidence\\DB-005R-m-team\\reproduce_g11_day_baseline.py --cid 18 --cid2 19 --window 24h --periodic-days 7 --out C:\\dispatcher\\probe_out\\db005r_g11_week_c18.json --compact-out C:\\dispatcher\\probe_out\\db005r_g11_week_c18_compact.json",
+  "periodic_days": 7,
+  "note": "口令随机值只经环境变量传入，未落盘/未入库/未入证据",
+  "errors": {
+    "day_baseline": "FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\dispatcher\\\\probe_out\\\\db005r_g11_week_c18.json'",
+    "periodic_gate": "FileNotFoundError: [Errno 2] No such file or directory: 'C:\\\\dispatcher\\\\probe_out\\\\g11_periodic_gate_week_c18.json'"
+  }
+}

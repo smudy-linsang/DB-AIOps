@@ -1,8 +1,8 @@
-# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10 + 11-11 落桶核验与中断取证 + 11-12 D1 日周期复判 + 11-12 新窗口首日连驱与落桶核验）
+# DB-005R 证据清单（S-1：真实 MySQL 8.0 链路级回归 + G-13 三方互证 + v1.1/v1.2 G-11 回填 + 人工连驱 11-09 / 11-10 + 11-11 落桶核验与中断取证 + 11-12 D1 日周期复判 + 11-12 新窗口首日连驱与落桶核验 + 11-12 W18 轮失败取证 + 11-13 上午根因实测）
 
 入库副本已按 DB-005 同一口径脱敏：本地地址、端口、账号、实例名统一掩码为 `<local-host>` / `<platform-port>` / `<mysql-port>` / `<proxy-port>` / `<account>` / `<instance-proxy>` / `<instance-mysql>`；口令与令牌一律不出现在证据中（口令只经环境变量 `MTEAM_PW` 传入进程，随机值不落盘；令牌只经 `Authorization: Bearer` 头在进程内使用）。
 
-**共 61 份**（含本清单与 `manifest.json`）：40 份实测产物 + 19 份可复现脚本 + 本清单 + manifest。**实测产物（40 份数据类文件）敏感扫描命中 0**
+**共 65 份**（含本清单与 `manifest.json`）：44 份实测产物 + 19 份可复现脚本 + 本清单 + manifest。**实测产物（44 份数据类文件）敏感扫描命中 0**
 
 | 文件 | 说明 | 字节 | 已脱敏 |
 |---|---|---|---|
@@ -66,6 +66,10 @@
 | `g11_d1_cmd0_20261112.txt` | D1 轮次 `day_baseline` 脚本 stdout（权威轮 09:58:42，--periodic-days 3；原 `.log` 按仓库 `*.gitignore` 约定改名为 `.txt`）：两路 continuity 摘要与三次接口调用回显 | 1214 | 否 |
 | `g11_d1_cmd1_20261112.txt` | D1 轮次 `periodic_gate` 脚本 stdout（权威轮 09:58:42；原 `.log` 按仓库 `*.gitignore` 约定改名为 `.txt`）：两路 `retention` / `max_run_days` 与 days=3..7 端点扫描回显 | 733 | 否 |
 | `db005r_g11_rerun.py` | **G-11 复判轮次驱动脚本**（宿主机侧，2026-11-12 10:4x 补入 slot→口径映射表 `SLOT_PERIODIC_DAYS`：d1_d3／d2_d3＝3、week_*＝7）：按 `--slot` 依次执行 `day_baseline` 与 `periodic_gate` 两个只读脚本；口令随机值只经环境变量传入、不落盘。含本地地址/端口占位默认值、无任何真实凭据（脚本类按本清单口径豁免敏感扫描） | 7607 | 否 |
+| `db005r_g11_week_c18_cmd0_20261112.txt` | **W18 轮（11-12 20:35）cmd0 失败日志（入库掩码副本）**：该路驱动 rc=1 的完整输出，根因为 psycopg2 `OperationalError`「Connection refused (0x0000274D/10061)」（11-12 19:22 起时序库不可连）；原 `.log` 按仓库 `*.gitignore` 约定改名为 `.txt` 入库（沿用 D1 轮先例），原始未掩码副本留档 `probe_out` 不入库 | 5486 | 是 |
+| `db005r_g11_week_c18_cmd1_20261112.txt` | **W18 轮（11-12 20:35）cmd1 失败日志（入库掩码副本）**：同一根因（时序库连接被拒），该路 rc=1；原 `.log` 改名为 `.txt` 入库 | 5496 | 是 |
+| `db005r_g11_week_c18_summary_20261112.json` | **W18 轮（11-12 20:35）驱动摘要**：`rcs=[1,1]`、`errors` 两条 `FileNotFoundError`（上游产物未生成的**级联**）、`command_line` 含 `--periodic-days 7`（slot→口径映射正确 ⇒ **非口径问题**） | 868 | 是 |
+| `g11_rootcause_20261113.json` | **11-13 上午只读实测根因汇总**：W18 轮失败事实、`sql_stat` 五路中断（max 11-12 19:23:17）、Postgres 连接池占满与占用方定位、采集守护两处缺陷与修正、今日三轮前提与待授权处置三选一 | 4743 | 是 |
 
 ## 复现命令
 
@@ -128,3 +132,5 @@ python reproduce_g11_periodic_gate.py --cid 18 --cid2 19 --out 'C:/dispatcher/pr
 > ★**口径订正（2026-11-12 10:4x）**：驱动脚本 `db005r_g11_rerun.py` 已补入 **slot→口径映射表 `SLOT_PERIODIC_DAYS`**（`d1_d3`／`d2_d3`＝**3**、`week_c18`／`week_c19`／`week_mature`＝7）—— `--periodic-days` **不再是「缺省 7、只影响描述字段」**：它直接决定 `day_baseline` 内 `sql-periodic` 端点的**判定窗长与门槛 `ceil(days×0.7)`**，故 D1／D2 必须取 **3**。原 09:50 轮因 argparse 缺省 7 静默覆盖 slot 口径而**作废**（6 份产物以 `*.days7-superseded-20261112-0950.*` 留痕于本机 `C:\dispatcher\probe_out\`，未入库）；入库件为 **09:58:42 重跑（`--periodic-days 3`）**的权威轮。D1 的 days=3 判定结论由 `reproduce_g11_periodic_gate.py` 内部 sweep days=3..7 产出，两轮结论一致（NO），见 `g11_periodic_gate_20261112.json` 的 `endpoint_sweep`。
 
 原始运行副本保留在本机 `C:\dispatcher\probe_out\`，**不入库**；仓库 `.gitignore` 含 `*.log`，故日志类证据入库时统一改名为 `.txt`（沿用 DB-005 先例）。
+
+> ★**W18 轮（11-12 20:35）入库口径（2026-11-13 补记）**：该轮**已触发但无判定产物** —— 两路驱动 cmd0 rc=1／cmd1 rc=1，根因＝时序库连接被拒（`OperationalError`「Connection refused (0x0000274D/10061)」，11-12 19:22 起时序库不可连），summary `errors` 两条 `FileNotFoundError` 属**级联**；驱动已按 `SLOT_PERIODIC_DAYS` 传 `--periodic-days 7`（slot 口径正确 ⇒ **非口径问题**）。入库三份 W18 产物中，**两份 cmd 日志的掩码副本按上方 `.log`→`.txt` 约定改名入库**（`db005r_g11_week_c18_cmd0_20261112.txt` 5,486 B／`db005r_g11_week_c18_cmd1_20261112.txt` 5,496 B），**原始未掩码副本**（5,406 B／5,416 B）仍留档 `probe_out` 不入库；另入库 `g11_rootcause_20261113.json`（4,743 B，11-13 上午实测事实）。
