@@ -142,6 +142,7 @@
 | b1-0 | 备份：docker inspect 与 compose 文件留档；pg_dumpall --globals-only 导出角色 | 无 | 丢弃备份 |
 | b1-1 | 建角色 dbmonitor_app（NOSUPERUSER、CONNECTION LIMIT 30） | DB 目录写入，不重启 | DROP ROLE |
 | b1-2 | 授权（两库 public schema、全部表/视图/序列、TimescaleDB 扩展与内部对象、必要时 CREATEDB —— 覆盖 dev 副本 migrate 能力，见 S-3） | 同上 | DROP ROLE 连带撤销 |
+| b1-6 | **首次建超表的属主责任划分（G-3 残余）**：TimescaleDB 的 create_hypertable／add_retention_policy／add_compression_policy 需**对象属主**权限 ⇒ dev 副本首次建超表由 **postgres 执行一次**（或按需把目标对象属主转给 dbmonitor_app）。★**责任方＝我方执行侧（b1 实施人），在 D2 后实施窗口内自行定人并回报**（依复核侧 r30 第一节：该项待 D2 后定人、复核侧不代裁）⇒ **不占 muse 裁决位** | 一次性初始化动作，不打断采集；属 b1 之后的独立动作 | 若走属主转移：ALTER TABLE … OWNER TO dbmonitor_app（回退再转回 postgres） |
 | b1-3 | DB_Monitor 开发副本切到该角色并重启该副本（宿主侧环境变量） | 用户工程，其 dev 连接断开重连；**G-5 已获准**（STATUS v1.47，限 b1 的 S3） | 环境变量切回 postgres 并重启 |
 | b1-4 | 受控验证（先验证 rolconnlimit 生效，再制造并发，见 S-4 与第七节） | 制造短暂连接压力 | 无需回退 |
 | b2（可选） | 改 C:\DB_Monitor\docker-compose.dev.yml 加 max_connections=200 → docker compose up -d timescaledb（**容器重建**） | 全部连接断 5–15 秒；重建 ≠ 原地重启；**暂缓、不在本次获准范围**（compose 改动属 b2） | 还原 compose 并再次 up |
@@ -166,7 +167,7 @@
 
 - 巡检脚本升级为 v2（scripts/pg_pool_audit.py）：只读、全 SELECT/SHOW、连接走容器内 psql 本地 socket（不读 .env、不落口令）、命令行输出经脱敏；新增分侧归组（客户端侧/服务端侧/监听属主）＋客户端侧 PID→进程映射＋client 口径占用率＋UTC/本地双时区（D-1/D-2/D-3/D-7/S-6 已闭合）。
 - 读数落库：docs/pm/reports/evidence/DB-026-pool-audit-20261113.json（结构：corrected_reading ＋ v1_raw_readings 原值保留并标注失真 ＋ corrections_applied ＋ supersedes_note）。
-- 今日巡检读数（v2 脚本、只读、client 口径）：12:38:20 → client 9／97＝9.28%；13:04:52 → client 9／97＝9.28%（含后台裸口径 18.0%）；**15:28:23 → client 13／97＝13.40%**（含后台裸口径 22.0%；client_side 43592×8／47216×2／39072×1，采集器链因 15:05 采集驱动上行；server_side 40492×12），三次均 alert=false；容器 StartedAt 仍 2026-11-13T01:37:12Z、RestartCount=0，采集器 48396／43592 与 Web 45704／47216 四进程在位。
+- 今日巡检读数（v2 脚本、只读、client 口径）：12:38:20 → client 9／97＝9.28%；13:04:52 → client 9／97＝9.28%（含后台裸口径 18.0%）；**15:28:23 → client 13／97＝13.40%**（含后台裸口径 22.0%；client_side 43592×8／47216×2／39072×1，采集器链因 15:05 采集驱动上行；server_side 40492×12），三次均 alert=false；容器 StartedAt 仍 2026-11-13T01:37:12Z、RestartCount=0，采集器 48396／43592 与 Web 45704／47216 四进程在位。★**今日收尾读数 20:13:39 → client 11／97＝11.34%**（含后台裸口径 20.0%；client_side 43592×5／47216×2／39072×1，server_side 40492×10），alert=false；★**D2 前全程未动库：dbmonitor_app／dbaiops_app 两角色实测仍为 0**（权威方 15:5x 独立查库同结论）。
 - 巡检节奏：11-14、11-15 各至少 1 次读数并落 evidence（新增文件，不覆盖既有证据），D2 复判前每轮在黑板留痕。
 - 若期间连接池再次占满：只报黑板（任务单跟进 + 本单报告留痕），不重启时序库容器、采集器、Web，也不擅自终止任何进程，等用户处置。
 - 本轮未重启任何进程，时序库容器 StartedAt 仍为 2026-11-13T01:37:12Z（本地 09:37:12）、RestartCount=0，未发生 postmaster 重启。
@@ -175,7 +176,7 @@
 
 - G-1：TimescaleDB 连续聚合与保留/压缩策略在 pg_dump/restore 下的保真度未实测 —— 只影响路径 (a) 的成本与风险估算，不影响首推 b1。
 - G-2：两份副本的 application_name 同为 db_monitor，现有 pg_stat_activity 无法逐副本归属连接；已备「application_name 可配置化」补丁（需重启 Web 与采集器才生效），未在 D2 窗口内动进程。
-- G-3：非 superuser 角色 dbmonitor_app 的授权完整性未实测 —— 已按 S-3 补齐清单（含 dev 副本 migrate 能力），待 b1-2 之后受控验证。
+- G-3：非 superuser 角色 dbmonitor_app 的授权完整性未实测 —— 已按 S-3 补齐清单（含 dev 副本 migrate 能力），待 b1-2 之后受控验证。★**属主权限残余（首次建超表）已定责**：由我方执行侧在 D2 后实施窗口自行定人并回报（不占 muse 裁决位，依复核侧 r30 第一节）；板面侧已由落笔方订正廿三（commit f7e47c4）把「平台侧须同批切角色＋设限额＋重启生效」三件事前提落板。
 - G-4：scripts/validate.sh unit 在本机无法整体跑通，两处均为环境口径、非仓库缺陷：①工作区 CRLF 行尾使 bash 解析报 set: pipefail invalid option name（与 SYNC14 记录的 G-7 同源）；②本机 bash 走 WSL，validate.sh 会激活 Windows 版 .venv/Scripts/activate，导致 python 解析为 Windows python.exe、无法解析 /mnt/c/... 路径，红线扫描阶段假失败。本轮以 Windows 解释器直跑 unit 的等价两阶段，结果见第十节。
 - G-5（**已获准、范围限定**）：STATUS v1.47 裁决 G-5 获准，**仅限 b1 的 S3**（DB_Monitor 开发副本 **C:\DB_Monitor** 的连接指向/角色切换/重启）；**其编排文件 C:\DB_Monitor\docker-compose.dev.yml 的 command 改动属 b2，不在本次获准范围**（b2 暂缓）。裁决前我方未动该工程任何文件。
 - G-6（**PM 裁与 b1 同批，方向差异据实并列**）：我方原建议「平台侧限额不与 b1 同期做、列 D2 后独立处置」，PM 裁「与 b1 同批」⇒ 落笔方已按 PM 方向取「同批」并记「治本不再只治一侧」，我方接受该处置、不代裁。★**执行前提（我方补齐）**：平台侧同批须「切角色＋设限额＋重启使其生效」三件事齐做（settings.py L237／L265 默认 superuser ⇒ 只设限额即空话）；ORM 在非生产 CONN_MAX_AGE=0 下的引用环滞留**按 PM 裁决列为已知问题**，不并入 b1。
@@ -190,6 +191,7 @@
   5. v1.2 追加订正（据复核方 13:1x 终态回签第三节「据实并列」）：§〇 D-3 行的裸口径按读时点拆开（18.0%→ 20.0%）、v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；§一 补「用户决策两粒度并列」口径；证据文件同步订正 true_client_usage_pct 8.26→8.25 并加注口径说明。**结论档位不变（有条件通过），无待办遗留。**
   6. v1.3 基线更新（据 STATUS v1.47 / commit 53a2900）：G-5 获准（限 b1 的 S3）、S-2 采纳平台侧同批实施、b2 暂缓且不在获准范围、用户 12:31 确认「治本照做、D2 之后实施」；据此订正我方 13:2x 函中已过期的「待裁决」状态描述，并补齐平台侧生效前提（切角色＋设限额＋重启生效三件事齐做，证据 settings.py L237／L265）。**结论档位不变（有条件通过）：评估面条件已满足，实施面待 11-15 09:50 D2 之后启动。**
   7. v1.4 增补实施物料索引（订单任务 2 的「D2 之前…备脚本、备回退」）：新增 scripts/db026_b1.ps1／db026_b1_apply.sql／db026_b1_rollback.sql 三个 D2 后执行件（默认只读校验；Apply/Rollback 四道闸门实测拒绝；测试期未写库、角色数仍为 0）。**报告结论、实施步骤内容与档位均不变**，仅增补物料索引与实测记录。
+  8. v1.5 增补三项（据复核侧 r30 与权威方 r32 的复核结论）：①**G-3 属主残余定责** —— 首次建超表（create_hypertable／保留策略／压缩策略 需属主权限）由我方执行侧在 D2 后实施窗口自行定人并回报，**不占 muse 裁决位**（复核侧 r30：不代裁、待 D2 后定人），并已落 §六 b1-6；②今日收尾巡检读数 20:13:39（client 11／97＝11.34%，alert=false，D2 前角色数实测仍为 0＝未动库）；③**备件入库状态的据实并列** —— 权威方 r32 第四节「三份 b1 物料未被 git 跟踪」为 15:3x 读时点快照，已被 b56f168（15:37:52）取代，现态为**已跟踪并已推送**（复核侧 r30 同判为代次差不判错）；我方 scripts/scan_secrets.py 实测 exit 0「密钥扫描通过」，三份备件**无任何明文口令赋值**，「不进仓库」一句本意指**凭据**不进仓库、备件本身入库且经扫描合格。**结论档位、实施步骤内容与档位均不变（有条件通过）**。
 - 未改动：docs/pm/STATUS.md、docs/pm/DECISIONS.md（muse 维护面）；未改动任何业务代码；未新增配置项（故不涉及 monitor/appconf.py SPECS 登记）；未改动复核方文件与 DB-005R 回执/母报告。
 - validate（因 G-4 环境口径，以 Windows 解释器直跑 unit 的等价两阶段，结果对应本版提交时点 HEAD）：
   - 红线扫描 .venv\Scripts\python.exe scripts/lint_redlines.py → exit 0（输出「红线约束扫描通过」）；
@@ -205,3 +207,4 @@
 | v1.2 | 2026-11-13 | MMMan | 据复核方 13:1x 终态回签（评估面闭环、条件已满足；复核件自身 3 处错误已由其 commit 6464830 订正）作两项据实并列订正：①§〇 D-3 行「含后台裸口径 18.0%」与 11/97 同句并列属沿用未标注（18.0% 实为 12:37:35 读数）→ 按读时点拆开为 12:38:20 读数的 20.0%；v1 首轮 client 口径 8.26%→8.25%（8/97＝8.2474%）；②§一 补「用户决策两粒度并列」口径（路径归属取 STATUS v1.46、当日动作取 L280＋问卷记录，操作约束取交集）；证据文件同步订正。**评估面档位不变（有条件通过），实施面不启动、G-5/G-6/评档待 muse/PM** |
 | v1.3 | 2026-11-13 | MMMan | 据 STATUS v1.47（commit 53a2900，14:38:02）作基线更新：G-5 获准（仅限 b1 的 S3；compose 改动属 b2、不在获准范围）、S-2 采纳（平台侧同设 CONNECTION LIMIT，与 b1 同批；ORM 滞留列为已知问题）、S-1 b1/b2 拆分（b2 暂缓）、用户 12:31 确认「治本照做、D2 之后实施」；订正我方 13:2x 函中已过期的「待裁决」状态描述，并补齐平台侧生效前提（同批须切角色＋设限额＋重启生效三件事齐做；settings.py L237／L265 默认 superuser）；今日巡检读数 12:38:20／13:04:52／15:28:23 三次（client 9／9／13，末次 13.40%，alert=false，容器与四进程未变）。**结论档位不变（有条件通过）：评估面条件已满足，实施面待 11-15 09:50 D2 之后启动** |
 | v1.4 | 2026-11-13 | MMMan | 增补实施物料索引（订单任务 2「D2 之前…备脚本、备回退」）：新增 scripts/db026_b1.ps1（驱动，默认只读 Verify；Apply/Rollback 须 -Confirm ＋ 环境变量注入口令）、db026_b1_apply.sql（建 dbmonitor_app LIMIT 30 与 dbaiops_app LIMIT 60 ＋ 两库授权，幂等，口令经 psql 变量注入）、db026_b1_rollback.sql（REASSIGN/DROP OWNED ＋ DROP ROLE 回退）；已实测四道闸门并确认测试期未写库（角色数 0）。**结论档位、实施步骤内容均不变（有条件通过），实施仍排在 11-15 09:50 D2 之后** |
+| v1.5 | 2026-11-13 | MMMan | 据复核侧 r30 与权威方 r32 增补三项：①G-3 属主残余定责（首次建超表由我方执行侧在 D2 后定人并回报，不占 muse 裁决位，落 §六 b1-6）；②今日收尾巡检读数 20:13:39（client 11／97＝11.34%，alert=false，D2 前角色数实测仍为 0）；③备件入库状态据实并列（r32 §4 为 15:3x 快照、已被 b56f168 取代，现态已跟踪已推送；scan_secrets exit 0 密钥扫描通过，备件无明文口令，「不进仓库」指凭据不入库）。**结论档位与实施步骤内容均不变（有条件通过），实施仍排在 11-15 09:50 D2 之后** |
