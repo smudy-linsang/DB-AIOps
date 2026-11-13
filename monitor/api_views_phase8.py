@@ -795,7 +795,7 @@ class LlmCredentialPingView(_BaseView):
             )
             res = provider.chat(
                 [{'role': 'user', 'content': "ping, 请确认连通并回复 pong"}],
-                scene='ping', max_tokens=150, json_mode=False
+                scene='ping', max_tokens=256, json_mode=False
             )
             result['ok'] = bool(res and res.content)
             result['reply'] = res.content if res else ''
@@ -916,7 +916,7 @@ class LlmTestConnectionView(_BaseView):
             t0 = time.time()
             res = provider.chat(
                 [{'role': 'user', 'content': "你好！请回复一句：DB-AIOps 智能助手连接测试成功！"}],
-                scene='test', max_tokens=32, json_mode=False)
+                scene='test', max_tokens=256, json_mode=False)
             result['ok'] = bool(res and res.content)
             result['reply'] = res.content if res else ''
             result['latency_ms'] = int((time.time() - t0) * 1000)

@@ -203,7 +203,10 @@ class AuditLogMiddleware:
                 try:
                     parsed = json.loads(body)
                     if isinstance(parsed, dict):
-                        for key in ('password', 'old_password', 'new_password', 'confirm_password'):
+                        for key in (
+                            'password', 'old_password', 'new_password', 'confirm_password',
+                            'api_key', 'llm_api_key', 'secret_key', 'access_token',
+                        ):
                             if key in parsed:
                                 parsed[key] = '******'
                         return json.dumps(parsed, ensure_ascii=False)[:2000]

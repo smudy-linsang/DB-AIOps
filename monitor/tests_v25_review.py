@@ -249,6 +249,38 @@ class LlmRbacAndConfigTests(TestCase):
         self.assertTrue(credential.api_key.startswith('enc:'))
         self.assertEqual(credential.proxy_url, '')
 
+    @override_settings(LLM_ALLOWED_ENDPOINT_HOSTS=('api.deepseek.com',))
+    def test_deepseek_credential_create_encrypts_and_redacts_audit_log(self):
+        from monitor.models import AuditLog, LLMProviderCredential
+        client = Client()
+        login(client, self.manager)
+        raw_key = 'sk-deepseek-test-secret-value'  # secret-scan: allow 测试夹具
+        response = client.post(
+            '/api/v1/llm/credentials/',
+            data=json.dumps({
+                'name': 'DeepSeek-Test',
+                'provider_type': 'deepseek',
+                'base_url': 'https://api.deepseek.com',
+                'model_name': 'deepseek-flash',
+                'api_key': raw_key,
+                'priority': 1,
+                'weight': 1,
+                'is_active': True,
+            }),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        cred = LLMProviderCredential.objects.get(name='DeepSeek-Test')
+        self.assertEqual(cred.base_url, 'https://api.deepseek.com')
+        self.assertEqual(cred.model_name, 'deepseek-flash')
+        self.assertTrue(cred.api_key.startswith('enc:'))
+        self.assertEqual(cred.get_api_key(), raw_key)
+        audit = AuditLog.objects.filter(
+            description__contains='/api/v1/llm/credentials/').order_by('-id').first()
+        self.assertIsNotNone(audit)
+        self.assertNotIn(raw_key, audit.sql_command)
+        self.assertIn('"api_key": "******"', audit.sql_command)
+
 
 @tag('unit')
 class RedlineAndPlaybookMechanismTests(TestCase):

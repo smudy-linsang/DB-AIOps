@@ -238,7 +238,10 @@ DATABASES = {
         'PASSWORD': POSTGRES_PASSWORD,
         'HOST': os.environ.get('POSTGRES_HOST', 'localhost'),
         'PORT': os.environ.get('POSTGRES_PORT', '5432'),
-        'CONN_MAX_AGE': 60,  # 持久连接 1 分钟（开发环境，避免连接池耗尽）
+        # runserver 每请求新建短命线程且 close_request 不调用 connections.close_all()，
+        # 非生产环境置 CONN_MAX_AGE>0 会让线程退出后的 DatabaseWrapper 引用环滞留
+        # PostgreSQL 连接直至 Gen-2 GC 才释放，并发请求下会打满 max_connections=100。
+        'CONN_MAX_AGE': int(os.environ.get('DB_CONN_MAX_AGE', 60 if IS_PRODUCTION else 0)),
         'OPTIONS': {
             'connect_timeout': 10,
             'application_name': 'db_monitor',

@@ -577,7 +577,11 @@ export default function LLMConfigSettings() {
                             type={globalTestResult.ok ? 'success' : 'error'}
                             showIcon
                             message={globalTestResult.ok ? '大模型连接正常' : '连接失败'}
-                            description={<div>• 响应: {globalTestResult.reply || 'pong'} · 时延: {globalTestResult.latency_ms}ms</div>}
+                            description={
+                              globalTestResult.ok
+                                ? <div>• 响应: {globalTestResult.reply || 'pong'} · 时延: {globalTestResult.latency_ms}ms</div>
+                                : <div>• 错误: {globalTestResult.error || '未知错误'} · 时延: {globalTestResult.latency_ms}ms</div>
+                            }
                           />
                         )}
                       </Form>
