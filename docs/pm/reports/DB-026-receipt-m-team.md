@@ -8,7 +8,7 @@
   1. 本单评估与实施报告 docs/pm/reports/DB-026-report-m-team.md（v1.0 评估版，第一行结论「有条件通过」）
   2. 只读连接池巡检脚本 scripts/pg_pool_audit.py + 首日读数 docs/pm/reports/evidence/DB-026-pool-audit-20261113.json
 - 预计交付时间：
-  - 评估部分（D2 前）：2026-11-13 当日交付 —— 已具备交付条件
+  - 评估部分（D2 前）：2026-11-13 当日交付 —— 已具备交付条件（v1.0 已交，v1.1 订正版同日交付）
   - 实施部分：D2 复判（11-15 09:50）之后首个可动窗口内执行，实施后补终版报告（v2.0）
 
 ## 接单口径确认
@@ -22,13 +22,14 @@
 ## 评估阶段已取得的关键实测事实（详见报告）
 
 - 时序库容器 db-aiops-timescaledb 实测 max_connections=100、superuser_reserved_connections=3。
-- 库清单与体量：timeseriesdb 1205 MB、db_monitor 560 MB（public 表 105 张）、test_db_monitor 16 MB、postgres 9351 kB。
+- 库清单与体量（12:3x 复测）：timeseriesdb 1210 MB、db_monitor 561 MB（public 对象 105）、postgres 9351 kB、template0/template1；test_db_monitor 已删除（v1.0 回执误列，见报告 §〇 D-4）。
 - 行数：metric_point 2,171,816；sql_stat 269,622；collection_snapshot 136,348；session_sample 0。
-- 占用方定位：DB_Monitor 开发实例与本仓共用同一容器与同一组库；宿主侧 netstat 实测 PID 40492 = wslrelay.exe 持 7 条到 5432 的 ESTABLISHED，即 WSL 侧实例为活着占用方。
-- 11-13 11:58:08 巡检读数：17/100（17.0%），client backends 8（idle 7 / active 1），application_name db_monitor 4 / (none) 3 / psql 1，未达 80% 告警阈值。
+- 占用方定位（订正）：DB_Monitor 开发副本与本仓共用同一容器与同一组库；宿主侧 netstat **分侧**实测：客户端侧（远端＝5432，真正占用方）＝采集器链 43592×7、平台 Web 链 47216×2、DB_Monitor 开发副本 39072×1；服务端侧 40492＝wslrelay.exe×10 与监听属主 36736＝com.docker.backend.exe 皆非占用方（v1.0 回执此处表述不据实，见报告 §〇 D-1）。
+- 巡检读数（订正口径）：v1 首轮 11:58:08 的 17/100＝17.0% 系裸 count(*) 含后台进程所致，真实 client 口径为 8.26%；v2 脚本 12:4x 读数＝client backends 11／可用槽 97＝11.34%，未达 80% 告警阈值。证据已订正并保留 v1 原值供追溯。
 
 ## 版本记录
 
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-13 | MMMan | DB-026 接单回执与 ETA 登记 |
+| v1.1 | 2026-11-13 | MMMan | 据 DB-026 独立复核（commit 2d6d6c0）订正本回执中的占用方归因、库清单与巡检读数口径三处表述（详见报告 §〇 D-1/D-3/D-4）；结论与 ETA 不变 |

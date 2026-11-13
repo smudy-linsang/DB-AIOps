@@ -1,24 +1,126 @@
 {
-  "container": "db-aiops-timescaledb",
-  "checked_at": "2026-11-13 11:58:08",
-  "max_connections": 100,
-  "superuser_reserved": 3,
-  "total_backends": 17,
-  "client_backends": 8,
-  "by_state": {
-    "idle": 7,
-    "active": 1
+  "audit_version": "v2（分侧归组 + client 口径 + 时区标注）",
+  "audit_script": "scripts/pg_pool_audit.py",
+  "corrections_applied": {
+    "D_1": "netstat 改为分侧归组：client_side（远端＝5432＝真正占用方）／server_side（本地＝5432）／listening_owners；不再把服务端侧或中继侧属主（wslrelay.exe）当作占用方",
+    "D_2": "占用方 PID 改为客户端侧归组，并映射进程名与脱敏命令行",
+    "D_3": "占用率分子改 backend_type='client backend'，分母 max_connections - superuser_reserved_connections；含后台进程的裸计数单列",
+    "D_7": "最老连接同时给 UTC 与 Asia/Shanghai 本地时并标注时区"
   },
-  "by_application_name": {
-    "db_monitor": 4,
-    "(none)": 3,
-    "psql": 1
+  "supersedes_note": "本文件 v1 读数（11:58:08 / 12:37:14）口径失真：裸 count(*) 含后台进程、netstat 仅取服务端侧行；原值原样保留在 v1_raw_readings 供追溯，以 corrected_reading 为准",
+  "corrected_reading": {
+    "max_connections": 100,
+    "superuser_reserved_connections": 3,
+    "max_worker_processes": 35,
+    "client_usable_slots": 97,
+    "total_backends_all_types": 20,
+    "client_backends": 11,
+    "background_backends": 9,
+    "client_slot_usage_pct": 11.34,
+    "total_ratio_pct_including_background": 20,
+    "by_state_client_only": {
+      "idle": 10,
+      "active": 1
+    },
+    "by_application_name": {
+      "db_monitor": 7,
+      "(none)": 3,
+      "psql": 1
+    },
+    "by_client_addr": {
+      "172.22.0.1/32": 10,
+      "(local)": 1
+    },
+    "oldest_client_backend": {
+      "utc": "2026-11-13 02:27:12",
+      "local_cst": "2026-11-13 10:27:12"
+    },
+    "oldest_client_backend_tz_note": "PG timestamp 为 UTC；local_cst 为 Asia/Shanghai (+08:00)",
+    "checked_at_local_cst": "2026-11-13 12:38:20",
+    "checked_at_utc": "2026-11-13 04:38:20",
+    "container": "db-aiops-timescaledb",
+    "host_tcp": {
+      "client_side_by_pid": {
+        "39072": 1,
+        "43592": 7,
+        "47216": 2
+      },
+      "client_side_processes": {
+        "39072": {
+          "name": "python.exe",
+          "cmdline": "python.exe -u manage.py runserver --noreload 0.0.0.0:8000"
+        },
+        "43592": {
+          "name": "pythonw.exe",
+          "cmdline": "\"C:\\Users\\linsa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\pythonw.exe\"  manage.py start_monitor"
+        },
+        "47216": {
+          "name": "pythonw.exe",
+          "cmdline": "\"C:\\Users\\linsa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\pythonw.exe\"  manage.py runserver 127.0.0.1:8009 --noreload"
+        }
+      },
+      "server_side_by_pid": {
+        "40492": 10
+      },
+      "server_side_processes": {
+        "40492": {
+          "name": "wslrelay.exe",
+          "cmdline": " --mode 2 --vm-id {5eba426e-89af-423c-8cce-b3e4b885d449} --handle 1716"
+        }
+      },
+      "listening_owners_by_pid": {
+        "36736": 2,
+        "40492": 1
+      },
+      "listening_owner_processes": {
+        "36736": {
+          "name": "com.docker.backend.exe",
+          "cmdline": "\"C:\\Program Files\\Docker\\Docker\\resources\\com.docker.backend.exe\" services"
+        },
+        "40492": {
+          "name": "wslrelay.exe",
+          "cmdline": " --mode 2 --vm-id {5eba426e-89af-423c-8cce-b3e4b885d449} --handle 1716"
+        }
+      },
+      "note": "client_side = 远端为服务端口者（真正连着库的一方＝占用方）；server_side / listening_owners = 服务端侧或中继侧 socket 属主，不是占用方"
+    },
+    "threshold_pct": 80,
+    "threshold_basis": "client_backends / client_usable_slots（已扣 superuser_reserved_connections）",
+    "alert": false
   },
-  "oldest_backend_start": "2026-11-13 02:27:12",
-  "usage_pct": 17.0,
-  "host_tcp_established_by_pid": {
-    "40492": 7
-  },
-  "threshold_pct": 80,
-  "alert": false
+  "v1_raw_readings": [
+    {
+      "checked_at": "2026-11-13 11:58:08",
+      "audit_version": "v1",
+      "total_backends": 17,
+      "client_backends": 8,
+      "by_state": {
+        "idle": 7,
+        "active": 1
+      },
+      "by_application_name": {
+        "db_monitor": 4,
+        "(none)": 3,
+        "psql": 1
+      },
+      "oldest_backend_start_utc": "2026-11-13 02:27:12",
+      "usage_pct": 17,
+      "host_tcp_established_by_pid": {
+        "40492": 7
+      },
+      "defect": "usage_pct 分子含后台进程；host 归组只取服务端侧行 ⇒ 40492 非占用方",
+      "true_client_usage_pct": 8.26
+    },
+    {
+      "checked_at": "2026-11-13 12:37:14",
+      "audit_version": "v1",
+      "total_backends": 21,
+      "client_backends": 14,
+      "usage_pct": 21,
+      "host_tcp_established_by_pid": {
+        "40492": 13
+      },
+      "defect": "同上口径失真"
+    }
+  ]
 }
