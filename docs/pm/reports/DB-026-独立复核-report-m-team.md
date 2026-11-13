@@ -4,6 +4,7 @@
 
 - 单号：DB-026（连接池治本——独立实例或调高 max_connections）
 - 被复核物：`docs/pm/reports/DB-026-report-m-team.md`（v1.0 评估版，141 行，commit `ed02832`）、`docs/pm/reports/DB-026-receipt-m-team.md`（34 行）、`scripts/pg_pool_audit.py`（142 行）、`docs/pm/reports/evidence/DB-026-pool-audit-20261113.json`
+- 被复核物后续状态（本次订正读时点 2026-11-13 13:0x）：交付方 v1.1 订正版已入库（commit `e70fb4d`，12:40:31；`git merge-base --is-ancestor e70fb4d HEAD`＝0），我方终态只读复核首轮逐项成立；本 v1.1 订正仅涉本复核件自身的 3 处事实／数值错误，D-1～D-8 判项、S-1～S-6 建议与「有条件通过」的档位意见均不变。
 - 复核方：MMMan 复核侧（会话 `mvs_1a094fd33c62497595e277740566024b`），受落笔方 v5 函第 3 条请求承接
 - 复核读时点：**2026-11-13 12:14–12:19（本地时 +08:00）**
 - 基线 HEAD：`c47d20b`（main，`HEAD...origin/main` = 0/0）
@@ -63,15 +64,16 @@
 
   | 时点 | total（含后台） | client backend | 后台进程 | 脚本 usage_pct | 真实客户端槽位占用 |
   |---|---|---|---|---|---|
-  | 11-13 11:58:08（首日证据） | 17 | 8 | 9 | 17.0% | **8.0%** |
-  | 11-13 12:18:39（我方实跑脚本） | 20 | 11 | 9 | 20.0% | **11.0%** |
+  | 11-13 11:58:08（首日证据） | 17 | 8 | 9 | 17.0% | **8.25%**（8/97） |
+  | 11-13 12:18:39（我方实跑脚本） | 20 | 11 | 9 | 20.0% | **11.34%**（11/97） |
 
 - ⇒ 报告 L44「total_backends 17/100 ＝ 17.0%」与 §七-1 判据「占用率 < 80%」须改用 `backend_type='client backend'` 口径，并显式扣 `superuser_reserved_connections=3`（非 superuser 可用槽位＝97）；另 JSON 中 `total_backends` 与 `client_backends` 并列，易被引用为「占用数」。
+- ⇒ 上表末列「真实客户端槽位占用」的分母＝`max_connections - superuser_reserved_connections`＝**97**（与本条「须显式扣 3」同一口径；v1.0 原稿该两格按 100 算、与本条自相矛盾，本次订正）：8/97＝8.2474% ⇒ **8.25%**、11/97＝11.3402% ⇒ **11.34%**（后者与交付方证据 JSON v2 `corrected_reading.client_slot_usage_pct`＝11.34 逐位一致）；交付方 v1 原始读数段记 `true_client_usage_pct`＝8.26%、其 v1.1 报告 L19 同记 8.26%（与 8/97＝8.2474% 差 0.0126pp，属舍入／录入级差异，不影响本项任何判项结论）；★该类读数随连接建立／释放浮动，引用须带读时点与口径，不可作定值基准。
 
 ### D-4（不据实）库清单含已不存在的 `test_db_monitor`
 
 - 报告 L25／回执 L25：「库清单与体量：timeseriesdb 1205 MB、db_monitor 560 MB、**test_db_monitor 16 MB**、postgres 9351 kB」。
-- 实测 `pg_database` 仅 5 库（`db_monitor`、`postgres`、`template0`、`template1`、`timeseriesdb`）；`select count(*) from pg_database where datname='test_db_monitor'` ＝ **0**；仓库 `docs/V3.0_DIALECT_MATRIX.md:87` 载有 `DROP DATABASE IF EXISTS test_db_monitor;` ⇒ 该库系历史遗留且已删除，报告把文档／配置中出现过的库名写进了「实测库清单」。
+- 实测 `pg_database` 仅 5 库（`db_monitor`、`postgres`、`template0`、`template1`、`timeseriesdb`）；`select count(*) from pg_database where datname='test_db_monitor'` ＝ **0**；仓库根目录 `V3.0_DIALECT_MATRIX.md:87` 载有 `DROP DATABASE IF EXISTS test_db_monitor;` ⇒ 该库系历史遗留且已删除，报告把文档／配置中出现过的库名写进了「实测库清单」。
 - 影响面小（与治本路径无关），但「实测事实基线」一节的库清单不据实。
 
 ### D-5（实现落点错记，影响路径 (b) 的改动落点与 G-5 范围）
@@ -155,3 +157,4 @@
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-13 | MMMan（复核侧） | DB-026 评估版独立只读复核：13 项据实核验通过、8 项须订正（D-1～D-8）、6 项建议增补（S-1～S-6）；复核意见＝有条件通过（须先订正） |
+| v1.1 | 2026-11-13 | MMMan（复核侧） | 订正本复核件自身 3 处错误：① D-4 所引方言矩阵路径 `docs/V3.0_DIALECT_MATRIX.md:87` 不存在（`git cat-file -e HEAD:docs/V3.0_DIALECT_MATRIX.md`＝exit 128），实为仓库根目录 `V3.0_DIALECT_MATRIX.md:87`（＝exit 0；该文件第 87 行原文＝`DROP DATABASE IF EXISTS test_db_monitor;`）——事实成立、仅路径标注错；② D-3 表末列两格槽位占用率按分母 100 误算（8.0%／11.0%），改按本条自订口径（扣 `superuser_reserved_connections`＝3、可用槽位 97）＝**8.25%**（8/97）与 **11.34%**（11/97，与交付方证据 JSON v2 逐位一致；交付方记 8.26%，差 0.0126pp 属舍入／录入级，不影响判项结论）；③ 增补被复核物后续状态与分母口径说明。判项结论与档位意见一字未改 |
