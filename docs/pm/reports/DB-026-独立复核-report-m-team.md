@@ -4,7 +4,7 @@
 
 - 单号：DB-026（连接池治本——独立实例或调高 max_connections）
 - 被复核物：`docs/pm/reports/DB-026-report-m-team.md`（v1.0 评估版，141 行，commit `ed02832`）、`docs/pm/reports/DB-026-receipt-m-team.md`（34 行）、`scripts/pg_pool_audit.py`（142 行）、`docs/pm/reports/evidence/DB-026-pool-audit-20261113.json`
-- 被复核物后续状态（本次订正读时点 2026-11-13 13:0x）：交付方 v1.1 订正版已入库（commit `e70fb4d`，12:40:31；`git merge-base --is-ancestor e70fb4d HEAD`＝0），我方终态只读复核首轮逐项成立；本 v1.1 订正仅涉本复核件自身的 3 处事实／数值错误，D-1～D-8 判项、S-1～S-6 建议与「有条件通过」的档位意见均不变。
+- 被复核物后续状态（本次订正读时点 2026-11-13 20:0x）：交付方 **v1.4** 已入库（基线更新 commit `a44a5d3`，15:30:26；措辞一致性订正 commit `6974c9a`，15:30:58；物料索引增补 commit `b56f168`，15:37:52；`git merge-base --is-ancestor b56f168 HEAD`＝0），据 STATUS v1.47（commit `53a2900`，14:38:02）载：G-5 获准（**仅限 b1 的 S3**）、S-2 采纳（平台侧同设 CONNECTION LIMIT、与 b1 同批）、S-1 拆分（b2 暂缓且其 compose 改动不在获准范围）、用户 12:31 确认「治本照做、D2 之后实施」；★v1.3 已把我方 r27 函提出的「平台侧须同批『切角色＋设限额＋重启使其生效』三件事齐做」写入 §六 b1-5 实施步骤（证据：`dbmonitor/settings.py` L237／L265 默认身份为 superuser）；★**v1.4 增补 b1 实施物料索引**（commit `b56f168`，15:37:52：报告 ＋4 行 ＋ 三份 D2 后执行件入库——`scripts/db026_b1.ps1` 96 行／`db026_b1_apply.sql` 100 行／`db026_b1_rollback.sql` 32 行；其版本行载「四道闸门实测拒绝、测试期未写库、角色数仍为 0」）⇒ ★**v1.4 的报告结论／档位／实施步骤内容均不变** ⇒ ★**本 v1.3 订正涉本复核件自身 2 项：① 1 处口径缺漏（§一 表 3 行未写明库名）② 被复核物基线同步至 v1.4；D-1～D-8 判项、S-1～S-6 建议与「有条件通过」的档位意见均不变。**
 - 复核方：MMMan 复核侧（会话 `mvs_1a094fd33c62497595e277740566024b`），受落笔方 v5 函第 3 条请求承接
 - 复核读时点：**2026-11-13 12:14–12:19（本地时 +08:00）**
 - 基线 HEAD：`c47d20b`（main，`HEAD...origin/main` = 0/0）
@@ -26,7 +26,7 @@
 |---|---|---|---|
 | 1 | §2.1 L24：`max_connections=100`、`superuser_reserved_connections=3` | 同值；另测得 `max_worker_processes=35` | 据实 |
 | 2 | §2.1 L25：timeseriesdb 1205 MB／db_monitor 560 MB／postgres 9351 kB | 1,266,433,047 B（≈1207.8 MB）／587,799,575 B（≈560.6 MB）／9,575,447 B（≈9.13 MB） | 据实（随写入自然增长） |
-| 3 | §2.1 L26：metric_point 2,171,816／sql_stat 269,622／collection_snapshot 136,348／session_sample 0 | 2,177,848／271,094／136,441／0；sql_stat max(time)＝2026-11-13 04:15:23 UTC（＝12:15:23 本地）续写中 | 据实 |
+| 3 | §2.1 L26（★**库＝timeseriesdb**）：metric_point 2,171,816／sql_stat 269,622／collection_snapshot 136,348／session_sample 0 | ★**库＝timeseriesdb**：2,177,848／271,094／136,441／0；sql_stat max(time)＝2026-11-13 04:15:23 UTC（＝12:15:23 本地）续写中 | 据实（★**库名须随行数引用**：三表在 timeseriesdb；db_monitor 下存在同名近空表，照该库复现得近零行、误导出「数据面停写」——权威方 13:1x 实测 db_monitor 的 collection_snapshot 仅 8 行／max(time)＝2026-09-14、sql_stat 0 行） |
 | 4 | §2.1 L27：db_monitor public 表数 105 张 | `information_schema.tables`（表+视图）＝105 ✓；`pg_tables` 口径＝**102** | 数字可复现，口径标签需精确化（见 S-5） |
 | 5 | §2.3 L37：DB_Monitor 开发实例存在 | Windows 侧 47884→39072（`python.exe -u manage.py runserver --noreload 0.0.0.0:8000`）在跑 | 实例存在据实；「两侧并列两实例」不据实，见 D-1 附注 |
 | 6 | §2.3 L38：两份副本共用同一容器同一组库 | docker inspect labels：compose project＝`db_monitor`、config_files＝`C:\DB_Monitor\docker-compose.dev.yml`、service＝timescaledb、命名卷＝`db_monitor_timeseries_data`；容器名 `db-aiops-timescaledb` | 据实（比报告更精确，落点问题见 D-5） |
@@ -143,13 +143,14 @@
 8. `docker inspect db-aiops-timescaledb --format "{{json .Config.Labels}}"` / `{{json .Mounts}}` / `{{json .Config.Cmd}}`（→ D-5／D-6）
 9. `C:\DB-AIOps\.venv\Scripts\python.exe C:\DB-AIOps\scripts\pg_pool_audit.py`（只读实跑对照，12:18:39 → total 20／client 11／usage_pct 20.0／host {"40492": 10}）
 10. `git -C C:\DB_Monitor remote -v`、`git -C C:\DB_Monitor rev-parse HEAD`（→ 表 12）
+11. 表 3 行的三表行数与 max(time) 取自 **timeseriesdb**（★库名不可省）：`docker exec db-aiops-timescaledb psql -U postgres -d timeseriesdb -A -t -c "select count(*) from metric_point;"`，同法取 `sql_stat`／`collection_snapshot`／`session_sample` 的 count(*) 与 `max(time)`（→ 表 3）；★**切勿在 db_monitor 上复现这三张表**（同名近空表，会得近零行并误判「数据面停写」——权威方 13:1x 实测）
 
 ## 五、我方边界声明
 
 - 本复核为**只读独立复核**：未动库、未改任何配置（含不改 `max_connections`）、未启停任何进程／容器、未新增证据文件 ⇒ **DB-005R 证据仍 66 份（file_count 66／total_bytes 535574／scan_scope 45 不变）**；DB-005R 回执与母报告未动（母报告维持 v1.4／有条件通过）；STATUS.md／DECISIONS.md 未动（muse 维护面）。
 - 本复核**不构成对 DB-026 评估版的评档**，仅出具复核意见；评档由 muse／PM 侧依板面流程作出。
 - 路径最终选择（(b) vs (a′)）、S-1 拆分取舍、S-2 是否补齐，**我方不代裁**，仅提建议。
-- G-5（能否改动 `C:\DB_Monitor`）口径**不自行认定**，经 MMMan 转 muse。
+- G-5（能否改动 `C:\DB_Monitor`）口径**不自行认定**，经 MMMan 转 muse；★现态＝已由 STATUS v1.47 裁出（**G-5 获准、仅限 b1 的 S3**；其编排文件改动属 b2、不在获准范围），我方据实并列、不代裁。
 - 落笔归属自注：本件由 **MMMan 复核侧会话 `mvs_1a094fd33c62497595e277740566024b`** 于 2026-11-13 12:1x 落笔；与 DB-026 交付方会话（`mvs_1ec15a51d…`）**不是同一会话**，本复核不修改其交付物。
 
 ## 版本记录
@@ -158,3 +159,5 @@
 |---|---|---|---|
 | v1.0 | 2026-11-13 | MMMan（复核侧） | DB-026 评估版独立只读复核：13 项据实核验通过、8 项须订正（D-1～D-8）、6 项建议增补（S-1～S-6）；复核意见＝有条件通过（须先订正） |
 | v1.1 | 2026-11-13 | MMMan（复核侧） | 订正本复核件自身 3 处错误：① D-4 所引方言矩阵路径 `docs/V3.0_DIALECT_MATRIX.md:87` 不存在（`git cat-file -e HEAD:docs/V3.0_DIALECT_MATRIX.md`＝exit 128），实为仓库根目录 `V3.0_DIALECT_MATRIX.md:87`（＝exit 0；该文件第 87 行原文＝`DROP DATABASE IF EXISTS test_db_monitor;`）——事实成立、仅路径标注错；② D-3 表末列两格槽位占用率按分母 100 误算（8.0%／11.0%），改按本条自订口径（扣 `superuser_reserved_connections`＝3、可用槽位 97）＝**8.25%**（8/97）与 **11.34%**（11/97，与交付方证据 JSON v2 逐位一致；交付方记 8.26%，差 0.0126pp 属舍入／录入级，不影响判项结论）；③ 增补被复核物后续状态与分母口径说明。判项结论与档位意见一字未改 |
+| v1.2 | 2026-11-13 | MMMan（复核侧） | 订正本复核件自身 1 处口径缺漏并同步被复核物基线：① §一 表 3 行补「**库＝timeseriesdb**」——三表（metric_point／sql_stat／collection_snapshot／session_sample）在 timeseriesdb，db_monitor 下存在同名近空表，照该库复现得近零行、误导出「数据面停写」（依据：我方 12:1x 独立实测 136,441 行／sql_stat max(time) 04:15:23 UTC ＋ 权威方 13:1x 实测 db_monitor 的 collection_snapshot 仅 8 行、sql_stat 0 行）；② §四 补一条带 `-d timeseriesdb` 的可复现命令；③ 被复核物后续状态更新至 **v1.3**（`a44a5d3` 15:30:26／`6974c9a` 15:30:58）——G-5 获准（限 b1 的 S3）、S-2 采纳、b2 暂缓，且我方 r27 的「平台侧三件事齐做」前提已被写入 §六 b1-5；④ §五 G-5 句据实补注现态（已由 STATUS v1.47 裁出）。★D-1～D-8 判项、S-1～S-6 建议与「有条件通过」的档位意见一字未改 |
+| v1.3 | 2026-11-13 | MMMan（复核侧） | 同步被复核物基线至 **v1.4**（commit `b56f168`，15:37:52）：v1.4 增补 b1 实施物料索引——三份 D2 后执行件入库（`scripts/db026_b1.ps1` 96 行／`db026_b1_apply.sql` 100 行／`db026_b1_rollback.sql` 32 行），其版本行载「四道闸门实测拒绝、测试期未写库、角色数仍为 0」；★**报告结论／档位／实施步骤内容均不变**（有条件通过），实施仍排在 11-15 09:50 D2 之后。★D-1～D-8 判项、S-1～S-6 建议与「有条件通过」的档位意见一字未改。（本行随 v1.2 的 1 处口径缺漏订正一并入库。） |
