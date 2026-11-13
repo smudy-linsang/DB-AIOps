@@ -1,0 +1,70 @@
+{
+ "order": "DB-005R",
+ "generated_by": "M-team (MMMan)",
+ "generated_at": "2026-11-13 10:33",
+ "topic": "11-13 上午数据面恢复实测：连接池释放 → 常驻采集器与平台 Web 拉起 → sql_stat 断点闭合（并附今日三轮前提订正依据）",
+ "connection_pool_release": {
+  "read_at": "2026-11-13 10:26",
+  "established_to_timeseries": 0,
+  "max_connections": 100,
+  "note": "10:1x 时 ESTABLISHED=100（DB_Monitor 开发实例占满 max_connections=100）；10:26 实测归零 ⇒ 该开发实例（manage.py runserver，绑定本地平台端口，由 Antigravity IDE language server 经 WSL 启动）退出后连接释放"
+ },
+ "collector_relaunch": {
+  "watchdog_launch_at": "2026-11-13 10:27:10",
+  "launched_pid": 48396,
+  "up_at": "2026-11-13 10:27:19",
+  "up_pids": [48396, 43592],
+  "note": "守护退避期（10:26:34）到期后一轮即拉起成功（9 秒），此前 10:14 那轮失败根因（too many clients）已消失"
+ },
+ "sql_stat_resumed": {
+  "read_at": "2026-11-13 10:31/10:32",
+  "rows_total_at_1031": 264109,
+  "max_time_utc": "2026-11-13 02:31:26.717895+00",
+  "max_time_local": "2026-11-13 10:31:26",
+  "rows_since_20261112_1900": 229,
+  "per_target_max_time_local": {
+   "db_config_id_1": "2026-11-13 10:32:19",
+   "db_config_id_3": "2026-11-13 10:32:17",
+   "db_config_id_10": "2026-11-13 10:32:16",
+   "db_config_id_16": "2026-11-13 10:32:17",
+   "db_config_id_18": "2026-11-13 10:31:26",
+   "db_config_id_19": "2026-11-13 10:32:27"
+  },
+  "resumed_targets_count": 6,
+  "gap_closed_at": "2026-11-13 10:29:20",
+  "gap_note": "sql_stat 序列的空洞自 11-12 19:23:17 延至 11-13 10:29:20（约 15 小时 06 分）后闭合；闭合后各采集目标逐路续写"
+ },
+ "collection_snapshot": {
+  "rows_total_at_1031": 135770,
+  "max_time_utc": "2026-11-13 02:31:26.575101+00",
+  "max_time_local": "2026-11-13 10:31:26",
+  "note": "快照面持续在写，未因采集器缺席而中断"
+ },
+ "web_watchdog_same_defect": {
+  "defect": "pending_until 仅存 HH:MM:SS、跨日比较恒真（11-12 写的 '23:43:12' 在 11-13 10:26 仍被判未到退避期）⇒ 平台 Web 自 11-12 23:43 起再未被拉起约 10.7 小时，且将卡至当晚",
+  "fix": "改存完整时间戳并按日期比较；旧纯时刻形态无日期可判，一律视为已过期（与采集守护同法修正）",
+  "backup": "mman_web_watchdog.py.bak-20261113-103108（另备份 state 文件）",
+  "py_compile_exit": 0,
+  "launch_at": "2026-11-13 10:31:21",
+  "launched_pid": 45704,
+  "healthy_at": "2026-11-13 10:31:27",
+  "health_status": 200,
+  "health_body": "{\"status\": \"ok\"}",
+  "note": "属装置层修正，不改业务代码、不入库；修正后平台 API 端口恢复监听，判定链 HTTP 端点重新可达"
+ },
+ "today_rounds_premises_revised": {
+  "revised_at": "2026-11-13 10:32",
+  "platform_api_reachable": "是（10:31:27 health 200）",
+  "collector_resident_running": "是（10:27:19 起）",
+  "timeseries_connectable": "是（ESTABLISHED=10）",
+  "revision": "上一条「三轮预期全部失败」的读时点为 10:2x；据此订正为「三项前提已恢复，15:05/15:35/16:05 三轮待实跑验证」",
+  "remaining_caveat": "sql_stat 存在 11-12 19:23:17→11-13 10:29:20 的空洞 ⇒ 11-12 15:00 桶仍缺；11-13/11-14 桶取决于连驱是否在采集面存活期内成功"
+ },
+ "residual_risk": {
+  "holder_restarted_at": ["2026-11-13 10:26:54", "2026-11-13 10:26:55"],
+  "holder_pids": [47884, 39072],
+  "note": "DB_Monitor 开发实例已于连接池释放后随即重启 ⇒ 11-12 曾持 100/100 连接致 max_connections 打满的成因仍在；若再次并发压满，采集器与平台将再度被拒（too many clients already）⇒ 待用户侧处置",
+  "awaiting_user": true
+ },
+ "masking": "本机地址与端口统一掩码为 <local-host> / <platform-port>；口令与令牌全程不入证据。"
+}
