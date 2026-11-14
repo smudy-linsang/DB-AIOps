@@ -1,0 +1,84 @@
+{
+  "max_connections": 100,
+  "superuser_reserved_connections": 3,
+  "max_worker_processes": 35,
+  "client_usable_slots": 97,
+  "total_backends_all_types": 21,
+  "client_backends": 12,
+  "background_backends": 9,
+  "client_slot_usage_pct": 12.37,
+  "net_client_backends_excluding_audit_connection": 11,
+  "net_client_slot_usage_pct": 11.34,
+  "reading_basis_note": "client_backends 含本脚本自身那条只读 psql 查询连接（1 条）；净占用＝client_backends−1；两个口径并列输出，引用时须写明用哪一个",
+  "total_ratio_pct_including_background": 21.0,
+  "by_state_client_only": {
+    "idle": 11,
+    "active": 1
+  },
+  "by_application_name": {
+    "db_monitor": 8,
+    "(none)": 3,
+    "psql": 1
+  },
+  "by_client_addr": {
+    "172.22.0.1/32": 11,
+    "(local)": 1
+  },
+  "oldest_client_backend": {
+    "utc": "2026-11-13 02:27:12",
+    "local_cst": "2026-11-13 10:27:12"
+  },
+  "oldest_client_backend_tz_note": "PG timestamp 为 UTC；local_cst 为 Asia/Shanghai (+08:00)",
+  "checked_at_local_cst": "2026-11-14 14:56:21",
+  "checked_at_utc": "2026-11-14 06:56:21",
+  "container": "db-aiops-timescaledb",
+  "host_tcp": {
+    "client_side_by_pid": {
+      "47216": 4,
+      "43592": 6,
+      "39072": 1
+    },
+    "client_side_processes": {
+      "39072": {
+        "name": "python.exe",
+        "cmdline": "python.exe -u manage.py runserver --noreload 0.0.0.0:8000"
+      },
+      "43592": {
+        "name": "pythonw.exe",
+        "cmdline": "\"C:\\Users\\linsa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\pythonw.exe\"  manage.py start_monitor"
+      },
+      "47216": {
+        "name": "pythonw.exe",
+        "cmdline": "\"C:\\Users\\linsa\\AppData\\Roaming\\uv\\python\\cpython-3.11-windows-x86_64-none\\pythonw.exe\"  manage.py runserver 127.0.0.1:8009 --noreload"
+      }
+    },
+    "server_side_by_pid": {
+      "40492": 11
+    },
+    "server_side_processes": {
+      "40492": {
+        "name": "wslrelay.exe",
+        "cmdline": " --mode 2 --vm-id {5eba426e-89af-423c-8cce-b3e4b885d449} --handle 1716"
+      }
+    },
+    "listening_owners_by_pid": {
+      "36736": 2,
+      "40492": 1
+    },
+    "listening_owner_processes": {
+      "36736": {
+        "name": "com.docker.backend.exe",
+        "cmdline": "\"C:\\Program Files\\Docker\\Docker\\resources\\com.docker.backend.exe\" services"
+      },
+      "40492": {
+        "name": "wslrelay.exe",
+        "cmdline": " --mode 2 --vm-id {5eba426e-89af-423c-8cce-b3e4b885d449} --handle 1716"
+      }
+    },
+    "note": "client_side = 远端为服务端口者（真正连着库的一方＝占用方）；server_side / listening_owners = 服务端侧或中继侧 socket 属主，不是占用方"
+  },
+  "threshold_pct": 80,
+  "threshold_basis": "client_backends / client_usable_slots（已扣 superuser_reserved_connections；分子含本脚本自身只读连接 1 条）",
+  "alert": false,
+  "alert_by_net": false
+}
