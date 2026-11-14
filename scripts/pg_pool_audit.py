@@ -133,6 +133,12 @@ def collect_pg(container):
         "client_backends": client,
         "background_backends": background,
         "client_slot_usage_pct": round(client * 100.0 / usable, 2) if usable else None,
+        # 净口径：本脚本自身的只读 psql 查询也占 1 个客户端槽位（见 2026-11-14 复核侧 r37
+        # 「D-3 读数的净口径」：11/97＝11.34% 含该连接，净占用为 10/97＝10.31%）。
+        # 两个口径都输出，引用时必须写明用哪一个；alert 按 raw（保守）判定。
+        "net_client_backends_excluding_audit_connection": max(client - 1, 0),
+        "net_client_slot_usage_pct": round((client - 1) * 100.0 / usable, 2) if usable else None,
+        "reading_basis_note": "client_backends 含本脚本自身那条只读 psql 查询连接（1 条）；净占用＝client_backends−1；两个口径并列输出，引用时须写明用哪一个",
         "total_ratio_pct_including_background": round(total * 100.0 / max_conn, 2) if max_conn else None,
         "by_state_client_only": by_state,
         "by_application_name": by_app,
@@ -241,9 +247,11 @@ def main():
         "note": tcp.get("note"),
     }
     report["threshold_pct"] = args.threshold
-    report["threshold_basis"] = "client_backends / client_usable_slots（已扣 superuser_reserved_connections）"
+    report["threshold_basis"] = "client_backends / client_usable_slots（已扣 superuser_reserved_connections；分子含本脚本自身只读连接 1 条）"
     usage = report.get("client_slot_usage_pct")
     report["alert"] = bool(usage is not None and usage >= args.threshold)
+    net_usage = report.get("net_client_slot_usage_pct")
+    report["alert_by_net"] = bool(net_usage is not None and net_usage >= args.threshold)
 
     text = json.dumps(report, ensure_ascii=False, indent=2)
     if args.json_out:
