@@ -4,7 +4,7 @@
 
 - 任务单：`docs/pm/orders/DB-HY-002-HYMan试跑-黑板登记核对.md`
 - 接单时间：2026-11-17 19:07（GMT+8）；回执：`docs/pm/reports/DB-HY-002-ack-HYMan.md`
-- 完成时间：2026-11-17 19:1x（GMT+8）
+- 完成时间：2026-11-17 19:2x（GMT+8）
 - 报告版本：v1.0
 
 ## 结论：通过
@@ -66,6 +66,12 @@
 - 核对全程只读，不写工作区（除本报告与接单回执两份 Markdown）；轮询守护在 `C:/dispatcher` 独立运行，未触碰仓库。
 - `scripts/validate.sh unit --json` 实测结果：`exit_code=1`，其中「红线扫描」=pass、「unit 测试」=fail（`git_rev=ec5710b`）。unit 测试失败与本机无 Django 环境一致（见 STATUS「HYMan 已知限制」与 DB-HY-001 验收记录），非本单 Markdown 改动所致；按任务单§四约束本单不依赖该测试阶段，故如实记录、不隐瞒失败、不编造通过。
 - 红线扫描：按任务单要求单独跑 `scripts/scan_secrets.py`（`PYTHONUTF8=1 python scripts/scan_secrets.py`），退出码 0，输出「密钥扫描通过」（在 validate.sh 的「红线扫描」阶段亦为 pass）。本报告与工件未写入任何密钥、凭据、令牌。
+
+## 三点五、推送与 CI
+
+- 提交：`888bb70`（`docs(pm): DB-HY-002 HYMan 试跑核对交付——报告+回执（结论：通过）`），仅含回执与本报告两份 Markdown。
+- 推送：`git push origin main` 成功（`ec5710b..888bb70 main -> main`）。
+- CI（提交 `888bb70`，经 GitHub API 逐 job 轮询至终态）：9/9 全部 `completed : success` —— dispatch、coordinate、安全扫描、前端构建与测试、静态检查、单元测试（无外部依赖）、方言测试（MySQL/PG）、方言测试（Oracle）、集成测试（PostgreSQL）。主分支 CI 全绿，无红灯。
 
 ## 四、未尽事项与风险
 
