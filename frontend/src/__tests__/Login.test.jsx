@@ -28,7 +28,7 @@ describe('Login 页面冒烟测试', () => {
       </MemoryRouter>
     )
 
-    expect(screen.getByText('DB Monitor')).toBeInTheDocument()
+    expect(screen.getByText('DB-AIOps')).toBeInTheDocument()
     expect(screen.getByText('数据库智能监控系统')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('用户名')).toBeInTheDocument()
     expect(screen.getByPlaceholderText('密码')).toBeInTheDocument()

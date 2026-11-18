@@ -36,6 +36,7 @@ vi.mock('axios', () => {
 
   return {
     default: {
+      isCancel: error => error?.code === 'ERR_CANCELED',
       create: () => {
         const reqHandlers = []
         const resHandlers = []
@@ -118,4 +119,22 @@ describe('api.js 核心请求分支', () => {
     expect(localStorage.getItem('auth_token')).toBeNull()
     expect(localStorage.getItem('user')).toBeNull()
   })
+})
+
+// Cancelled reads must not retry, and support can correlate failures with backend logs.
+it('取消请求不自动重试', async () => {
+  mockState.requestFn = vi.fn().mockRejectedValue({ code: 'ERR_CANCELED', config: { method: 'get' } })
+  await expect(databaseAPI.list()).rejects.toMatchObject({ code: 'ERR_CANCELED' })
+  expect(mockState.requestFn).toHaveBeenCalledTimes(1)
+})
+it('错误保留请求编号', async () => {
+  mockState.requestFn = vi.fn().mockRejectedValue({ config: { method: 'post' }, response: { status: 400, headers: { 'x-request-id': 'ux-trace' }, data: { error: '参数无效' } } })
+  await expect(databaseAPI.create({})).rejects.toMatchObject({ requestId: 'ux-trace', status: 400, message: '参数无效' })
+})
+
+it('旧会话的迟到401不得注销新登录', async () => {
+  localStorage.setItem('auth_token', 'new-session')
+  mockState.requestFn = vi.fn().mockRejectedValue({ config: { method: 'get', headers: { Authorization: 'Bearer old-session' } }, response: { status: 401, data: {} } })
+  await expect(databaseAPI.list()).rejects.toMatchObject({ status: 401 })
+  expect(localStorage.getItem('auth_token')).toBe('new-session')
 })

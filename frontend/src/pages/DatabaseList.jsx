@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import { databaseAPI, alertAPI, collectTemplateAPI } from '../services/api'
 import { PermissionGuard } from '../components/AuthGuard'
+import { errorText } from '../utils/experience'
 import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
 import relativeTime from 'dayjs/plugin/relativeTime'
@@ -177,6 +178,30 @@ const DatabaseList = () => {
   const [editForm] = Form.useForm()
 
   const [collectTemplates, setCollectTemplates] = useState([])
+  const [dirty, setDirty] = useState({ add: false, edit: false })
+  const revisions = useRef({ add: 0, edit: 0 })
+  const changed = kind => {
+    revisions.current[kind]++
+    setDirty(old => ({ ...old, [kind]: true }))
+    if (kind === 'add') setTestResult(null)
+    else setEditTestResult(null)
+  }
+  const closeForm = kind => {
+    if (kind === 'add' ? addModalLoading : editModalLoading) return
+    const close = () => {
+      revisions.current[kind]++
+      setDirty(old => ({ ...old, [kind]: false }))
+      if (kind === 'add') { setAddModalVisible(false); setTestResult(null) }
+      else { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }
+    }
+    if (dirty[kind]) Modal.confirm({ title: '放弃未保存的配置？', content: '输入的修改尚未保存。继续编辑可保留当前输入。', okText: '放弃修改', cancelText: '继续编辑', onOk: close })
+    else close()
+  }
+  useEffect(() => {
+    const warn = event => { if ((addModalVisible && dirty.add) || (editModalVisible && dirty.edit)) { event.preventDefault(); event.returnValue = ''; } }
+    window.addEventListener('beforeunload', warn)
+    return () => window.removeEventListener('beforeunload', warn)
+  }, [dirty, addModalVisible, editModalVisible])
 
   // 获取数据库列表与采集模板列表
   const fetchDatabases = useCallback(async () => {
@@ -200,6 +225,8 @@ const DatabaseList = () => {
   // 打开添加数据库弹窗
   const openAddModal = () => {
     form.resetFields()
+    setDirty(old => ({ ...old, add: false }))
+    revisions.current.add++
     setTestResult(null)
     setAddModalVisible(true)
   }
@@ -216,7 +243,7 @@ const DatabaseList = () => {
       fetchDatabases()
     } catch (error) {
       console.error('添加数据库失败:', error)
-      message.error(error.response?.data?.error || '添加数据库失败')
+      message.error(errorText(error))
     } finally {
       setAddModalLoading(false)
     }
@@ -224,20 +251,22 @@ const DatabaseList = () => {
 
   // 测试数据库连接
   const handleTestConnection = async () => {
+    let revision
     try {
       const values = await form.validateFields()
+      revision = revisions.current.add
       setTestLoading(true)
       setTestResult(null)
       const response = await databaseAPI.testConnection(values)
-      setTestResult(response)
+      if (revision === revisions.current.add) setTestResult(response)
     } catch (error) {
       if (error.errorFields) {
         // 表单验证未通过，不处理
         return
       }
-      setTestResult({
+      if (revision === revisions.current.add) setTestResult({
         success: false,
-        message: error.response?.data?.message || error.response?.data?.error || '连接测试请求失败'
+        message: errorText(error)
       })
     } finally {
       setTestLoading(false)
@@ -308,6 +337,8 @@ const DatabaseList = () => {
 
   // 打开编辑数据库弹窗
   const openEditModal = async (db) => {
+    setDirty(old => ({ ...old, edit: false }))
+    revisions.current.edit++
     setEditingDb(db)
     setEditTestResult(null)
     // 获取最新配置详情
@@ -349,7 +380,7 @@ const DatabaseList = () => {
       fetchDatabases()
     } catch (error) {
       console.error('更新数据库失败:', error)
-      message.error(error.response?.data?.error || '更新数据库失败')
+      message.error(errorText(error))
     } finally {
       setEditModalLoading(false)
     }
@@ -357,19 +388,21 @@ const DatabaseList = () => {
 
   // 测试编辑后的数据库连接
   const handleEditTestConnection = async () => {
+    let revision
     try {
       const values = await editForm.validateFields()
+      revision = revisions.current.edit
       setEditTestLoading(true)
       setEditTestResult(null)
       const response = await databaseAPI.testConnection(values)
-      setEditTestResult(response)
+      if (revision === revisions.current.edit) setEditTestResult(response)
     } catch (error) {
       if (error.errorFields) {
         return
       }
-      setEditTestResult({
+      if (revision === revisions.current.edit) setEditTestResult({
         success: false,
-        message: error.response?.data?.message || error.response?.data?.error || '连接测试请求失败'
+        message: errorText(error)
       })
     } finally {
       setEditTestLoading(false)
@@ -1346,14 +1379,16 @@ const DatabaseList = () => {
       <Modal
         title="添加数据库"
         open={addModalVisible}
-        onCancel={() => setAddModalVisible(false)}
+        onCancel={() => closeForm('add')}
         footer={null}
         width={500}
         destroyOnClose
       >
+        <Alert type="info" showIcon message="连接测试只验证当次连通性，保存后需等待采集；修改参数后请重新测试。" style={{ marginBottom: 16 }} />
         <Form
           form={form}
           layout="vertical"
+          onValuesChange={() => changed('add')}
           onFinish={handleAddDatabase}
           initialValues={{
             db_type: 'oracle',
@@ -1467,7 +1502,7 @@ const DatabaseList = () => {
                 rules={[{ required: true, message: '请输入采集周期' }]}
                 extra="支持 10s-3600s"
               >
-                <InputNumber style={{ width: '100%' }} min={5} max={3600} placeholder="60" />
+                <InputNumber style={{ width: '100%' }} min={10} max={3600} placeholder="60" />
               </Form.Item>
             </Col>
           </Row>
@@ -1507,7 +1542,7 @@ const DatabaseList = () => {
               </Col>
               <Col>
                 <Space>
-                  <Button onClick={() => { setAddModalVisible(false); setTestResult(null) }}>取消</Button>
+                  <Button onClick={() => closeForm('add')}>取消</Button>
                   <Button type="primary" htmlType="submit" loading={addModalLoading}>
                     添加
                   </Button>
@@ -1522,7 +1557,7 @@ const DatabaseList = () => {
       <Modal
         title={`编辑数据库 - ${editingDb?.name || ''}`}
         open={editModalVisible}
-        onCancel={() => { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }}
+        onCancel={() => closeForm('edit')}
         footer={null}
         width={500}
         destroyOnClose
@@ -1530,6 +1565,7 @@ const DatabaseList = () => {
         <Form
           form={editForm}
           layout="vertical"
+          onValuesChange={() => changed('edit')}
           onFinish={handleEditDatabase}
           initialValues={{
             port: 3306
@@ -1640,7 +1676,7 @@ const DatabaseList = () => {
                 rules={[{ required: true, message: '请输入采集周期' }]}
                 extra="支持 10s-3600s"
               >
-                <InputNumber style={{ width: '100%' }} min={5} max={3600} placeholder="60" />
+                <InputNumber style={{ width: '100%' }} min={10} max={3600} placeholder="60" />
               </Form.Item>
             </Col>
           </Row>
@@ -1680,7 +1716,7 @@ const DatabaseList = () => {
               </Col>
               <Col>
                 <Space>
-                  <Button onClick={() => { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }}>取消</Button>
+                  <Button onClick={() => closeForm('edit')}>取消</Button>
                   <Button type="primary" htmlType="submit" loading={editModalLoading}>
                     保存修改
                   </Button>

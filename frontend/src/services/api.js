@@ -1,4 +1,5 @@
 import axios from 'axios'
+import { safeReturnTo } from '../utils/experience'
 
 const MAX_RETRIES = 2
 const RETRY_DELAY_MS = 1000
@@ -39,14 +40,25 @@ const createApiClient = (baseURL) => {
 
     // 401 未授权：清除 Token 并跳转登录
     if (error.response?.status === 401) {
-      localStorage.removeItem('auth_token')
-      localStorage.removeItem('user')
-      // 避免在登录页重复跳转
-      if (!window.location.pathname.includes('/login')) {
-        window.location.href = '/login'
+      // An old in-flight request must not invalidate a newly established session.
+      const currentToken = localStorage.getItem('auth_token')
+      const sentAuthorization = config?.headers?.Authorization
+      const staleSession = currentToken && sentAuthorization && sentAuthorization !== `Bearer ${currentToken}`
+      if (!staleSession) {
+        localStorage.removeItem('auth_token')
+        localStorage.removeItem('user')
       }
-      return Promise.reject(error)
+      // 避免在登录页重复跳转
+      if (!staleSession && !window.location.pathname.includes('/login')) {
+        window.location.href = '/login?returnTo=' + encodeURIComponent(safeReturnTo(window.location.pathname + window.location.search + window.location.hash))
+      }
+      const err = new Error(error.response?.data?.error || '登录已失效，请重新登录')
+      err.response = error.response
+      err.status = 401
+      err.requestId = error.response?.headers?.['x-request-id']
+      return Promise.reject(err)
     }
+    if (axios.isCancel(error)) return Promise.reject(error)
 
     // 5xx 服务端错误：对幂等请求自动重试
     // BUG-116: 上一版第 52 行用 `!config` 做了短路保护，第 53 行却无条件解引用
@@ -83,6 +95,7 @@ const createApiClient = (baseURL) => {
     err.code = data?.code || error.response?.status
     err.status = error.response?.status
     err.payload = data
+    err.requestId = error.response?.headers?.['x-request-id']
     return Promise.reject(err)
     }
   )
@@ -255,7 +268,7 @@ export const dashboardAPI = {
   getStats: () => api.get('/dashboard/stats/'),
   
   // 获取仪表盘图表数据
-  getCharts: () => api.get('/dashboard/charts/'),
+  getCharts: (hours = 24) => api.get('/dashboard/charts/', { params: { hours } }),
   
   // 获取健康评分趋势
   getHealthTrend: (days = 7) => 

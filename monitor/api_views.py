@@ -271,7 +271,15 @@ class DatabaseListView(JSONResponseMixin, View):
         username = data['username'].strip()
         password = data['password']
         service_name = data.get('service_name', '').strip() or None
-        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        try:
+            raw_interval = data.get('collect_interval_sec', 60)
+            if not str(raw_interval).isdigit():
+                raise ValueError
+            collect_interval_sec = int(raw_interval)
+            if not 10 <= collect_interval_sec <= 3600:
+                raise ValueError
+        except (ValueError, TypeError):
+            return self.error_response('采集周期必须是 10 至 3600 的整数秒', 400)
         template_name = data.get('template_name', '').strip()
         
         # 验证端口
@@ -305,6 +313,8 @@ class DatabaseListView(JSONResponseMixin, View):
                 username=username,
                 password=encrypted_password,
                 service_name=service_name,
+                collect_interval_sec=collect_interval_sec,
+                template_name=template_name,
                 is_active=True
             )
             
@@ -475,7 +485,15 @@ class DatabaseConfigDetailView(JSONResponseMixin, View):
         port = data['port']
         username = data['username'].strip()
         service_name = data.get('service_name', '').strip() or None
-        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        try:
+            raw_interval = data.get('collect_interval_sec', 60)
+            if not str(raw_interval).isdigit():
+                raise ValueError
+            collect_interval_sec = int(raw_interval)
+            if not 10 <= collect_interval_sec <= 3600:
+                raise ValueError
+        except (ValueError, TypeError):
+            return self.error_response('采集周期必须是 10 至 3600 的整数秒', 400)
         template_name = data.get('template_name', '').strip()
 
         # 验证端口
@@ -2574,7 +2592,15 @@ class DBCollectTemplateListView(JSONResponseMixin, View):
             return self.error_response(f'模板标识编码 "{code}" 已存在', 409)
 
         default_port = int(data.get('default_port') or 3306)
-        collect_interval_sec = int(data.get('collect_interval_sec') or 60)
+        try:
+            raw_interval = data.get('collect_interval_sec', 60)
+            if not str(raw_interval).isdigit():
+                raise ValueError
+            collect_interval_sec = int(raw_interval)
+            if not 10 <= collect_interval_sec <= 3600:
+                raise ValueError
+        except (ValueError, TypeError):
+            return self.error_response('采集周期必须是 10 至 3600 的整数秒', 400)
         default_service_name = (data.get('default_service_name') or '').strip()
         is_default = bool(data.get('is_default', False))
         description = (data.get('description') or '').strip()
@@ -3210,30 +3236,25 @@ class DashboardStatsView(JSONResponseMixin, View):
     def get(self, request):
         from .models import DatabaseConfig, HealthScore
         dbs = DatabaseConfig.objects.visible_to(request.user).filter(is_active=True)
-        total = dbs.count()
-        # 用子查询获取每个库最新状态
+        dbs = dbs.exclude(name=SYSTEM_CONFIG_NAME)
         from django.db.models import Subquery, OuterRef
-        latest_status = MonitorLog.objects.filter(
-            config=OuterRef('pk')
-        ).order_by('-create_time')
-        dbs_ann = dbs.annotate(
+        latest_status = MonitorLog.objects.filter(config=OuterRef('pk')).order_by('-create_time')
+        statuses = list(dbs.annotate(
             _status=Subquery(latest_status.values('status')[:1])
-        )
-        online = sum(1 for d in dbs_ann if d._status == 'UP')
-        offline = sum(1 for d in dbs_ann if d._status and d._status not in ('UP',))
-        degraded = sum(1 for d in dbs_ann if d._status == 'DEGRADED')
-
-        # 平均健康评分
-        scores = list(HealthScore.objects.values_list('total_score', flat=True))
-        avg_health = round(sum(scores) / len(scores), 1) if scores else None
-
-        # 活跃告警
-        active_alerts = AlertLog.objects.filter(status='active').count()
-
+        ).values_list('_status', flat=True))
+        scores = list(HealthScore.objects.filter(
+            config__in=dbs, score_date=timezone.localdate()
+        ).values_list('total_score', flat=True))
         return self.json_response({
-            'total': total, 'online': online, 'offline': offline,
-            'degraded': degraded, 'avg_health': avg_health,
-            'active_alerts': active_alerts,
+            'total': len(statuses),
+            'online': statuses.count('UP'),
+            'offline': statuses.count('DOWN'),
+            'degraded': statuses.count('DEGRADED'),
+            'unknown': sum(s not in ('UP', 'DOWN', 'DEGRADED') for s in statuses),
+            'avg_health': round(sum(scores) / len(scores), 1) if scores else None,
+            'scored_count': len(scores),
+            'active_alerts': AlertLog.objects.filter(config__in=dbs, status='active').count(),
+            'generated_at': timezone.now().isoformat(),
         })
 
 
@@ -3252,8 +3273,18 @@ class DashboardChartsView(JSONResponseMixin, View):
 
     def get(self, request):
         from .models import DatabaseConfig, MonitorLog
-        hours = int(request.GET.get('hours', 24))
+        try:
+            hours = int(request.GET.get('hours', 24))
+            if not 1 <= hours <= 168:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self.error_response('hours 必须是 1 至 168 的整数', 400)
         since = timezone.now() - timedelta(hours=hours)
+        db_ids = list(DatabaseConfig.objects.visible_to(request.user)
+                      .filter(is_active=True).exclude(name=SYSTEM_CONFIG_NAME)
+                      .values_list('id', flat=True))
+        meta = {'hours': hours, 'generated_at': timezone.now().isoformat(),
+                'aggregation': 'hourly_sample_mean'}
         
         # 尝试从 TimescaleDB 读取趋势
         try:
@@ -3263,8 +3294,6 @@ class DashboardChartsView(JSONResponseMixin, View):
                 with ts.cursor() as cur:
                     rows = []
                     if cur is not None:
-                        db_ids = list(DatabaseConfig.objects.visible_to(request.user)
-                                      .filter(is_active=True).values_list('id', flat=True))
                         # 简单查询最近指标
                         cur.execute(
                             "SELECT time, db_config_id, metric_name, metric_value "
@@ -3277,26 +3306,23 @@ class DashboardChartsView(JSONResponseMixin, View):
                     if rows:
                         # 按时间聚合为趋势数据
                         trend_data = self._aggregate_trend_from_rows(rows)
-                        return self.json_response({'trend': trend_data})
-        except Exception:
-            pass
-        
-        # 回退：从 MonitorLog ORM 读取趋势数据
+                        return self.json_response({'trend': trend_data, 'source': 'timescaledb', **meta})
+        except Exception as exc:
+            degrade.note('dashboard.trend.timescaledb', '回退 ORM', exc)
+
         try:
-            trend_data = self._get_trend_from_orm(since)
-            return self.json_response({'trend': trend_data})
-        except Exception:
-            return self.json_response({'trend': []})
-    
-    def _get_trend_from_orm(self, since):
-        """从 MonitorLog 表聚合趋势数据"""
-        from .models import MonitorLog, DatabaseConfig
-        
+            trend_data = self._get_trend_from_orm(since, db_ids)
+            return self.json_response({'trend': trend_data, 'source': 'orm', **meta})
+        except Exception as exc:
+            degrade.note('dashboard.trend.orm', '趋势暂不可用', exc)
+            return self.error_response('趋势数据暂不可用，请重试或联系管理员', 503)
+
+    def _get_trend_from_orm(self, since, db_ids):
+        """仅聚合当前用户可见、启用实例的样本。"""
         logs = MonitorLog.objects.filter(
-            create_time__gte=since,
-            status='UP'
+            config_id__in=db_ids, create_time__gte=since, status='UP'
         ).order_by('create_time')
-        
+
         if not logs.exists():
             return []
         

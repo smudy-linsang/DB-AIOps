@@ -283,3 +283,18 @@ body {
 .metric-chart {
   height: 300px;
 }
+
+/* Shared operational workspace: readable at narrow widths and with keyboard focus. */
+.experience-heading { display: flex; justify-content: space-between; gap: 20px; align-items: center; flex-wrap: wrap; margin: 12px 0 24px; }
+.experience-heading h2 { margin: 4px 0 8px; }
+.experience-search { width: min(320px, 42vw); }
+.source-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(160px, 1fr)); gap: 16px; margin-bottom: 16px; }
+.source-error { margin-top: 6px; color: #8c4a00; font-size: 12px; overflow-wrap: anywhere; }
+.experience-dashboard .ant-card { border-radius: 10px; }
+:focus-visible { outline: 3px solid #1677ff; outline-offset: 3px; }
+@media (max-width: 760px) {
+  .experience-header { height: auto !important; min-height: 100px; padding: 10px 12px !important; gap: 8px; flex-wrap: wrap; line-height: 32px !important; }
+  .experience-content { padding: 12px !important; }
+  .experience-dashboard .ant-card-head { flex-wrap: wrap; }
+  .experience-dashboard .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; padding: 12px 0; }
+}

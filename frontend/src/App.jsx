@@ -3,6 +3,7 @@ import { Routes, Route, Navigate, useNavigate, useLocation } from 'react-router-
 import { ConfigProvider, App as AntApp, Result, Button, Spin } from 'antd';
 import zhCN from 'antd/es/locale/zh_CN';
 
+import { readStoredUser } from './utils/experience';
 import EMLayout from './components/EMLayout';
 import ErrorBoundary from './components/ErrorBoundary';
 import Dashboard from './pages/Dashboard';
@@ -45,7 +46,7 @@ function PrivateRoute({ children }) {
   const location = useLocation();
   const [permReady, setPermReady] = useState(() => {
     // 检查权限数据是否已就绪（兼容旧版本 localStorage 数据）
-    const user = localStorage.getItem('user') ? JSON.parse(localStorage.getItem('user')) : null;
+    const user = readStoredUser();
     return !user || (user.permissions && user.role);
   });
 
@@ -103,9 +104,10 @@ function ForbiddenPage() {
 
 // 主应用路由（在 EMLayout 内的路由）
 function LayoutRoutes() {
+  const location = useLocation();
   return (
     <EMLayout>
-      <ErrorBoundary>
+      <ErrorBoundary key={location.pathname}>
         <Routes>
           <Route path="/" element={<PermissionRoute path="/"><Dashboard /></PermissionRoute>} />
           <Route path="/databases" element={<PermissionRoute path="/databases"><DatabaseList /></PermissionRoute>} />
@@ -118,7 +120,7 @@ function LayoutRoutes() {
           <Route path="/incident-warroom" element={<PermissionRoute path="/alerts"><IncidentWarRoom /></PermissionRoute>} />
           <Route path="/sla-report" element={<PermissionRoute path="/alerts"><SlaReport /></PermissionRoute>} />
           <Route path="/ai-ops" element={<PermissionRoute path="/ai-ops"><AiOpsCenter /></PermissionRoute>} />
-          <Route path="/llm-config" element={<PermissionRoute path="/ai-ops"><LLMConfigSettings /></PermissionRoute>} />
+          <Route path="/llm-config" element={<PermissionRoute path="/llm-config"><LLMConfigSettings /></PermissionRoute>} />
           <Route path="/inspection" element={<PermissionRoute path="/inspection"><InspectionCenter /></PermissionRoute>} />
           <Route path="/inspection/runs/:runId" element={<PermissionRoute path="/inspection"><InspectionDetail /></PermissionRoute>} />
           <Route path="/alert-config" element={<PermissionRoute path="/alert-config"><AlertConfig /></PermissionRoute>} />
@@ -136,7 +138,7 @@ function LayoutRoutes() {
           <Route path="/oam/bench" element={<PermissionRoute path="/oam/bench"><OamBench /></PermissionRoute>} />
           <Route path="/oam/kb" element={<PermissionRoute path="/oam/kb"><OamKb /></PermissionRoute>} />
           <Route path="/403" element={<ForbiddenPage />} />
-          <Route path="*" element={<Navigate to="/" replace />} />
+          <Route path="*" element={<Result status="404" title="页面不存在" subTitle="链接可能已变更，请使用导航搜索查找功能。" extra={<Button href="/">返回监控概览</Button>} />} />
         </Routes>
       </ErrorBoundary>
     </EMLayout>

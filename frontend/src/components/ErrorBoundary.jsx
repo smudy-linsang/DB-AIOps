@@ -78,7 +78,7 @@ class ErrorBoundary extends React.Component {
                 </Space>
               }
             />
-            <div style={{
+            <details style={{
               marginTop: 16,
               padding: 16,
               background: '#fff',
@@ -87,6 +87,7 @@ class ErrorBoundary extends React.Component {
               maxHeight: 300,
               overflow: 'auto',
             }}>
+              <summary>查看技术详情（供管理员排查）</summary>
               <Text strong style={{ color: '#ff4d4f', display: 'block', marginBottom: 8 }}>
                 错误详情（供开发人员参考）：
               </Text>
@@ -135,7 +136,7 @@ class ErrorBoundary extends React.Component {
                   </Paragraph>
                 </>
               )}
-            </div>
+            </details>
           </div>
         </div>
       );

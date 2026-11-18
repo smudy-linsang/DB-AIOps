@@ -1,7 +1,8 @@
 import { useState } from 'react'
-import { useNavigate } from 'react-router-dom'
-import { Form, Input, Button, Card, Typography, message } from 'antd'
+import { useNavigate, useLocation } from 'react-router-dom'
+import { Form, Input, Button, Card, Typography, message, Alert } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
+import { safeReturnTo, errorText } from '../utils/experience'
 import { authAPI, setAuthToken, setUser } from '../services/api'
 
 const { Title, Text } = Typography
@@ -9,8 +10,11 @@ const { Title, Text } = Typography
 const Login = () => {
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
+  const location = useLocation()
+  const [error, setError] = useState('')
 
   const onFinish = async (values) => {
+    setError('')
     setLoading(true)
     try {
       const response = await authAPI.login(values.username, values.password)
@@ -21,13 +25,13 @@ const Login = () => {
         setUser(response.user)
         
         message.success('登录成功')
-        navigate('/')
+        const from = location.state?.from
+        navigate(safeReturnTo(new URLSearchParams(location.search).get('returnTo') || (from ? from.pathname + (from.search || '') + (from.hash || '') : '/')), { replace: true })
       } else {
-        message.error(response.message || '登录失败')
+        setError(response.message || '登录失败')
       }
     } catch (error) {
-      console.error('登录错误:', error)
-      message.error(error.response?.data?.error || '登录失败，请检查用户名和密码')
+      setError(error.status === 401 ? '用户名或密码不正确，请检查后重试' : errorText(error))
     } finally {
       setLoading(false)
     }
@@ -44,16 +48,18 @@ const Login = () => {
       <Card
         style={{
           width: 400,
+          maxWidth: 'calc(100vw - 32px)',
           boxShadow: '0 14px 40px rgba(0,0,0,0.2)',
           borderRadius: 8
         }}
         bordered={false}
       >
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
-          <Title level={2} style={{ marginBottom: 8 }}>DB Monitor</Title>
+          <Title level={2} style={{ marginBottom: 8 }}>DB-AIOps</Title>
           <Text type="secondary">数据库智能监控系统</Text>
         </div>
 
+        {error && <Alert type="error" showIcon message={error} style={{ marginBottom: 16 }} />}
         <Form
           name="login"
           onFinish={onFinish}
@@ -69,7 +75,7 @@ const Login = () => {
           >
             <Input
               prefix={<UserOutlined />}
-              placeholder="用户名"
+              placeholder="用户名" aria-label="用户名" autoComplete="username"
             />
           </Form.Item>
 
@@ -79,7 +85,7 @@ const Login = () => {
           >
             <Input.Password
               prefix={<LockOutlined />}
-              placeholder="密码"
+              placeholder="密码" aria-label="密码" autoComplete="current-password"
             />
           </Form.Item>
 

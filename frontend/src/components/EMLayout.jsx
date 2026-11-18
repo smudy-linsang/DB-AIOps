@@ -12,7 +12,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Layout, Input, Badge, Dropdown, Avatar, Space, Typography, Tag, Menu, Breadcrumb,
+  Layout, Input, AutoComplete, Button, Empty, Badge, Dropdown, Avatar, Space, Typography, Tag, Menu, Breadcrumb,
 } from 'antd';
 import {
   MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined,
@@ -26,6 +26,8 @@ import { useNavigate, useLocation } from 'react-router-dom';
 import { authAPI, alertAPI, systemAPI, setUser } from '../services/api';
 import useAppStore from '../stores/useAppStore';
 import TargetNavigationTree from './TargetNavigationTree';
+import { readStoredUser } from '../utils/experience';
+import UsageGuide from './UsageGuide';
 import CopilotDrawer from './CopilotDrawer';
 import { hasPermission } from '../utils/permission';
 import { Perm } from '../utils/permission';
@@ -37,20 +39,20 @@ const EMLayout = ({ children }) => {
   const navigate = useNavigate();
   const location = useLocation();
   const {
-    collapsed, toggleCollapsed, selectedDbId, selectedDbName, selectedDbType,
+    collapsed, toggleCollapsed, setCollapsed, selectedDbId, selectedDbName, selectedDbType,
     alertCounts, setAlertCounts, globalSearchKeyword, setGlobalSearchKeyword,
     connectSSE, disconnectSSE,
   } = useAppStore();
 
+  const [guideVisible, setGuideVisible] = useState(false);
+  const databases = useAppStore(state => state.databases);
   const [copilotVisible, setCopilotVisible] = useState(false);
   const [userName, setUserName] = useState('');
   const [userRole, setUserRole] = useState('');
   const [permVersion, setPermVersion] = useState(0); // 权限版本号，用于触发 useMemo 重算
 
   useEffect(() => {
-    const user = localStorage.getItem('user')
-      ? JSON.parse(localStorage.getItem('user'))
-      : null;
+    const user = readStoredUser();
     setUserName(user?.username || 'Admin');
     setUserRole(user?.role_name || user?.role || '');
 
@@ -159,9 +161,7 @@ const EMLayout = ({ children }) => {
   };
 
   const userMenuItems = [
-    { key: 'profile', label: '个人中心', icon: <UserOutlined /> },
-    { key: 'settings', label: '系统设置', icon: <SettingOutlined /> },
-    { type: 'divider' },
+    { key: 'guide', label: '使用指南', onClick: () => setGuideVisible(true) },
     { key: 'logout', label: '退出登录', icon: <LogoutOutlined />, danger: true, onClick: handleLogout },
   ];
 
@@ -208,10 +208,22 @@ const EMLayout = ({ children }) => {
       };
     });  }, [navigate, permVersion]);
 
+  const searchOptions = useMemo(() => {
+    const keyword = globalSearchKeyword.trim().toLowerCase();
+    if (!keyword) return [];
+    const functions = menuItems.filter(item => item.key && `${item.label} ${item.key}`.toLowerCase().includes(keyword))
+      .map(item => ({ value: item.key, label: `功能 · ${item.label}` }));
+    const targets = hasPermission(Perm.DATABASE_DETAIL_VIEW) ? databases
+      .filter(db => `${db.name} ${db.host}`.toLowerCase().includes(keyword))
+      .map(db => ({ value: `/databases/${db.id}`, label: `实例 · ${db.name}` })) : [];
+    return [...functions, ...targets].slice(0, 20);
+  }, [globalSearchKeyword, menuItems, databases]);
+  const selectSearch = value => { setGlobalSearchKeyword(''); navigate(value); };
+
   return (
     <Layout style={{ minHeight: '100vh' }}>
       {/* ──────── 顶部栏 ──────── */}
-      <Header
+      <Header className="experience-header"
         style={{
           background: '#1a3a5c',
           display: 'flex',
@@ -225,6 +237,7 @@ const EMLayout = ({ children }) => {
         }}
       >
         <Space size={16}>
+          <Button ghost aria-label={collapsed ? '展开导航' : '折叠导航'} icon={collapsed ? <MenuUnfoldOutlined /> : <MenuFoldOutlined />} onClick={toggleCollapsed} />
           <div
             style={{
               fontSize: 18,
@@ -240,23 +253,16 @@ const EMLayout = ({ children }) => {
             <DatabaseOutlined style={{ fontSize: 22, color: '#1890ff' }} />
             DB-AIOps
           </div>
-          <Input
-            prefix={<SearchOutlined style={{ color: '#999' }} />}
-            placeholder="搜索数据库名称、主机、指标..."
-            value={globalSearchKeyword}
-            onChange={(e) => setGlobalSearchKeyword(e.target.value)}
-            style={{
-              width: 320,
-              borderRadius: 4,
-              border: '1px solid rgba(255,255,255,0.2)',
-              background: 'rgba(255,255,255,0.1)',
-              color: '#fff',
-            }}
-            allowClear
-          />
+          <AutoComplete className="experience-search" value={globalSearchKeyword} options={searchOptions}
+            onChange={setGlobalSearchKeyword} onSelect={selectSearch}
+            notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未找到入口。支持功能名称、已加载实例的名称或主机；仅显示有权限的结果。" />}>
+            <Input prefix={<SearchOutlined />} placeholder="搜索功能或实例…" aria-label="搜索功能或实例" allowClear
+              onPressEnter={() => { if (searchOptions[0]) selectSearch(searchOptions[0].value); }} />
+          </AutoComplete>
         </Space>
 
-        <Space size={20}>
+        <Space size={12} wrap>
+          <Button ghost onClick={() => setGuideVisible(true)}>使用指南</Button>
           {/* W4 自监控：系统健康指示灯 ok绿/degraded黄/down红，点击进系统健康页 */}
           {sysHealth && (
             <span
@@ -271,7 +277,7 @@ const EMLayout = ({ children }) => {
               }} />
               {sysHealth.status === 'degraded' && (
                 <Text style={{ color: '#faad14', fontSize: 12, lineHeight: '52px' }}>
-                  {(sysHealth.components || []).filter(c => c.status === 'down').length} 组件失联
+                  系统降级 · 查看详情
                 </Text>
               )}
             </span>
@@ -320,7 +326,9 @@ const EMLayout = ({ children }) => {
         <Sider
           collapsible
           collapsed={collapsed}
-          onCollapse={toggleCollapsed}
+          breakpoint="md"
+          onBreakpoint={broken => setCollapsed(broken)}
+          onCollapse={value => setCollapsed(value)}
           trigger={null}
           width={260}
           collapsedWidth={0}
@@ -332,10 +340,6 @@ const EMLayout = ({ children }) => {
         >
           <div style={{ padding: '8px 12px', borderBottom: '1px solid #e8e8e8' }}>
             <Space>
-              <MenuUnfoldOutlined
-                onClick={toggleCollapsed}
-                style={{ fontSize: 16, cursor: 'pointer', color: '#666' }}
-              />
               <Text strong style={{ fontSize: 13 }}>目标导航</Text>
             </Space>
           </div>
@@ -353,27 +357,7 @@ const EMLayout = ({ children }) => {
         </Sider>
 
         {/* ──────── 主内容区 ──────── */}
-        <Content style={{ background: '#f0f2f5', minHeight: 'calc(100vh - 52px)' }}>
-          {/* 折叠按钮 (Sider 折叠时显示) */}
-          {collapsed && (
-            <div
-              style={{
-                position: 'absolute',
-                top: 60,
-                left: 8,
-                zIndex: 10,
-                cursor: 'pointer',
-                background: '#fff',
-                padding: '6px 10px',
-                borderRadius: 4,
-                boxShadow: '0 2px 8px rgba(0,0,0,0.1)',
-              }}
-              onClick={toggleCollapsed}
-            >
-              <MenuFoldOutlined style={{ fontSize: 16, color: '#666' }} />
-            </div>
-          )}
-
+        <Content id="main-content" style={{ minWidth: 0, background: '#f0f2f5', minHeight: 'calc(100vh - 52px)' }}>
           {/* 面包屑 + 当前选中 DB 标识 */}
           <div style={{ padding: '8px 24px 0', background: '#f0f2f5' }}>
             <Space>
@@ -389,12 +373,13 @@ const EMLayout = ({ children }) => {
           </div>
 
           {/* 页面内容 */}
-          <div style={{ padding: '12px 24px 24px' }}>
+          <div className="experience-content" style={{ padding: '12px 24px 24px' }}>
             {children}
           </div>
         </Content>
       </Layout>
 
+      <UsageGuide open={guideVisible} onClose={() => setGuideVisible(false)} />
       {/* 全局 AI Copilot 抽屉 */}
       <CopilotDrawer
         visible={copilotVisible}

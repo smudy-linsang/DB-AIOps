@@ -114,6 +114,7 @@ export const ROUTE_PERMISSION_MAP = {
   '/tickets': Perm.TICKETS_VIEW,
   '/sql-monitoring': Perm.SQL_MONITORING_VIEW,
   '/ai-ops': Perm.METRICS_VIEW,
+  '/llm-config': Perm.ALERT_CONFIG_VIEW,
   '/notification-settings': Perm.NOTIFICATION_VIEW,
   '/business-systems': Perm.BUSINESS_TOPOLOGY_VIEW,
   '/reports': Perm.REPORTS_VIEW,

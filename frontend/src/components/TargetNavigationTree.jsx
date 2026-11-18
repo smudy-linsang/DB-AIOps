@@ -71,14 +71,14 @@ const TargetNavigationTree = () => {
       await Promise.all(
         dbs.map(async (db) => {
           try {
-            const hRes = await healthAPI.get(db.id);
+            const hRes = await databaseAPI.getHealth(db.id);
             const hData = hRes.data || hRes || {};
             scores[db.id] = {
-              grade: hData.overall_grade || hData.grade || 'C',
-              score: hData.overall_score || hData.score || 70,
+              grade: hData.overall_grade || hData.grade || 'F',
+              score: hData.overall_score ?? hData.total_score ?? hData.score ?? null,
             };
           } catch (_) {
-            scores[db.id] = { grade: 'C', score: null };
+            scores[db.id] = { grade: 'F', score: null };
           }
         })
       );

@@ -1,0 +1,52 @@
+{
+  "browser": "system Chromium via Playwright, real Django + PostgreSQL",
+  "tests": [
+    {
+      "name": "登录校验与原页面返回",
+      "status": "pass"
+    },
+    {
+      "name": "搜索功能并以回车导航",
+      "status": "pass"
+    },
+    {
+      "name": "搜索无结果解释",
+      "status": "pass"
+    },
+    {
+      "name": "指南提供下一步和权限说明",
+      "status": "pass"
+    },
+    {
+      "name": "时间范围请求真实后端并展示来源",
+      "status": "pass"
+    },
+    {
+      "name": "部分接口失败保留旧数据并支持重试（网络故障注入）",
+      "status": "pass"
+    },
+    {
+      "name": "未知链接明确404并可返回",
+      "status": "pass"
+    },
+    {
+      "name": "过期会话重新登录回到同一地址",
+      "status": "pass"
+    },
+    {
+      "name": "纳管输入取消可继续编辑，确认后才丢弃",
+      "status": "pass"
+    },
+    {
+      "name": "真实PG连接测试、参数修改撤销旧结果、配置保存回读",
+      "status": "pass"
+    },
+    {
+      "name": "窄窗口内容可读、导航可折叠",
+      "status": "pass"
+    }
+  ],
+  "pageErrors": [],
+  "createdConfigId": 3,
+  "cleanupStatus": 200
+}
