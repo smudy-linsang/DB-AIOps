@@ -108,7 +108,7 @@ export default function Dashboard() {
           {hasPermission(Perm.ALERTS_VIEW) && <Button type="link" onClick={() => navigate('/alerts')}>查看告警 <ArrowRightOutlined /></Button>}</Card></Col>
         <Col xs={24} sm={12} xl={6}><Card title="建议下一步" size="small"><Space direction="vertical">
           {hasPermission(Perm.DATABASES_VIEW) && <Button onClick={() => navigate('/databases')}>检查纳管与采集状态</Button>}
-          {hasPermission(Perm.ALERTS_VIEW) && <Button onClick={() => navigate('/incidents')}>跟进事故与处理进度</Button>}
+          {hasPermission(Perm.ALERTS_VIEW) && <Button onClick={() => navigate('/work-queue')}>打开值班队列</Button>}
         </Space></Card></Col>
       </Row>
       <Card title="性能趋势" style={{ marginBottom: 16 }} extra={<Segmented aria-label="趋势时间范围" value={hours} onChange={setHours}

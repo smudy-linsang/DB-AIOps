@@ -56,6 +56,7 @@ from monitor.api_views_phase5 import (
     # Phase 5: 告警案例库 + 统计
     AlertCaseListView, AlertCaseSearchView, Phase5StatsView,
 )
+from monitor.api_views_work_queue import OperationsQueueView
 from monitor.api_views_incident import (
     IncidentListView, IncidentDetailView, IncidentTimelineView,
     IncidentAckView, IncidentCloseView, IncidentRediagnoseView, EventListView,
@@ -286,6 +287,7 @@ urlpatterns = [
     path('api/v1/databases/<int:config_id>/perf/sql-periodic/', SqlPeriodicView.as_view()),
     path('api/v1/databases/<int:config_id>/perf/sessions/<str:session_id>/kill/', SessionKillView.as_view()),
 
+    path('api/v1/work-queue/', OperationsQueueView.as_view()),
     path('api/v1/incidents/', IncidentListView.as_view()),
     path('api/v1/incidents/<str:incident_id>/', IncidentDetailView.as_view()),
     path('api/v1/incidents/<str:incident_id>/timeline/', IncidentTimelineView.as_view()),

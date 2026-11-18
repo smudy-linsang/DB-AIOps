@@ -25,6 +25,7 @@ import UserManagement from './pages/UserManagement';
 import AlertDetail from './pages/AlertDetail';
 import InspectionCenter from './pages/InspectionCenter';
 import InspectionDetail from './pages/InspectionDetail';
+import WorkQueue from './pages/WorkQueue';
 import IncidentList from './pages/IncidentList';
 import IncidentDetail from './pages/IncidentDetail';
 import SlaReport from './pages/SlaReport';
@@ -115,6 +116,7 @@ function LayoutRoutes() {
           <Route path="/databases/:id/performance" element={<PermissionRoute path="/databases/:id/performance"><PerformanceCenter /></PermissionRoute>} />
           <Route path="/databases/:id/performance-legacy" element={<PermissionRoute path="/databases/:id/performance"><DatabasePerformanceHub /></PermissionRoute>} />
           <Route path="/alerts" element={<PermissionRoute path="/alerts"><AlertList /></PermissionRoute>} />
+          <Route path="/work-queue" element={<PermissionRoute path="/work-queue"><WorkQueue /></PermissionRoute>} />
           <Route path="/incidents" element={<PermissionRoute path="/alerts"><IncidentList /></PermissionRoute>} />
           <Route path="/incidents/:incidentId" element={<PermissionRoute path="/alerts"><IncidentDetail /></PermissionRoute>} />
           <Route path="/incident-warroom" element={<PermissionRoute path="/alerts"><IncidentWarRoom /></PermissionRoute>} />
