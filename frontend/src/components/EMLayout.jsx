@@ -70,12 +70,12 @@ const EMLayout = ({ children }) => {
   // 加载告警统计
   const loadAlertCounts = useCallback(async () => {
     try {
-      const res = await alertAPI.list({ page_size: 1 });
-      const countRes = res?.data || res || {};
+      const res = await alertAPI.getStatistics();
+      const countRes = res?.ongoing_by_severity || {};
       setAlertCounts({
-        warning: countRes.warning_count || 0,
-        error: countRes.error_count || 0,
-        critical: countRes.critical_count || 0,
+        warning: countRes.warning || 0,
+        error: countRes.error || 0,
+        critical: countRes.critical || 0,
       });
     } catch (_) {}
   }, [setAlertCounts]);

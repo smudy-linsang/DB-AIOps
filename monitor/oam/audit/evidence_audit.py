@@ -92,19 +92,34 @@ def extract_claims(report: dict) -> list:
     return out
 
 
-def _known_refs(trajectory, kb_refs=None) -> set:
-    """轨迹中出现过的全部证据引用 + 知识库已知记录 ID。"""
-    refs = set()
-    for step in getattr(trajectory, 'steps', []) or []:
-        obs = getattr(step, 'observation', None)
-        if obs and obs.evidence:
-            refs.update(str(r) for r in (obs.evidence.get('refs') or []))
-        # 元数据/参数类工具也会留一个 tool:<name> 引用
-        name = getattr(step.action, 'tool', '') if getattr(step, 'action', None) else ''
-        if name and not getattr(step, 'tool_error_code', ''):
-            refs.add(f'tool:{name}')
-    refs.update(str(r) for r in (kb_refs or []))
-    return refs
+def observation_index(trajectory):
+    """Index named observations for in-memory and persisted trajectories."""
+    steps = getattr(trajectory, 'steps', [])
+    if hasattr(steps, 'all'):
+        steps = steps.all()
+    index = {}
+    for step in steps or ():
+        if getattr(step, 'tool_error_code', ''):
+            continue
+        observation = getattr(step, 'observation', None)
+        evidence = getattr(observation, 'evidence', None) or getattr(step, 'observation_evidence', {}) or {}
+        action = getattr(step, 'action', None)
+        name = getattr(action, 'tool', '') or getattr(step, 'tool_name', '')
+        refs = evidence.get('refs') if isinstance(evidence, dict) else []
+        refs = list(refs) if isinstance(refs, list) else []
+        if name:
+            refs.append(f'tool:{name}')
+        at = evidence.get('observed_at') if isinstance(evidence, dict) else None
+        for ref in refs:
+            index.setdefault(str(ref), {
+                'id': str(ref), 'tool': name or None,
+                'turn': step.turn, 'observed_at': at if isinstance(at, str) else None,
+            })
+    return list(index.values())
+
+
+def _known_refs(trajectory, kb_refs=None):
+    return {entry['id'] for entry in observation_index(trajectory)} | {str(r) for r in kb_refs or ()}
 
 
 def audit(trajectory, report: dict, kb_refs=None) -> AuditResult:
@@ -133,7 +148,7 @@ def audit(trajectory, report: dict, kb_refs=None) -> AuditResult:
     unsupported = []
     for claim in claims:
         refs = [str(r) for r in claim.evidence_refs]
-        hit = [r for r in refs if r in known]
+        hit = set(refs) & known
         if len(hit) < min_refs:
             unsupported.append(claim)
 

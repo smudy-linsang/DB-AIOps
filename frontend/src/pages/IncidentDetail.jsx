@@ -8,6 +8,8 @@ import {
   RobotOutlined, ExperimentOutlined,
 } from '@ant-design/icons'
 import { Link, useParams, useLocation } from 'react-router-dom'
+import IncidentOperations from '../components/IncidentOperations'
+import { DiagnosisReferences, DiagnosisUncertainty } from '../components/DiagnosticEvidence'
 import { incidentAPI } from '../services/api'
 import { errorText, safeReturnTo } from '../utils/experience'
 import { incidentStatus, operationTime } from '../utils/operations'
@@ -20,6 +22,7 @@ const STATUS_COLOR = {
 }
 const SOURCE_TAG = {
   rule: { color: 'blue', text: '规则' },
+  rules: { color: 'blue', text: '规则' },
   llm: { color: 'purple', text: 'AI' },
   both: { color: 'geekblue', text: '规则+AI' },
 }
@@ -286,6 +289,8 @@ export default function IncidentDetail() {
         </Descriptions>
       </Card>
 
+      <IncidentOperations key={inc.incident_id} incident={inc} canTriage={canTriage} />
+
       <Row gutter={16}>
         <Col xs={24} xl={12}>
           <Card title="事故时间线" size="small" style={{ marginBottom: 16 }}>
@@ -308,7 +313,8 @@ export default function IncidentDetail() {
         </Col>
         <Col xs={24} xl={12}>
           <Card title="根因诊断" size="small" style={{ marginBottom: 16 }}>
-            {rca.llm_summary && (
+            <DiagnosisUncertainty rca={rca} />
+            {rca.llm_summary && !rca.llm?.summary && (
               <Alert type="info" showIcon icon={<RobotOutlined />} style={{ marginBottom: 12 }}
                 message="AI 综合分析" description={rca.llm_summary} />
             )}
@@ -322,7 +328,9 @@ export default function IncidentDetail() {
                       <Tag color={SOURCE_TAG[rc.source].color}>{SOURCE_TAG[rc.source].text}</Tag>}
                     {rc.agent_confirmed && <Tag color="cyan">深挖确认</Tag>}
                     <span style={{ fontSize: 12 }}>置信度</span>
-                    <Progress percent={Math.round((rc.confidence || 0) * 100)} size="small" style={{ width: 120 }} />
+                    {Number.isFinite(rc.confidence)
+                      ? <Progress percent={Math.round(rc.confidence * 100)} size="small" style={{ width: 120 }} />
+                      : <span>未评估</span>}
                     <Tooltip title="根因准确">
                       <Button size="small" icon={<LikeOutlined />}
                         type={myFb.rca[rc.rule_id] === 'correct' ? 'primary' : 'default'}
@@ -341,6 +349,10 @@ export default function IncidentDetail() {
                   {rc.llm_dissent && (
                     <Alert type="warning" showIcon style={{ margin: '4px 0' }} banner
                       message={`AI 异议: ${rc.llm_dissent}`} />)}
+                  {(rc.source === 'llm' || rc.source === 'both' || rc.evidence_refs?.length > 0) &&
+                    <DiagnosisReferences references={rc.evidence_refs} index={rca.llm?.meta?.evidence_index} />}
+                  {!!rc.dissent_evidence_refs?.length && <DiagnosisReferences
+                    references={rc.dissent_evidence_refs} index={rca.llm?.meta?.evidence_index} />}
                   {(rc.evidence || []).length > 0 && (
                     <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
                       <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>证据链:</div>

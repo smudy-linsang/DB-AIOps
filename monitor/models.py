@@ -193,6 +193,8 @@ class AuditLog(models.Model):
     config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE,
                                null=True, blank=True, verbose_name="数据库",
                                help_text="平台级操作（登录/用户/角色）无关联实例，可为空")
+    incident = models.ForeignKey('Incident', on_delete=models.SET_NULL, null=True, blank=True,
+                                 related_name='tickets')
     related_log = models.ForeignKey(MonitorLog, on_delete=models.SET_NULL, null=True, blank=True, verbose_name="关联监控日志")
     
     # 新增: 触发告警（用于告警与工单关联）
@@ -252,10 +254,12 @@ class AlertLog(models.Model):
         ('lock',       '锁等待'),
         ('baseline',   '基线偏离'),
     )
+    UNRESOLVED = ('active', 'acknowledged')
     STATUS_CHOICES = (
         ('active',       '活跃'),
         ('acknowledged', '已确认'),
         ('resolved',     '已恢复'),
+        ('superseded',   '历史重复记录'),
     )
 
     config = models.ForeignKey(DatabaseConfig, on_delete=models.CASCADE, verbose_name="数据库")
@@ -270,6 +274,9 @@ class AlertLog(models.Model):
     status = models.CharField(max_length=20, choices=STATUS_CHOICES, default='active', verbose_name="状态")
     # 最后一次推送通知的时间（用于判断是否需要再次提醒）
     last_notified_at = models.DateTimeField(default=timezone.now, verbose_name="最后通知时间")
+    acknowledged_at = models.DateTimeField(null=True, blank=True)
+    acknowledged_by = models.CharField(max_length=150, blank=True, default='')
+    recovery_evidence = models.JSONField(default=dict, blank=True)
     resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="恢复时间")
     create_time = models.DateTimeField(auto_now_add=True, verbose_name="首次告警时间")
 
@@ -277,7 +284,14 @@ class AlertLog(models.Model):
         verbose_name = "告警日志"
         verbose_name_plural = "告警日志列表"
         ordering = ['-create_time']
-        # 一个数据库 + 告警类型 + 指标键只能有一条 active 记录
+        constraints = [
+            models.UniqueConstraint(
+                fields=['config', 'alert_type', 'metric_key'],
+                condition=models.Q(status__in=('active', 'acknowledged')),
+                name='uniq_unresolved_alert_per_metric',
+            ),
+        ]
+        # 支持按实例和指标查找当前状态和历史。
         indexes = [
             models.Index(fields=['config', 'alert_type', 'metric_key', 'status']),
         ]
@@ -1567,6 +1581,10 @@ class Incident(models.Model):
     plan_ready_at = models.DateTimeField(null=True, blank=True, verbose_name="方案就位时刻")
     acked_at = models.DateTimeField(null=True, blank=True, verbose_name="确认时刻")
     acked_by = models.CharField(max_length=50, default='', blank=True, verbose_name="确认人")
+    owner = models.CharField(max_length=150, blank=True, default='')
+    next_step = models.CharField(max_length=500, blank=True, default='')
+    handoff_by = models.CharField(max_length=150, blank=True, default='')
+    handoff_at = models.DateTimeField(null=True, blank=True)
     executing_at = models.DateTimeField(null=True, blank=True, verbose_name="执行时刻")
     resolved_at = models.DateTimeField(null=True, blank=True, verbose_name="解决时刻")
     closed_at = models.DateTimeField(null=True, blank=True, verbose_name="关闭时刻")

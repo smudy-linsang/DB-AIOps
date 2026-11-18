@@ -107,7 +107,7 @@ class PrometheusExporter:
             # ==========================================
             # 告警指标
             # ==========================================
-            active_alerts = AlertLog.objects.filter(status='active')
+            active_alerts = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED)
             total_active = active_alerts.count()
 
             lines.append('# HELP dbmonitor_alerts_active Total number of active alerts')
@@ -189,8 +189,8 @@ class HealthChecker:
         collection_rate = (recent_collected / active_dbs * 100) if active_dbs > 0 else 0
 
         # 告警状态检查
-        active_alerts = AlertLog.objects.filter(status='active').count()
-        critical_alerts = AlertLog.objects.filter(status='active', severity='critical').count()
+        active_alerts = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED).count()
+        critical_alerts = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED, severity='critical').count()
 
         # 整体健康状态判定
         overall_status = 'healthy'

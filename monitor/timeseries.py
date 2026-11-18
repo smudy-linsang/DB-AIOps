@@ -574,6 +574,20 @@ class TimeseriesStorage:
             logger.error(f"[Timeseries] 阻塞计数查询失败: {e}")
             return 0
 
+    def latest_blocked_observation(self, db_config_id, since):
+        """Latest actual ASH sample in the verification window, including a genuine zero."""
+        with self.cursor() as cur:
+            if cur is None:
+                return None, None
+            cur.execute(
+                "SELECT time, COUNT(*) FILTER (WHERE is_blocked) "
+                "FROM session_sample WHERE db_config_id=%s AND time >= %s "
+                "GROUP BY time ORDER BY time DESC LIMIT 1",
+                (db_config_id, since),
+            )
+            row = cur.fetchone()
+        return (int(row[1]), row[0]) if row else (None, None)
+
     # SQL 查询模板（使用参数化占位符，表名通过白名单校验）
     _TABLE_WHITELIST = {
         'raw': 'metric_point',

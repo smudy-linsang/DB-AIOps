@@ -1,3 +1,4 @@
+import { OamEvidenceLinks } from '../components/DiagnosticEvidence'
 import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate } from 'react-router-dom'
 import {
@@ -282,6 +283,10 @@ const OamDiagnose = () => {
               <Descriptions.Item label="根因">
                 {report.root_cause ? <Text strong>{report.root_cause}</Text> : <Text type="secondary">未给出</Text>}
               </Descriptions.Item>
+              {report.root_cause && <Descriptions.Item label="根因证据">
+                <OamEvidenceLinks references={report.evidence_refs} index={report.evidence_index}
+                  trailHref={trajId ? `/oam/trajectories/${encodeURIComponent(trajId)}` : ''} />
+              </Descriptions.Item>}
             </Descriptions>
           )}
 

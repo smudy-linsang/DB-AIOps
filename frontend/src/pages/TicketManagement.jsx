@@ -1,4 +1,5 @@
 import { useState, useEffect, useCallback } from 'react'
+import { Link, useSearchParams } from 'react-router-dom'
 import { Card, Table, Tag, Typography, Spin, Alert, Button, Space, Modal, Input, message, Tabs, Descriptions, Form, Select, Row, Col, Statistic } from 'antd'
 import { CheckCircleOutlined, CloseCircleOutlined, ThunderboltOutlined, EyeOutlined, ClockCircleOutlined, PlusOutlined, ReloadOutlined } from '@ant-design/icons'
 import { auditLogAPI, ticketAPI, databaseAPI } from '../services/api'
@@ -9,6 +10,8 @@ const { Title, Text } = Typography
 const { TextArea } = Input
 
 const TicketManagement = () => {
+  const [params] = useSearchParams()
+  const incidentId = params.get('incident_id')
   const [loading, setLoading] = useState(true)
   const [tickets, setTickets] = useState([])
   const [error, setError] = useState(null)
@@ -24,14 +27,14 @@ const TicketManagement = () => {
   const loadTickets = useCallback(async () => {
     try {
       setLoading(true)
-      const res = await auditLogAPI.list()
+      const res = await auditLogAPI.list(incidentId ? { incident_id: incidentId } : {})
       setTickets(res?.auditlogs || res?.data || [])
     } catch (e) {
       setError(e.message || 'Failed to load tickets')
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [incidentId])
 
   const loadDatabases = useCallback(async () => {
     try {
@@ -238,6 +241,9 @@ const TicketManagement = () => {
 
   return (
     <div style={{ padding: 24 }}>
+      {incidentId && <Alert showIcon type="info" style={{ marginBottom: 16 }}
+        message={`仅查看事故 ${incidentId} 的关联工单`}
+        action={<Space><Link to={`/incidents/${encodeURIComponent(incidentId)}`}>返回事故</Link><Link to="/tickets">查看全部</Link></Space>} />}
       <Title level={2}>运维工单管理</Title>
       {error && <Alert message={error} type="error" style={{ marginBottom: 16 }} closable onClose={() => setError(null)} />}
 

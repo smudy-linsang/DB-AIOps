@@ -51,7 +51,7 @@ def get_global_managed_inventory(configs=None) -> Dict[str, Any]:
     summary = []
     for c in configs:
         last_log = MonitorLog.objects.filter(config=c).order_by('-create_time').first()
-        active_alerts = AlertLog.objects.filter(config=c, status='active').count()
+        active_alerts = AlertLog.objects.filter(config=c, status__in=AlertLog.UNRESOLVED).count()
         summary.append({
             'id': c.id,
             'name': c.name,
@@ -89,7 +89,7 @@ def get_alerts_and_baseline_status(config: Optional[DatabaseConfig] = None, conf
     if config:
         alert_qs = alert_qs.filter(config=config)
         
-    active_alerts = alert_qs.filter(status='active').order_by('-create_time')[:10]
+    active_alerts = alert_qs.filter(status__in=AlertLog.UNRESOLVED).order_by('-create_time')[:10]
     
     # 统计近期频发 TOP 问题
     recent_frequent = alert_qs.values('alert_type', 'metric_key', 'title').annotate(
@@ -672,7 +672,7 @@ def generate_quick_health_assessment(config_id: int) -> Dict[str, Any]:
         return {'error': 'Database config not found'}
 
     latest_log = MonitorLog.objects.filter(config=config).order_by('-create_time').first()
-    alerts_count = AlertLog.objects.filter(config=config, status='active').count()
+    alerts_count = AlertLog.objects.filter(config=config, status__in=AlertLog.UNRESOLVED).count()
 
     metrics = {}
     if latest_log:

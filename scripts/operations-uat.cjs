@@ -58,7 +58,7 @@ async function run() {
     })
 
     await check('分页、刷新与返回保留筛选', async () => {
-      await page.getByTitle('2', { exact: true }).click()
+      await page.locator('.ant-pagination').getByTitle('2', { exact: true }).click()
       await page.getByText(/第 2 页/).waitFor()
       assert.equal(await page.getByRole('link', { name: '查看事故' }).count(), 3)
       await page.reload()
@@ -68,7 +68,7 @@ async function run() {
       await page.getByRole('link', { name: '返回值班队列' }).click()
       await page.getByText(/第 2 页/).waitFor()
       assert.match(page.url(), /page=2/)
-      await page.getByTitle('1', { exact: true }).click()
+      await page.locator('.ant-pagination').getByTitle('1', { exact: true }).click()
       await page.getByText(/第 1 页/).waitFor()
     })
 

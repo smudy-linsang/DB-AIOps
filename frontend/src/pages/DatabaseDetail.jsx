@@ -28,6 +28,8 @@ import {
 } from '../config/dbMetricsConfig';
 import TimeRangeSelector, { TIME_RANGE_PRESETS } from '../components/TimeRangeSelector';
 import dayjs from 'dayjs';
+import CollectionHealth, { CollectionStatusTag } from '../components/CollectionHealth';
+import { errorText } from '../utils/experience';
 
 const { Title, Text } = Typography;
 const { TabPane } = Tabs;
@@ -210,6 +212,7 @@ const DatabaseDetail = () => {
   const { id } = useParams();
   const [loading, setLoading] = useState(true);
   const [configInfo, setConfigInfo] = useState(null);
+  const [collection, setCollection] = useState({});
   const [statusData, setStatusData] = useState(null);
   const [metricsHistory, setMetricsHistory] = useState([]);
   const [alerts, setAlerts] = useState([]);
@@ -347,18 +350,16 @@ const DatabaseDetail = () => {
       const configResponse = await databaseAPI.list();
       const dbConfig = configResponse?.databases?.find(db => db.id === parseInt(id));
 
-      const statusResponse = await databaseAPI.getStatus(id);
-
-      const metricsResponse = await databaseAPI.getMetrics(id, {
-        time: currentTimeRange || '24h',
-      });
-
-      const alertsResponse = await alertAPI.getByDatabase(id);
-
       setConfigInfo(dbConfig || {});
-      setStatusData(statusResponse || {});
-      setMetricsHistory(metricsResponse?.metrics || []);
-      setAlerts(alertsResponse?.alerts || []);
+      const [status, history, alerts] = await Promise.allSettled([
+        databaseAPI.getStatus(id),
+        databaseAPI.getMetrics(id, { time: currentTimeRange || '24h' }),
+        alertAPI.getByDatabase(id),
+      ]);
+
+      setStatusData(status.value || (dbConfig ? {} : null));
+      setMetricsHistory(history.value?.metrics || []);
+      setAlerts(alerts.value?.alerts || []);
     } catch (error) {
       console.error('获取数据失败:', error);
     } finally {
@@ -366,6 +367,21 @@ const DatabaseDetail = () => {
       loadingRef.current = false;
     }
   }, [id]);
+
+  const refreshCollection = useCallback(async signal => {
+    try {
+      const result = await databaseAPI.collectionHealth(id, signal);
+      if (!signal?.aborted) setCollection({ result });
+    } catch (error) {
+      if (!signal?.aborted) setCollection({ error: errorText(error) });
+    }
+  }, [id]);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    refreshCollection(controller.signal);
+    return () => controller.abort();
+  }, [refreshCollection]);
 
   const handleTimeRangeChange = useCallback((key, range) => {
     setTimeRangeKey(key);
@@ -377,11 +393,15 @@ const DatabaseDetail = () => {
 
   const handleRefresh = useCallback(() => {
     fetchData(timeRangeKey);
-  }, [fetchData, timeRangeKey]);
+    refreshCollection();
+  }, [fetchData, timeRangeKey, refreshCollection]);
 
   useEffect(() => {
     if (autoRefresh > 0) {
-      const interval = setInterval(() => fetchData(timeRangeKey), autoRefresh * 1000);
+      const interval = setInterval(() => {
+        fetchData(timeRangeKey);
+        refreshCollection();
+      }, autoRefresh * 1000);
       return () => clearInterval(interval);
     }
   }, [autoRefresh, timeRangeKey, fetchData]);
@@ -534,7 +554,7 @@ const DatabaseDetail = () => {
   }
 
   if (!statusData) {
-    return <Alert message="未找到数据库信息" type="error" />;
+    return <CollectionHealth {...collection} onRetry={() => refreshCollection()} />;
   }
 
   return (
@@ -547,7 +567,7 @@ const DatabaseDetail = () => {
           <Title level={4} style={{ margin: 0 }}>
             <DatabaseOutlined /> {configInfo?.name || '数据库详情'}
           </Title>
-          {getStatusTag(statusData?.status)}
+          <CollectionStatusTag collection={collection.result || configInfo?.collection} />
           <Tag color="blue">{DB_TYPE_LABELS[dbType] || dbType}</Tag>
           {statusData?.collected_at && (
             <Text type="secondary" style={{ fontSize: 12 }}>
@@ -568,10 +588,11 @@ const DatabaseDetail = () => {
           <Descriptions.Item label="数据库类型">{DB_TYPE_LABELS[dbType] || dbType}</Descriptions.Item>
           <Descriptions.Item label="服务名/库名">{configInfo?.service_name || '-'}</Descriptions.Item>
           <Descriptions.Item label="最后检查">{statusData?.collected_at ? dayjs(statusData.collected_at).format('YYYY-MM-DD HH:mm:ss') : '-'}</Descriptions.Item>
-          <Descriptions.Item label="监控状态">{getStatusTag(statusData?.status)}</Descriptions.Item>
+          <Descriptions.Item label="监控状态"><CollectionStatusTag collection={collection.result || configInfo?.collection} /></Descriptions.Item>
         </Descriptions>
       </Card>
 
+      <CollectionHealth {...collection} onRetry={() => refreshCollection()} />
       {metricCategories.map(renderCategory)}
 
       <Card

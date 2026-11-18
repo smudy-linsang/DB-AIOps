@@ -1,7 +1,9 @@
 import { useEffect, useState } from 'react'
-import { Alert, Button, Card, Descriptions, Drawer, Empty, Form, Input, Pagination, Radio, Space, Spin, Tag, Typography } from 'antd'
+import { Alert, App, Button, Card, Descriptions, Drawer, Empty, Form, Input, Pagination, Radio, Space, Spin, Tag, Typography } from 'antd'
 import { Link, useSearchParams } from 'react-router-dom'
-import { operationsAPI } from '../services/api'
+import AlertLifecycle, { AlertMonitoringTag } from '../components/AlertLifecycle'
+import { hasPermission, Perm } from '../utils/permission'
+import { alertAPI, operationsAPI } from '../services/api'
 import { errorText } from '../utils/experience'
 import { incidentStatus, operationTime } from '../utils/operations'
 
@@ -10,10 +12,12 @@ const LEVELS = {
   P1: ['error', 'P1'], P2: ['warning', 'P2'], P3: ['processing', 'P3'], P4: ['default', 'P4'],
   critical: ['error', '严重'], error: ['volcano', '错误'], warning: ['warning', '警告'], info: ['processing', '信息'],
 }
-const ALERT_STATES = { active: '待确认', acknowledged: '已确认', resolved: '已恢复' }
+const ALERT_STATES = { active: '待确认', acknowledged: '已知晓', resolved: '已恢复', superseded: '历史重复记录' }
 const STAGES = { pending: '待确认', acknowledged: '已确认', finished: '已结束', all: '全部' }
 
 export default function WorkQueue() {
+  const { message } = App.useApp()
+  const [acknowledging, setAcknowledging] = useState(false)
   const [params, setParams] = useSearchParams()
   const kind = params.get('kind') || 'incidents'
   const stage = params.get('stage') || 'pending'
@@ -60,6 +64,23 @@ export default function WorkQueue() {
     setParams(next)
   }
   const alert = openAlert?.key === key ? data?.items.find(row => row.id === openAlert.id) : null
+  async function acknowledge() {
+    if (!alert || acknowledging) return
+    setAcknowledging(true)
+    try {
+      const result = await alertAPI.acknowledge(alert.id)
+      setFetchState(current => current.key === key ? {
+        ...current, data: { ...current.data, items: current.data.items.map(row =>
+          row.id === alert.id ? { ...row, ...result, status: 'acknowledged' } : row) },
+      } : current)
+      message.success('已记录确认，系统继续监测异常状态')
+      setAttempt(value => value + 1)
+    } catch (err) {
+      message.error(errorText(err))
+    } finally {
+      setAcknowledging(false)
+    }
+  }
 
   return <section className="operations-page">
     <header className="experience-heading">
@@ -112,9 +133,12 @@ export default function WorkQueue() {
                   <Space wrap>
                     <Tag color={color}>{label}</Tag>
                     <Tag>{isAlerts ? ALERT_STATES[row.status] || row.status : incidentStatus(row.status)}</Tag>
+                    {isAlerts && row.status === 'acknowledged' && <AlertMonitoringTag alert={row} />}
                   </Space>
                   <h3>{row.title}</h3>
                   <Text type="secondary">{row.database} · {row.id} · {operationTime(row.occurred_at)}</Text>
+                  {!isAlerts && row.owner && <div>负责人 · {row.owner}</div>}
+                  {!isAlerts && row.next_step && <div>下一步 · {row.next_step}</div>}
                   {!isAlerts && (row.acked_by || row.acked_at) && <div>已确认 · {row.acked_by || '确认人未记录'}</div>}
                 </div>
                 {isAlerts
@@ -135,8 +159,12 @@ export default function WorkQueue() {
           { key: 'db', label: '实例', children: alert.database },
           { key: 'state', label: '记录状态', children: ALERT_STATES[alert.status] || alert.status },
           { key: 'time', label: '首次告警', children: operationTime(alert.occurred_at) },
-          { key: 'resolution', label: '恢复时间', children: alert.resolved_at ? operationTime(alert.resolved_at) : '未记录' },
+
         ]} />
+        <AlertLifecycle alert={alert} />
+        {alert.status === 'active' && hasPermission(Perm.ALERTS_ACKNOWLEDGE) && (
+          <Button type="primary" loading={acknowledging} disabled={!!error} onClick={acknowledge}>确认知晓告警</Button>
+        )}
         <Typography.Paragraph className="operations-description">{alert.description || '本记录没有补充描述。'}</Typography.Paragraph>
         {alert.status === 'acknowledged' && !alert.resolved_at && <Alert type="info" showIcon message="已确认表示人员已知晓。恢复时间目前未记录。" />}
       </>}

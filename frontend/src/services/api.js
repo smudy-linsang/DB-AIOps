@@ -153,6 +153,7 @@ export const databaseAPI = {
   
   // 获取数据库状态
   getStatus: (id) => api.get(`/databases/${id}/status/`),
+  collectionHealth: (id, signal) => api.get(`/databases/${id}/collection-health/`, { signal }),
   
   // 获取数据库指标
   getMetrics: (id, params = {}) =>
@@ -579,6 +580,9 @@ export const operationsAPI = {
 export const incidentAPI = {
   list: (params = {}) => api.get('/incidents/', { params }),
   detail: (id, signal) => api.get(`/incidents/${id}/`, { signal }),
+  context: (id, signal) => api.get(`/incidents/${encodeURIComponent(id)}/context/`, { signal }),
+  saveHandoff: (id, data) => api.post(`/incidents/${encodeURIComponent(id)}/handoff/`, data),
+  linkTicket: (id, ticket_id) => api.post(`/incidents/${encodeURIComponent(id)}/tickets/`, { ticket_id }),
   timeline: (id, signal) => api.get(`/incidents/${id}/timeline/`, { signal }),
   ack: (id) => api.post(`/incidents/${id}/ack/`, {}),
   close: (id, reason) => api.post(`/incidents/${id}/close/`, { reason }),

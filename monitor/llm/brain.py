@@ -61,6 +61,10 @@ def diagnose_incident(incident, context: dict, features: dict,
             out['_meta'] = {
                 'model': res.model, 'latency_ms': res.latency_ms,
                 'evidence_count': len(pack), 'attempt': attempt,
+                'evidence_index': [
+                    {key: entry.get(key) for key in ('id', 'type', 'label', 'observed_at', 'focus', 'preview')}
+                    for entry in pack
+                ],
             }
             return out
         except SchemaValidationError as e:
@@ -93,6 +97,7 @@ def merge_llm_with_rules(root_causes: list, llm_result: dict) -> list:
             target['confidence'] = round(min(target['confidence'] + 0.15, 1.0), 2)
             target['source'] = 'both'
             target['reasoning'] = h.get('reasoning', '')
+            target['evidence_refs'] = h.get('evidence_refs', [])
             # LLM 补充建议去重合并
             extra = [s for s in h.get('suggestions', []) if s not in target.get('suggestions', [])]
             target['suggestions'] = (target.get('suggestions') or []) + extra[:3]
@@ -100,6 +105,7 @@ def merge_llm_with_rules(root_causes: list, llm_result: dict) -> list:
             # R2: 不认同 → 降分并留异议
             target['confidence'] = round(max(target['confidence'] - 0.20, 0.05), 2)
             target['llm_dissent'] = h.get('reasoning', '')
+            target['dissent_evidence_refs'] = h.get('evidence_refs', [])
         else:
             # R3: 新假设 (含 rule_id 未命中场景)
             merged.append({

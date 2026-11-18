@@ -9,6 +9,7 @@ import { GridComponent, TooltipComponent } from 'echarts/components';
 import { CanvasRenderer } from 'echarts/renderers';
 import { healthAPI, databaseAPI, alertAPI, dashboardAPI } from '../services/api';
 import { hasPermission, Perm } from '../utils/permission';
+import { CollectionStatusTag } from '../components/CollectionHealth';
 import { errorText } from '../utils/experience';
 
 echarts.use([LineChart, GridComponent, TooltipComponent, CanvasRenderer]);
@@ -32,7 +33,7 @@ export default function Dashboard() {
     setLoading(true);
     const id = ++generation.current;
     const results = await Promise.allSettled([
-      healthAPI.check(), databaseAPI.list(), alertAPI.list({ limit: 50, status: 'active' }),
+      healthAPI.check(), databaseAPI.list(), alertAPI.list({ limit: 50, status: 'ongoing' }),
       dashboardAPI.getCharts(hours), dashboardAPI.getStats(),
     ]);
     if (id !== generation.current) return;
@@ -101,7 +102,7 @@ export default function Dashboard() {
       </Card>}
       <Row gutter={[16, 16]} style={{ marginBottom: 16 }}>
         <Col xs={24} sm={12} xl={6}><Card><Statistic title="启用监控的实例" value={stats?.total ?? '—'} />
-          <Text type="secondary">{stats ? `${stats.online} 正常 / ${stats.offline} 故障 / ${stats.degraded} 降级 / ${stats.unknown} 未知` : '等待统计数据'}</Text></Card></Col>
+          <Text type="secondary">{stats ? `${stats.online} 正常 / ${stats.offline} 故障 / ${stats.degraded} 降级 / ${stats.stale ?? 0} 数据过期 / ${stats.unknown} 未知` : '等待统计数据'}</Text></Card></Col>
         <Col xs={24} sm={12} xl={6}><Card><Statistic title="今日平均健康分" value={stats?.avg_health ?? '未评分'} />
           <Text type="secondary">{stats ? `${stats.scored_count} 个实例已有今日评分` : '等待统计数据'}</Text></Card></Col>
         <Col xs={24} sm={12} xl={6}><Card><Statistic title="活跃告警 · 启用实例" value={stats?.active_alerts ?? '—'} />
@@ -126,9 +127,11 @@ export default function Dashboard() {
         <Table rowKey="id" dataSource={databases} loading={loading && !sources.databases?.at} scroll={{ x: 700 }} pagination={{ pageSize: 10, showSizeChanger: false }} columns={[
           { title: '数据库', dataIndex: 'name', render: (name, db) => <Button type="link" onClick={() => goDatabase(db.id)}>{name}</Button> },
           { title: '类型', dataIndex: 'db_type' },
-          { title: '监控状态', render: (_, db) => { const [color, label] = statusLabels[db.status] || statusLabels.UNKNOWN;
+          { title: '监控状态', render: (_, db) => {
+            if (db.collection) return <CollectionStatusTag collection={db.collection} />;
+            const [color, label] = statusLabels[db.status] || statusLabels.UNKNOWN;
             return db.is_active ? <Tag color={color}>{label}</Tag> : <Tag>已停用监控</Tag>; } },
-          { title: '最后采集时间', dataIndex: 'last_collect_time', render: time => time ? new Date(time).toLocaleString('zh-CN') : '尚未采集' },
+          { title: '最后成功采集', render: (_, db) => db.collection?.last_success_at ? new Date(db.collection.last_success_at).toLocaleString('zh-CN') : '尚未成功' },
         ]} locale={{ emptyText: unknown(sources.databases) || '暂无可见数据库' }} />
       </Card>
       <Card title="近期活跃告警 · 最多50条" extra={hasPermission(Perm.ALERTS_VIEW) && <Button onClick={() => navigate('/alerts')}>查看全部告警</Button>}>

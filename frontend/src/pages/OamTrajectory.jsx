@@ -1,5 +1,6 @@
+import { OamEvidenceLinks } from '../components/DiagnosticEvidence'
 import React, { useState, useEffect, useCallback } from 'react'
-import { useParams, useNavigate } from 'react-router-dom'
+import { useParams, useLocation, useNavigate } from 'react-router-dom'
 import {
   Card, Table, Tag, Alert, Descriptions, Button, Space, Spin, Empty, Tooltip, Typography
 } from 'antd'
@@ -27,10 +28,12 @@ const { Text, Paragraph } = Typography
 const OamTrajectory = () => {
   const { trajId } = useParams()
   const navigate = useNavigate()
+  const { hash } = useLocation()
   const [traj, setTraj] = useState(null)
   const [auditData, setAuditData] = useState(null)
   const [loading, setLoading] = useState(false)
   const [err, setErr] = useState(null)
+  const [turnPage, setTurnPage] = useState(1)
   const [auditErr, setAuditErr] = useState(null)
 
   const load = useCallback(async () => {
@@ -66,6 +69,19 @@ const OamTrajectory = () => {
   useEffect(() => {
     load()
   }, [load])
+
+  useEffect(() => {
+    if (!traj || !/^#oam-turn-\d+$/.test(hash)) return
+    const turn = Number(hash.slice('#oam-turn-'.length))
+    const index = traj.turns?.findIndex(step => step.turn === turn) ?? -1
+    if (index < 0) return
+    const targetPage = Math.floor(index / 10) + 1
+    if (targetPage !== turnPage) {
+      setTurnPage(targetPage)
+      return
+    }
+    document.getElementById(hash.slice(1))?.scrollIntoView({ block: 'center' })
+  }, [traj, hash, turnPage])
 
   const report = traj?.report || {}
   const state = reportState(report.status, traj?.escalated)
@@ -203,6 +219,7 @@ const OamTrajectory = () => {
                     ? <Text strong>{report.root_cause}</Text>
                     : <Text type="secondary">未给出（证据不足时不臆造根因）</Text>}
                 </Paragraph>
+                {report.root_cause && <OamEvidenceLinks references={report.evidence_refs} index={report.evidence_index} />}
                 <Paragraph style={{ marginBottom: 8 }}>
                   <Text strong>修复建议：</Text>
                   <Text>{report.fix || '无'}</Text>
@@ -262,9 +279,11 @@ const OamTrajectory = () => {
           size="small"
           rowKey={(r, i) => `${r.turn}-${i}`}
           dataSource={turns}
+          onRow={row => ({ id: `oam-turn-${row.turn}` })}
           columns={turnColumns}
           loading={loading}
-          pagination={{ pageSize: 10, hideOnSinglePage: true }}
+          pagination={{ current: turnPage, pageSize: 10, hideOnSinglePage: true,
+            onChange: next => { if (hash) navigate({ hash: '' }, { replace: true }); setTurnPage(next) } }}
           locale={{ emptyText: <Empty description="该轨迹没有记录任何轮次" /> }}
         />
       </Card>

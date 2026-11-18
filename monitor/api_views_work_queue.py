@@ -7,6 +7,8 @@ from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.cache import never_cache
 
+from monitor.alert_lifecycle import alert_observation
+from monitor.collection_health import collection_detail, with_collection_times
 from monitor.auth import Perm, require_auth, require_permission
 from monitor.models import AlertLog, DatabaseConfig, Incident
 
@@ -32,7 +34,7 @@ def queue_definition(kind):
     return AlertLog, {
         'pending': Q(status='active'),
         'acknowledged': Q(status='acknowledged'),
-        'finished': Q(status='resolved'),
+        'finished': Q(status__in=('resolved', 'superseded')),
     }, 'id', 'severity', ('critical', 'error', 'warning', 'info'), 'create_time'
 
 
@@ -46,12 +48,13 @@ def queue_row(item, kind):
     if kind == 'incidents':
         row.update(
             level=item.priority, occurred_at=item.occurred_at,
-            acked_by=item.acked_by, acked_at=item.acked_at,
+            acked_by=item.acked_by, acked_at=item.acked_at, owner=item.owner, next_step=item.next_step,
         )
     else:
         row.update(
             level=item.severity, occurred_at=item.create_time,
             resolved_at=item.resolved_at, description=item.description[:2000],
+            **alert_observation(item),
         )
     return row
 
@@ -110,3 +113,15 @@ class OperationsQueueView(View):
             'page_size': PAGE_SIZE,
             'items': [queue_row(item, kind) for item in rows[offset:offset + PAGE_SIZE]],
         })
+
+
+@method_decorator(never_cache, name='dispatch')
+@method_decorator(require_auth, name='dispatch')
+@method_decorator(require_permission(Perm.DATABASE_DETAIL_VIEW), name='dispatch')
+class CollectionHealthView(View):
+    def get(self, request, config_id):
+        visible = DatabaseConfig.objects.visible_to(request.user)
+        config = with_collection_times(visible).filter(pk=config_id).first()
+        if not config:
+            return JsonResponse({'message': '实例不存在或无权访问'}, status=404)
+        return JsonResponse(collection_detail(config))

@@ -253,7 +253,7 @@ class AlertOpsTests(TestCase):
         am = AlertManager(self.config)
         alerts = [
             AlertLog.objects.create(config=self.config, alert_type="down",
-                                    severity="critical", title=f"a{i}", description="d",
+                                    metric_key=f"signal-{i}", severity="critical", title=f"a{i}", description="d",
                                     status="active")
             for i in range(3)
         ]
