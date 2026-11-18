@@ -69,14 +69,16 @@ GRANT CONNECT ON DATABASE timeseriesdb TO dbmonitor_app, dbaiops_app;
 GRANT USAGE, CREATE ON SCHEMA public TO dbmonitor_app, dbaiops_app;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO dbmonitor_app, dbaiops_app;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO dbmonitor_app, dbaiops_app;
-GRANT ALL PRIVILEGES ON ALL VIEWS IN SCHEMA public TO dbmonitor_app, dbaiops_app;
+-- 注：PostgreSQL 无「GRANT ... ON ALL VIEWS」语法（PG16 报 syntax error at or near "VIEWS"），
+--     且视图/物化视图本属 relation、已含在上一行 ALL TABLES 之内 ⇒ 此处不另设 VIEWS 授权。
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO dbmonitor_app, dbaiops_app;
 
 \connect timeseriesdb
 GRANT USAGE, CREATE ON SCHEMA public TO dbmonitor_app, dbaiops_app;
 GRANT ALL PRIVILEGES ON ALL TABLES IN SCHEMA public TO dbmonitor_app, dbaiops_app;
 GRANT ALL PRIVILEGES ON ALL SEQUENCES IN SCHEMA public TO dbmonitor_app, dbaiops_app;
-GRANT ALL PRIVILEGES ON ALL VIEWS IN SCHEMA public TO dbmonitor_app, dbaiops_app;
+-- 注：PostgreSQL 无「GRANT ... ON ALL VIEWS」语法（PG16 报 syntax error at or near "VIEWS"），
+--     且视图/物化视图本属 relation、已含在上一行 ALL TABLES 之内 ⇒ 此处不另设 VIEWS 授权。
 GRANT EXECUTE ON ALL FUNCTIONS IN SCHEMA public TO dbmonitor_app, dbaiops_app;
 
 -- TimescaleDB 内部 schema：超表/会话采样等扩展对象在 hypertable 内部目录，
@@ -96,5 +98,5 @@ FROM pg_roles WHERE rolname IN ('dbmonitor_app', 'dbaiops_app') ORDER BY rolname
 --   add_compression_policy 需要**对象属主**权限，非 superuser 角色对 postgres 拥有的
 --   超表无法执行 ⇒ dev 副本首次建超表须由 postgres 执行一次，或按需把目标对象属主转给
 --   该角色。以下查询列出仍由 postgres 拥有的表，供实施时逐项判定。
-SELECT table_schema, count(*) AS still_owned_by_postgres
+SELECT schemaname AS table_schema, count(*) AS still_owned_by_postgres
 FROM pg_tables WHERE tableowner = 'postgres' GROUP BY 1 ORDER BY 1;
