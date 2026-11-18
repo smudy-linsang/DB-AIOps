@@ -10,6 +10,7 @@ import {
   EyeOutlined, DeleteOutlined, CheckOutlined
 } from '@ant-design/icons'
 import { alertAPI } from '../services/api'
+import AlertLifecycle from '../components/AlertLifecycle'
 import { PermissionGuard } from '../components/AuthGuard'
 import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
@@ -26,8 +27,9 @@ const SEV_CONFIG = {
 
 const STATUS_CONFIG = {
   active:       { color: 'processing', text: '活跃',  badge: 'error' },
-  acknowledged: { color: 'warning',    text: '已确认', badge: 'warning' },
+  acknowledged: { color: 'warning',    text: '已知晓 · 异常持续', badge: 'warning' },
   resolved:     { color: 'success',    text: '已恢复', badge: 'success' },
+  superseded:   { color: 'default',    text: '历史重复记录', badge: 'default' },
 }
 
 function SeverityTag({ severity }) {
@@ -78,16 +80,12 @@ function AlertDetailModal({ alert, onClose, onAck, onDelete }) {
         <Descriptions.Item label="首次告警">
           {alert.create_time ? dayjs(alert.create_time).format('YYYY-MM-DD HH:mm:ss') : '—'}
         </Descriptions.Item>
-        {alert.resolved_at && (
-          <Descriptions.Item label="恢复时间" span={2}>
-            {dayjs(alert.resolved_at).format('YYYY-MM-DD HH:mm:ss')}
-          </Descriptions.Item>
-        )}
         <Descriptions.Item label="告警标题" span={2}>{alert.title}</Descriptions.Item>
         <Descriptions.Item label="详细描述" span={2}>
           <pre style={{ whiteSpace: 'pre-wrap', margin: 0, fontSize: 12 }}>{alert.description}</pre>
         </Descriptions.Item>
       </Descriptions>
+      <AlertLifecycle alert={alert} />
     </Modal>
   )
 }
@@ -232,7 +230,7 @@ export default function AlertList() {
   const handleAck = async (id) => {
     try {
       await alertAPI.acknowledge(id)
-      message.success('告警已确认，移入已确认列表')
+      message.success('已记录确认，系统继续监测异常状态')
       fetchAlerts()
     } catch {
       message.error('确认失败')
@@ -270,8 +268,9 @@ export default function AlertList() {
 
   const stats = {
     active:    allAlerts.filter(a => a.status === 'active').length,
-    critical:  allAlerts.filter(a => a.status === 'active' && a.severity === 'critical').length,
-    warning:   allAlerts.filter(a => a.status === 'active' && a.severity === 'warning').length,
+    ongoing:   allAlerts.filter(a => a.status === 'active' || a.status === 'acknowledged').length,
+    critical:  allAlerts.filter(a => ['active', 'acknowledged'].includes(a.status) && a.severity === 'critical').length,
+    warning:   allAlerts.filter(a => ['active', 'acknowledged'].includes(a.status) && a.severity === 'warning').length,
     acked:     allAlerts.filter(a => a.status === 'acknowledged').length,
   }
 
@@ -291,7 +290,7 @@ export default function AlertList() {
       <Row gutter={12} style={{ marginBottom: 20 }}>
         <Col span={6}>
           <Card size="small">
-            <Statistic title="活跃告警" value={stats.active}
+            <Statistic title="未恢复告警" value={stats.ongoing}
               valueStyle={{ color: stats.active > 0 ? '#ff4d4f' : '#52c41a' }}
               prefix={<BellOutlined />} />
           </Card>
@@ -337,7 +336,7 @@ export default function AlertList() {
             key: 'active',
             label: (
               <span>
-                活跃告警&nbsp;
+                待确认&nbsp;
                 {stats.active > 0 && <Badge count={stats.active} size="small" />}
               </span>
             ),
@@ -346,7 +345,7 @@ export default function AlertList() {
                 {active.length === 0
                   ? <div style={{ textAlign: 'center', padding: '40px 0', color: '#52c41a' }}>
                       <CheckCircleOutlined style={{ fontSize: 32, marginBottom: 8 }} />
-                      <div>当前无活跃告警</div>
+                      <div>当前没有待确认告警</div>
                     </div>
                   : <AlertTable alerts={active} showAck {...tableProps} />
                 }
@@ -364,7 +363,7 @@ export default function AlertList() {
             children: (
               <div>
                 <Text type="secondary" style={{ display: 'block', marginBottom: 12, fontSize: 12 }}>
-                  已确认的告警不会重复推送通知，也不会在活跃列表中显示。删除后该指标可重新触发告警。
+                  已确认表示有人知晓，异常仍由系统监测。恢复后会保留确认回执与恢复依据。
                 </Text>
                 <AlertTable alerts={acknowledged} showAck={false} {...tableProps} />
               </div>

@@ -77,23 +77,14 @@ class AlertManager:
         - 若该 (config, alert_type, metric_key) 已有 active 记录 → 静默（不重复发送）
         - 若无 active 记录 → 创建记录并发送通知
         """
-        # 1. 检查是否已有活跃告警
-        existing = self._get_active(alert_type, metric_key)
-        if existing:
-            # 已经处于活跃状态，不重复推送
-            return existing
-
-        # 2. 创建告警记录
-        alert = AlertLog.objects.create(
+        alert, created = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED).get_or_create(
             config=self.config,
             alert_type=alert_type,
             metric_key=metric_key,
-            severity=severity,
-            title=title,
-            description=description,
-            status='active',
-            last_notified_at=timezone.now(),
+            defaults={'severity': severity, 'title': title, 'description': description},
         )
+        if not created:
+            return alert
 
         # 2.5 同步写入 Elasticsearch
         try:
@@ -144,7 +135,7 @@ class AlertManager:
 
         return alert
 
-    def resolve(self, alert_type, metric_key, recovery_title=None, recovery_body=None):
+    def resolve(self, alert_type, metric_key, recovery_title=None, recovery_body=None, evidence=None):
         """
         解除一条告警。
         - 若存在 active 记录 → 更新为 resolved 并发送恢复通知
@@ -154,16 +145,18 @@ class AlertManager:
         if not existing:
             return
 
-        existing.status = 'resolved'
-        existing.resolved_at = timezone.now()
-        existing.save(update_fields=['status', 'resolved_at'])
+        at = timezone.now()
+        proof = {'source': 'alert_rule', 'at': at.isoformat(), 'metric': metric_key or alert_type}
+        if evidence:
+            proof.update(evidence)
+        changed = AlertLog.objects.filter(
+            pk=existing.pk, status__in=AlertLog.UNRESOLVED,
+        ).update(status='resolved', resolved_at=at, recovery_evidence=proof)
+        if not changed:
+            return
 
-        # 4NF/一致性: 同步 ES 文档状态, 避免列表(优先读ES)显示陈旧 active
-        try:
-            from monitor.elasticsearch_engine import sync_alert
-            sync_alert(existing)
-        except Exception as e:
-            logger.warning("[AlertManager] 同步ES解除状态失败: %s", e)
+        from monitor.alert_lifecycle import sync_current_alert
+        sync_current_alert(existing)
 
         # 清理聚合缓冲区
         buffer_key = (alert_type, metric_key)
@@ -208,33 +201,20 @@ class AlertManager:
         """
         确认告警（DBA标记"已知晓"）
         """
-        try:
-            alert = AlertLog.objects.get(id=alert_id, status='active')
-            alert.status = 'acknowledged'
-            alert.last_notified_at = timezone.now()
-            alert.save(update_fields=['status', 'last_notified_at'])
-            # 一致性: 同步 ES 文档状态
-            try:
-                from monitor.elasticsearch_engine import sync_alert
-                sync_alert(alert)
-            except Exception as e:
-                logger.warning("[AlertManager] 同步ES确认状态失败: %s", e)
-            logger.info(f"[AlertManager] 告警已确认: {alert.title} by {acknowledged_by}")
-            return True
-        except AlertLog.DoesNotExist:
-            return False
+        from monitor.alert_lifecycle import acknowledge_alert
+        return acknowledge_alert(alert_id, self.config.pk, acknowledged_by) is not None
 
     def fire_or_resolve(self, condition, alert_type, metric_key,
                         fire_title, fire_body, resolve_title, resolve_body,
-                        severity='warning'):
+                        severity='warning', evidence=None):
         """
         根据 condition 决定触发还是解除告警的便捷方法。
         :param condition: bool，True 表示当前处于告警状态
         """
         if condition:
             self.fire(alert_type, metric_key, fire_title, fire_body, severity)
-        else:
-            self.resolve(alert_type, metric_key, resolve_title, resolve_body)
+        elif condition is False:
+            self.resolve(alert_type, metric_key, resolve_title, resolve_body, evidence=evidence)
 
     def flush_aggregation(self):
         """立即刷新所有聚合缓冲区，发送批量告警"""
@@ -659,7 +639,7 @@ class AlertManager:
             config=self.config,
             alert_type=alert_type,
             metric_key=metric_key,
-            status__in=('active', 'acknowledged'),
+            status__in=AlertLog.UNRESOLVED,
         ).first()
 
     # ------------------------------------------------------------------
@@ -669,7 +649,7 @@ class AlertManager:
     @staticmethod
     def get_active_alerts(config_id=None, severity=None):
         """获取活跃告警列表"""
-        qs = AlertLog.objects.filter(status='active').select_related('config')
+        qs = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED).select_related('config')
         if config_id:
             qs = qs.filter(config_id=config_id)
         if severity:
@@ -679,7 +659,7 @@ class AlertManager:
     @staticmethod
     def get_alert_summary():
         """获取告警汇总统计"""
-        active_alerts = AlertLog.objects.filter(status='active')
+        active_alerts = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED)
         return {
             'total': active_alerts.count(),
             'critical': active_alerts.filter(severity='critical').count(),

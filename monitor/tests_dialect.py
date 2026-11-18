@@ -804,3 +804,74 @@ class GbaseDialectTests(TransactionTestCase):
         self.assertIn('max_connections', gm)
         self.assertGreater(gm['max_connections'], 0)
 
+
+
+class _CollectionRecoveryContract:
+    """Exercise the actual checker and business-state pipeline for a target database."""
+
+    def exercise(self, dsn, db_type, checker_class):
+        import socket
+        from unittest.mock import patch
+
+        from monitor.alert_manager import AlertManager
+        from monitor.auth import Perm
+        from monitor.management.commands.start_monitor import Command
+        from monitor.models import AlertLog, MonitorLog
+        from monitor.tests_bugfix import login, make_user
+
+        config = _cfg_from_dsn(dsn, db_type, f'collection-recovery-{db_type}')
+        operator = make_user(f'{db_type}-watch', f'{db_type}_watch',
+                             [Perm.ALERTS_VIEW, Perm.ALERTS_ACKNOWLEDGE], [config.pk])
+        login(self.client, operator)
+        collector = Command()
+        checker = checker_class(collector)
+        working_endpoint = config.host, config.port
+
+        # Keep all DB reads real. Disable only out-of-scope notifications and enrichment.
+        with patch.object(AlertManager, '_send_notification'), patch.object(AlertManager, '_send_to_channels'), \
+             patch.object(collector, '_emit_phase6_events'), patch.object(collector, '_collect_perf_extras'), \
+             patch('monitor.management.commands.start_monitor.ENABLE_PHASE2_ENGINES', False), \
+             patch('monitor.sse_views.publish_alert_event'), patch('monitor.sse_views.publish_metric_event'):
+            checker.check(config)
+            self.assertEqual(MonitorLog.objects.filter(config=config).latest('pk').status, 'UP')
+
+            # Hold a local port without listening so the driver's real connect is refused.
+            with socket.socket() as offline:
+                offline.bind(('127.0.0.1', 0))
+                config.host, config.port = offline.getsockname()
+                checker.check(config)
+                self.assertEqual(MonitorLog.objects.filter(config=config).latest('pk').status, 'DOWN')
+                alert = AlertLog.objects.get(config=config, alert_type='down')
+                result = self.client.post(f'/api/v1/alerts/{alert.pk}/acknowledge/')
+                self.assertEqual(result.status_code, 200)
+                self.assertEqual(result.json()['monitoring_state'], 'ongoing')
+
+                checker.check(config)
+                self.assertEqual(AlertLog.objects.filter(config=config, alert_type='down').count(), 1)
+                alert.refresh_from_db()
+                self.assertEqual(alert.status, 'acknowledged')
+
+            config.host, config.port = working_endpoint
+            checker.check(config)
+            self.assertEqual(MonitorLog.objects.filter(config=config).latest('pk').status, 'UP')
+            alert.refresh_from_db()
+            self.assertEqual(alert.status, 'resolved')
+            self.assertEqual(alert.acknowledged_by, operator.username)
+            self.assertEqual(alert.recovery_evidence['source'], 'collector')
+            self.assertEqual(alert.recovery_evidence['value'], 'UP')
+
+
+@tag('dialect')
+@unittest.skipUnless(MYSQL_DSN, 'DIALECT_MYSQL_DSN 未设置')
+class MySQLCollectionRecoveryTests(_CollectionRecoveryContract, TransactionTestCase):
+    def test_collection_acknowledgement_and_recovery(self):
+        from monitor.checkers.mysql import MySQLChecker
+        self.exercise(MYSQL_DSN, 'mysql', MySQLChecker)
+
+
+@tag('dialect')
+@unittest.skipUnless(PG_DSN, 'DIALECT_PG_DSN 未设置')
+class PostgreSQLCollectionRecoveryTests(_CollectionRecoveryContract, TransactionTestCase):
+    def test_collection_acknowledgement_and_recovery(self):
+        from monitor.checkers.pgsql import PostgreSQLChecker
+        self.exercise(PG_DSN, 'pgsql', PostgreSQLChecker)

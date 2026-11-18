@@ -448,7 +448,7 @@ class ReportDataCollector:
                     grade = cached.get('grade', 'N/A')
 
             # 获取告警统计
-            alert_count = AlertLog.objects.filter(config=config, status='active').count()
+            alert_count = AlertLog.objects.filter(config=config, status__in=AlertLog.UNRESOLVED).count()
             critical_alerts = AlertLog.objects.filter(
                 config=config, status='active', severity__in=['P1', 'critical', 'emergency']
             ).count()

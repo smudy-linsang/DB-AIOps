@@ -93,7 +93,7 @@ class Command(BaseCommand):
             health_str = f"{hs.total_score}分({hs.grade})" if hs else '-'
 
             # 活跃告警
-            active_alerts = AlertLog.objects.filter(config=config, status='active').count()
+            active_alerts = AlertLog.objects.filter(config=config, status__in=AlertLog.UNRESOLVED).count()
 
             # 容量预测
             pred = PredictionResult.objects.filter(config=config).first()

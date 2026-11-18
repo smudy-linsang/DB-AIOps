@@ -49,30 +49,9 @@ def collect_single_db(self, config_id):
         logger.warning(f"[Celery] 不支持的数据库类型: {config.db_type}")
         return {'status': 'skipped', 'config_id': config_id, 'reason': 'unsupported_type'}
 
-    # 创建一个简单的命令实例用于process_result（包含 TSDB 写入）
-    class TaskCommand:
-        def process_result(self, config, status, data):
-            MonitorLog.objects.create(
-                config=config,
-                status=status,
-                message=json.dumps(data, ensure_ascii=False, default=str)
-            )
-            # 同步写入 TimescaleDB
-            try:
-                from monitor.timeseries import get_timeseries_storage
-                ts = get_timeseries_storage()
-                if ts.enabled:
-                    numeric_metrics = {}
-                    for key, value in data.items():
-                        if isinstance(value, (int, float)) and value is not None and not isinstance(value, bool):
-                            numeric_metrics[key] = float(value)
-                    if numeric_metrics:
-                        ts.write_metrics_batch(config.id, numeric_metrics, status=status)
-                    ts.write_snapshot(config.id, status, data)
-            except Exception as ts_err:
-                logger.warning(f"[Celery] TSDB写入跳过: {ts_err}")
-
-    checker = checker_class(TaskCommand())
+    # The scheduled and Celery collectors use the same alert and persistence rules.
+    from monitor.management.commands.start_monitor import Command
+    checker = checker_class(Command())
 
     try:
         checker.check(config)
@@ -302,7 +281,7 @@ def update_platform_metrics():
     )
 
     # 活跃告警数
-    active_alerts = AlertLog.objects.filter(status='active').count()
+    active_alerts = AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED).count()
     PlatformMetric.objects.update_or_create(
         name='active_alerts',
         labels=None,

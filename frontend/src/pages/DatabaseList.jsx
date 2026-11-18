@@ -16,6 +16,7 @@ import {
 } from '@ant-design/icons'
 import { databaseAPI, alertAPI, collectTemplateAPI } from '../services/api'
 import { PermissionGuard } from '../components/AuthGuard'
+import { CollectionStatusTag } from '../components/CollectionHealth'
 import { errorText } from '../utils/experience'
 import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
@@ -564,10 +565,11 @@ const DatabaseList = () => {
         const healthScores = health?.scores || []
         const latestHealth = healthScores.length > 0 ? healthScores[0] : null
         const alertList = alerts?.alerts || []
-        const activeAlerts = alertList.filter(a => a.status === 'active')
+        const activeAlerts = alertList.filter(a => a.status === 'active' || a.status === 'acknowledged')
 
         detailsMap[db.id] = {
-          status: status?.status || 'UNKNOWN',
+          status: db.collection?.state === 'stale' ? 'STALE'
+            : status?.status || db.status || 'UNKNOWN',
           collectedAt: status?.collected_at,
           healthScore: latestHealth?.total_score,
           healthLevel: getHealthLevel(latestHealth?.total_score),
@@ -664,6 +666,7 @@ const DatabaseList = () => {
       }
       if (filters.status !== 'all') {
         const detail = dbDetails[db.id] || {}
+        if (filters.status === 'stale' && db.collection?.state !== 'stale') return false
         if (filters.status === 'up' && detail.status !== 'UP') return false
         if (filters.status === 'down' && detail.status !== 'DOWN') return false
         if (filters.status === 'unknown' && detail.status !== 'UNKNOWN') return false
@@ -722,7 +725,7 @@ const DatabaseList = () => {
   // 统计数据
   const stats = {
     total: databases.length,
-    up: databases.filter(db => (dbDetails[db.id] || {}).status === 'UP').length,
+    up: databases.filter(db => db.collection ? db.collection.state === 'fresh' : dbDetails[db.id]?.status === 'UP').length,
     down: databases.filter(db => (dbDetails[db.id] || {}).status === 'DOWN').length,
     unknown: databases.filter(db => (dbDetails[db.id] || {}).status === 'UNKNOWN').length,
     healthy: databases.filter(db => {
@@ -754,6 +757,8 @@ const DatabaseList = () => {
   // 获取状态标签
   const getStatusTag = (dbId) => {
     const detail = dbDetails[dbId] || {}
+    const collection = databases.find(db => db.id === dbId)?.collection
+    if (collection) return <CollectionStatusTag collection={collection} />
     const config = STATUS_CONFIG[detail.status] || STATUS_CONFIG.UNKNOWN
 
     return (
@@ -1268,6 +1273,7 @@ const DatabaseList = () => {
                 <Option value="all">全部状态</Option>
                 <Option value="up">正常</Option>
                 <Option value="down">故障</Option>
+                <Option value="stale">数据过期</Option>
                 <Option value="unknown">未知</Option>
               </Select>
               <Select

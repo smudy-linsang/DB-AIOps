@@ -70,12 +70,12 @@ const EMLayout = ({ children }) => {
   // 加载告警统计
   const loadAlertCounts = useCallback(async () => {
     try {
-      const res = await alertAPI.list({ page_size: 1 });
-      const countRes = res?.data || res || {};
+      const res = await alertAPI.getStatistics();
+      const countRes = res?.ongoing_by_severity || {};
       setAlertCounts({
-        warning: countRes.warning_count || 0,
-        error: countRes.error_count || 0,
-        critical: countRes.critical_count || 0,
+        warning: countRes.warning || 0,
+        error: countRes.error || 0,
+        critical: countRes.critical || 0,
       });
     } catch (_) {}
   }, [setAlertCounts]);
@@ -83,10 +83,11 @@ const EMLayout = ({ children }) => {
   // W4 自监控：系统健康指示灯数据（与告警统计共用下方 60s 定时器，不新增定时器）
   const [sysHealth, setSysHealth] = useState(null);
   const loadSystemHealth = useCallback(async () => {
+    if (!hasPermission(Perm.DASHBOARD_VIEW)) return;
     try {
       const res = await systemAPI.health();
       setSysHealth(res?.data || res || null);
-    } catch (_) {}
+    } catch (_) { setSysHealth(null); }
   }, []);
 
   useEffect(() => {
@@ -114,6 +115,8 @@ const EMLayout = ({ children }) => {
 
     if (path.includes('/databases') && !path.includes('/databases/')) {
       crumbs.push({ title: '数据库管理', path: '/databases' });
+    } else if (path === '/work-queue') {
+      crumbs.push({ title: '值班队列' });
     } else if (path.includes('/alerts')) {
       crumbs.push({ title: '告警中心', path: '/alerts' });
     } else if (path.includes('/alert-config')) {
@@ -175,6 +178,7 @@ const EMLayout = ({ children }) => {
     const allItems = [
       { key: '/', icon: <DashboardOutlined />, label: '仪表盘', perm: Perm.DASHBOARD_VIEW },
       { key: '/databases', icon: <DatabaseOutlined />, label: '数据库管理', perm: Perm.DATABASES_VIEW },
+      { key: '/work-queue', icon: <ThunderboltOutlined />, label: '值班队列', perm: Perm.ALERTS_VIEW },
       { key: '/alerts', icon: <AlertOutlined />, label: '告警中心', perm: Perm.ALERTS_VIEW },
       { key: '/alert-config', icon: <ToolOutlined />, label: '模板配置中心', perm: Perm.ALERT_CONFIG_VIEW },
       { key: '/sql-monitoring', icon: <SearchOutlined />, label: 'SQL 监控', perm: Perm.SQL_MONITORING_VIEW },
@@ -263,24 +267,10 @@ const EMLayout = ({ children }) => {
 
         <Space size={12} wrap>
           <Button ghost onClick={() => setGuideVisible(true)}>使用指南</Button>
-          {/* W4 自监控：系统健康指示灯 ok绿/degraded黄/down红，点击进系统健康页 */}
-          {sysHealth && (
-            <span
-              title={`系统健康：${sysHealth.status}`}
-              onClick={() => navigate('/system/health')}
-              style={{ cursor: 'pointer', display: 'inline-flex', alignItems: 'center', gap: 6 }}
-            >
-              <span style={{
-                width: 10, height: 10, borderRadius: '50%', display: 'inline-block',
-                background: sysHealth.status === 'ok' ? '#52c41a'
-                  : sysHealth.status === 'degraded' ? '#faad14' : '#f5222d',
-              }} />
-              {sysHealth.status === 'degraded' && (
-                <Text style={{ color: '#faad14', fontSize: 12, lineHeight: '52px' }}>
-                  系统降级 · 查看详情
-                </Text>
-              )}
-            </span>
+          {hasPermission(Perm.DASHBOARD_VIEW) && (
+            <Button ghost size="small" aria-label="查看系统健康" onClick={() => navigate('/system/health')}>
+              {({ ok: '系统正常', degraded: '系统降级', down: '系统不可用' })[sysHealth?.status] || '系统健康'}
+            </Button>
           )}
 
           {/* Copilot 悬浮/顶部入口 */}

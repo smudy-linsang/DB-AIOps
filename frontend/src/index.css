@@ -298,3 +298,13 @@ body {
   .experience-dashboard .ant-card-head { flex-wrap: wrap; }
   .experience-dashboard .ant-card-head-wrapper { flex-wrap: wrap; gap: 8px; padding: 12px 0; }
 }
+
+.operations-controls .ant-card-body { display: grid; gap: 14px; }
+.operations-search { gap: 8px 0; }
+.operations-search .ant-form-item { margin-bottom: 0; }
+.operations-feedback { margin: 16px 0; }
+.operations-items { list-style: none; display: grid; gap: 8px; margin: 0 0 16px; padding: 0; }
+.operations-row { display: flex; flex-wrap: wrap; justify-content: space-between; gap: 12px; align-items: center; }
+.operations-row > div { min-width: 0; overflow-wrap: anywhere; }
+.operations-row h3 { margin: 5px 0; }
+.operations-description { white-space: pre-wrap; overflow-wrap: anywhere; }

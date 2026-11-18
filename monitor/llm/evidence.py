@@ -9,6 +9,7 @@ Phase 8A: 证据包构建 (phase8/20 §4)。
 """
 import json
 import logging
+from math import isfinite
 import re
 
 from django.conf import settings
@@ -48,13 +49,15 @@ def build_evidence_pack(incident, context: dict, features: dict,
     """
     items = []
 
-    def add(etype, payload, label=''):
+    def add(etype, payload, label='', *, observed_at=None, focus=None, preview=None):
         try:
             text = json.dumps(_sanitize(payload), ensure_ascii=False, default=str)
-        except Exception:
-            text = str(payload)[:1000]
+        except (ValueError, TypeError):
+            logger.warning('Evidence of type %s could not be encoded', etype)
+            return
         items.append({'type': etype, 'priority': _PRIORITY.get(etype, 4),
-                      'label': label, 'text': text})
+                      'label': label, 'text': text, 'observed_at': observed_at,
+                      'focus': focus, 'preview': preview})
 
     # 1. 事故概要 + 触发事件 (priority=1)
     ev0 = incident.events.first() if incident.events.exists() else None
@@ -66,21 +69,28 @@ def build_evidence_pack(incident, context: dict, features: dict,
         'value': getattr(ev0, 'value', None),
         'detail': (getattr(ev0, 'detail', {}) or {}),
         'occurred_at': incident.occurred_at.isoformat() if incident.occurred_at else None,
-    }, '事故与触发事件')
+    }, '事故与触发事件', observed_at=ev0.occurred_at.isoformat() if ev0 else None,
+        focus=f'event-{ev0.event_uid}' if ev0 else 'incident-evidence',
+        preview={'signal': ev0.signal, 'metric': ev0.metric_key, 'value': ev0.value} if ev0 else None)
 
     # 2. 关键指标快照 (priority=1, 只保留数值型关键指标)
     keep = {}
-    for k, v in (features or {}).items():
-        if isinstance(v, (int, float)) and not isinstance(v, bool):
+    metric_sample = (context or {}).get('metric_sample') or {}
+    metrics = metric_sample.get('metrics', features or {})
+    for k, v in metrics.items():
+        if isinstance(v, (int, float)) and not isinstance(v, bool) and isfinite(v):
             keep[k] = v
     if keep:
-        add('metric', keep, '当前指标快照')
+        from monitor.collection_health import METRIC_EXPECTATIONS
+        keys = METRIC_EXPECTATIONS.get(incident.db_type, ()) + ('blocked_sessions',)
+        add('metric', keep, '当前指标快照', observed_at=metric_sample.get('at'),
+            focus='incident-metrics', preview={name: keep[name] for name in keys if name in keep})
 
     # 3. 阻塞链 (priority=1)
     ash = (context or {}).get('ash_timeline', {}) or {}
     chains = ash.get('blocking_chains') or []
     if chains:
-        add('lock', {'blocking_chains': chains[:5]}, '阻塞链')
+        add('lock', {'blocking_chains': chains[:5]}, '阻塞链', focus='incident-events')
 
     # 4. ASH 画像 (priority=2)
     ash_brief = {}
@@ -89,7 +99,7 @@ def build_evidence_pack(incident, context: dict, features: dict,
     if ash.get('top_sql_by_samples'):
         ash_brief['top_sql'] = ash['top_sql_by_samples'][:5]
     if ash_brief:
-        add('ash', ash_brief, 'ASH 活动画像')
+        add('ash', ash_brief, 'ASH 活动画像', focus='incident-metrics')
 
     # 5. 规则引擎初判 (priority=2)
     if root_causes:
@@ -102,7 +112,8 @@ def build_evidence_pack(incident, context: dict, features: dict,
     # 6. 近期变更 (priority=3)
     changes = (context or {}).get('recent_changes') or []
     if changes:
-        add('change', changes[:10], '近72h变更')
+        add('change', changes[:10], '近72h变更', focus='incident-changes',
+            preview={'count': len(changes[:10])})
 
     # 7. 相似案例 (priority=4)
     if similar_cases:
@@ -131,7 +142,7 @@ def _clip_to_budget(items: list) -> list:
             remain = budget - used
             if remain > 200 and it['priority'] <= 2:
                 # 高优先级证据: 截断保留
-                it = dict(it, text=it['text'][:remain * 2] + '…(截断)')
+                it = dict(it, text=it['text'][:remain * 2] + '…(截断)', preview=None)
                 t = _tok(it['text'])
             else:
                 continue  # 低优先级直接驱逐

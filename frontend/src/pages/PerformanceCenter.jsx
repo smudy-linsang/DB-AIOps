@@ -36,6 +36,7 @@ export default function PerformanceCenter() {
   const [sp, setSp] = useSearchParams();
   const tab = sp.get('tab') || 'home';
   const windowKey = sp.get('window') || '1h';
+  const linkedIncident = sp.get('incident');
 
   const [db, setDb] = useState(null);
   const [autoRefresh, setAutoRefresh] = useState(false);
@@ -65,8 +66,10 @@ export default function PerformanceCenter() {
   useEffect(() => {
     if (!Number.isFinite(configId)) return undefined;
     return withAlive((alive) => {
-      incidentAPI.list({ config_id: configId, status: 'open,diagnosing,plan_ready,executing,verifying' })
-        .then((r) => { if (alive()) setOpenIncidents((r.data?.items || r.items || []).slice(0, 3)); })
+      incidentAPI.list({ config_id: configId })
+        .then((r) => { if (alive()) setOpenIncidents((r.incidents || []).filter(item =>
+          ['open', 'diagnosing', 'plan_ready', 'executing', 'verifying'].includes(item.status)
+        ).slice(0, 3)); })
         .catch(() => { if (alive()) setOpenIncidents([]); });
     });
   }, [configId, refreshKey]);
@@ -133,6 +136,9 @@ export default function PerformanceCenter() {
                   onClick={() => setCompareOpen(true)}>期间对比</Button>
         </Space>
       </Space>
+      {range.from && range.to && <Alert type="info" showIcon style={{ marginBottom: 8 }}
+        message={`固定时间窗 ${new Date(range.from).toLocaleString('zh-CN')} 至 ${new Date(range.to).toLocaleString('zh-CN')}`}
+        action={linkedIncident && <Link to={`/incidents/${encodeURIComponent(linkedIncident)}`}>返回事故</Link>} />}
       {openIncidents.length > 0 && (
         <Alert type="warning" showIcon style={{ marginBottom: 8 }}
           message={

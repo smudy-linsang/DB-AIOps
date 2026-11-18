@@ -215,7 +215,9 @@ def _build_report(traj, verdict, audit_res) -> dict:
       · 未通过证据审计 ⇒ `status='evidence_insufficient'` 且**不给根因**；
       · 推荐修复必须附 `risk_level` 与"需人工审批"标记（只诊断不执行）。
     """
+    from monitor.oam.audit.evidence_audit import observation_index
     report = dict(traj.report or {})
+    report['evidence_index'] = observation_index(traj)
     if not audit_res.passed:
         report['status'] = 'evidence_insufficient'
         report['root_cause'] = ''
@@ -258,6 +260,9 @@ class OamTrajectoryView(_BaseV3View):
         traj = _scoped_trajectory(request, traj_id)
         if not traj:
             return self.err('NOT_FOUND', f'轨迹 {traj_id} 不存在', 404)
+        from monitor.oam.audit.evidence_audit import observation_index
+        report = dict(traj.report or {})
+        report['evidence_index'] = observation_index(traj)
         return self.ok({
             'traj_id': traj.traj_id,
             'case_id': traj.case_id,
@@ -267,7 +272,7 @@ class OamTrajectoryView(_BaseV3View):
             'escalated': traj.escalated,
             'hallucinated': traj.hallucinated,
             'verdict_reason': traj.verdict_reason,
-            'report': traj.report,
+            'report': report,
             'turns': [{
                 'turn': s.turn,
                 'thought': s.thought,

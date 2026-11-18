@@ -20,6 +20,7 @@ from apscheduler.schedulers.blocking import BlockingScheduler
 from django.conf import settings
 from django.core.management.base import BaseCommand, CommandError
 from django.db import connection
+from django.db.models import OuterRef, Subquery
 from django.utils import timezone
 
 from monitor.alert_manager import AlertManager
@@ -143,7 +144,8 @@ class Command(BaseCommand):
         scheduler = BlockingScheduler()
         self._leader.on_lost = lambda: (
             scheduler.shutdown(wait=False) if scheduler.running else None)
-        scheduler.add_job(self.monitor_job, 'interval', seconds=60)
+        # Dispatch frequently enough to honor the supported 10s per-instance cadence.
+        scheduler.add_job(self.monitor_job, 'interval', seconds=10)
         # 告警运维：自动升级扫描 + 聚合冲刷（接通 AlertManager 升级/聚合能力）
         scheduler.add_job(self.alert_housekeeping_job, 'interval', seconds=60)
 
@@ -255,7 +257,10 @@ class Command(BaseCommand):
         now = datetime.datetime.now()
         connection.close_if_unusable_or_obsolete()
 
-        all_configs = list(DatabaseConfig.objects.filter(is_active=True))
+        last_sample = MonitorLog.objects.filter(config_id=OuterRef('pk')).order_by('-create_time', '-pk')
+        all_configs = list(DatabaseConfig.objects.filter(is_active=True).annotate(
+            last_sample_at=Subquery(last_sample.values('create_time')[:1]),
+        ))
         if not all_configs:
             print("  没有活跃的数据库配置，跳过本轮巡检")
             return
@@ -264,11 +269,10 @@ class Command(BaseCommand):
         configs_to_check = []
         for cfg in all_configs:
             interval = cfg.collect_interval_sec or 60
-            last_log = MonitorLog.objects.filter(config=cfg).order_by('-create_time').first()
-            if not last_log:
+            if not cfg.last_sample_at:
                 configs_to_check.append(cfg)
             else:
-                elapsed = (timezone.now() - last_log.create_time).total_seconds()
+                elapsed = (timezone.now() - cfg.last_sample_at).total_seconds()
                 # 若已流逝时间达到采集周期的 90%，或超过周期，即触发采集
                 if elapsed >= (interval * 0.9):
                     configs_to_check.append(cfg)
@@ -300,15 +304,22 @@ class Command(BaseCommand):
 
         am = AlertManager(config, notify)
 
+        observed_at = timezone.now().isoformat()
+
+        def evidence(metric, value, threshold=None):
+            return {'source': 'collector', 'metric': metric, 'value': value,
+                    'threshold': threshold, 'observed_at': observed_at}
+
         # --- 1. 连通性告警 ---
         am.fire_or_resolve(
-            condition=(current_status == 'DOWN'),
+            condition=(current_status == 'DOWN') if current_status in ('UP', 'DOWN') else None,
             alert_type='down', metric_key='',
             fire_title='[DOWN] 故障告警',
             fire_body=f"数据库无法连接\n错误：{data.get('error', '未知错误')}",
             resolve_title='[RECOVERED] 恢复通知',
             resolve_body='数据库已重新恢复连接',
             severity='critical',
+            evidence=evidence('connection_status', current_status),
         )
 
         # --- 2. 业务监控（仅 UP 状态）---
@@ -319,7 +330,9 @@ class Command(BaseCommand):
             tbs_warn_val = (tbs_cfg.get('warn_threshold') if tbs_cfg else None) or TBS_THRESHOLD
             tbs_err_val = (tbs_cfg.get('error_threshold') if tbs_cfg else None) or TBS_THRESHOLD + 5
             tbs_crit_val = (tbs_cfg.get('critical_threshold') if tbs_cfg else None) or TBS_THRESHOLD + 10
-            tablespaces = data.get('tablespaces', [])
+            tablespaces = data.get('tablespaces') or []
+            measured_spaces = [t['used_pct'] for t in tablespaces
+                               if isinstance(t.get('used_pct'), (int, float))]
             tbs_critical = [t['name'] for t in tablespaces if (t.get('used_pct') or 0) > tbs_crit_val]
             tbs_error = [t['name'] for t in tablespaces if tbs_err_val < (t.get('used_pct') or 0) <= tbs_crit_val]
             tbs_warn_ = [t['name'] for t in tablespaces if tbs_warn_val < (t.get('used_pct') or 0) <= tbs_err_val]
@@ -340,7 +353,7 @@ class Command(BaseCommand):
                     resolve_body='所有表空间使用率已降至阈值以下',
                     severity=tbs_sev,
                 )
-            else:
+            elif measured_spaces and len(measured_spaces) == len(tablespaces):
                 am.fire_or_resolve(
                     condition=False,
                     alert_type='tablespace', metric_key='',
@@ -348,19 +361,21 @@ class Command(BaseCommand):
                     fire_body='',
                     resolve_title='[RECOVERED] 容量恢复',
                     resolve_body='所有表空间使用率已降至阈值以下',
+                    evidence=evidence('tablespace_usage_pct', max(measured_spaces), tbs_warn_val),
                 )
 
             # B. 连接数使用率告警（动态三级阈值）
-            conn_usage = data.get('conn_usage_pct', 0)
+            conn_usage = data.get('conn_usage_pct')
+            has_conn_sample = isinstance(conn_usage, (float, int)) and not isinstance(conn_usage, bool)
             conn_cfg = get_effective_alert_config(config, 'conn_usage_pct')
             conn_warn_val = (conn_cfg.get('warn_threshold') if conn_cfg else None) or CONN_THRESHOLD_PCT
             conn_err_val = (conn_cfg.get('error_threshold') if conn_cfg else None) or CONN_THRESHOLD_PCT + 10
             conn_crit_val = (conn_cfg.get('critical_threshold') if conn_cfg else None) or CONN_THRESHOLD_PCT + 20
-            conn_sev = ('critical' if conn_usage > conn_crit_val
-                        else 'error' if conn_usage > conn_err_val
+            conn_sev = ('critical' if has_conn_sample and conn_usage > conn_crit_val
+                        else 'error' if has_conn_sample and conn_usage > conn_err_val
                         else 'warning')
             am.fire_or_resolve(
-                condition=(conn_usage > conn_warn_val),
+                condition=(conn_usage > conn_warn_val) if has_conn_sample else None,
                 alert_type='connection', metric_key='conn_usage_pct',
                 fire_title=f'[{conn_sev.upper()}] 连接数告警',
                 fire_body=(f"连接数使用率已达 {conn_usage}%（一级>{conn_warn_val}% 二级>{conn_err_val}% 三级>{conn_crit_val}%）\n"
@@ -369,18 +384,20 @@ class Command(BaseCommand):
                 resolve_title='[RECOVERED] 连接数恢复',
                 resolve_body=f"连接数使用率已恢复正常（当前 {conn_usage}%）",
                 severity=conn_sev,
+                evidence=evidence('conn_usage_pct', conn_usage, conn_warn_val),
             )
 
             # C. 锁等待告警
-            current_locks = data.get('locks', [])
+            current_locks = data.get('locks')
             am.fire_or_resolve(
-                condition=bool(current_locks),
+                condition=bool(current_locks) if isinstance(current_locks, list) else None,
                 alert_type='lock', metric_key='',
                 fire_title='[CRITICAL] 性能告警：锁等待',
-                fire_body=self._build_lock_msg(current_locks),
+                fire_body=self._build_lock_msg(current_locks or []),
                 resolve_title='[RECOVERED] 锁等待解除',
                 resolve_body='数据库阻塞已全部解除',
                 severity='critical',
+                evidence=evidence('blocked_sessions', len(current_locks) if isinstance(current_locks, list) else None, 0),
             )
             if current_locks:
                 print(f"  [LOCK] {len(current_locks)} 个阻塞会话")
@@ -866,14 +883,21 @@ class Command(BaseCommand):
             # 对本轮已恢复的基线异常发送恢复通知
             from monitor.models import AlertLog
             active_baseline = AlertLog.objects.filter(
-                config=config, alert_type='baseline', status='active'
+                config=config, alert_type='baseline', status__in=AlertLog.UNRESOLVED
             )
             for al in active_baseline:
-                if al.metric_key not in anomaly_keys:
+                value = data.get(al.metric_key)
+                if al.metric_key in anomaly_keys or not isinstance(value, (int, float)):
+                    continue
+                bounds = baseline_engine.get_baseline_for_current_slot(al.metric_key)
+                if bounds and bounds.data_sufficient and bounds.normal_min <= value <= bounds.normal_max:
                     am.resolve(
                         alert_type='baseline', metric_key=al.metric_key,
                         recovery_title=f'[RECOVERED] 基线恢复：{al.metric_key}',
                         recovery_body=f'指标 {al.metric_key} 已恢复至正常范围',
+                        evidence={'source': 'baseline', 'value': value,
+                                  'normal_range': [bounds.normal_min, bounds.normal_max]},
+
                     )
 
         except Exception as e:

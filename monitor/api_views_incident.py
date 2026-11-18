@@ -7,13 +7,15 @@ import json
 import logging
 import uuid
 
+from django.db import transaction
 from django.utils import timezone
 from django.utils.decorators import method_decorator
 from django.views import View
 from django.views.decorators.csrf import csrf_exempt
 
 from monitor.auth import Perm, get_user_database_ids, require_auth, require_permission
-from monitor.models import Incident, Event, IncidentStateError
+from monitor.models import DatabaseConfig, Incident, Event, IncidentStateError
+from monitor import degrade
 
 logger = logging.getLogger(__name__)
 
@@ -174,8 +176,9 @@ class IncidentTimelineView(_BaseView):
                     config=inc.config, action_type='incident_transition',
                     description__contains=inc.incident_id).order_by('create_time'):
                 items.append({'kind': 'status', 'at': a.create_time, 'text': a.description})
-        except Exception:
-            pass
+        except Exception as exc:
+            degrade.note('incident.timeline.audit', exc=exc)
+            return self.err('TIMELINE_UNAVAILABLE', '事故时间线暂不可用，请重试。', 503)
         items.sort(key=lambda x: (x['at'] or timezone.now()))
         return self.ok(items=items)
 
@@ -188,15 +191,19 @@ class IncidentAckView(_BaseView):
         return super().dispatch(*a, **k)
 
     def post(self, request, incident_id):
-        inc = _get_incident(request, incident_id)
-        if not inc:
-            return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
-        if inc.status in ('closed',):
-            return self.err('CONFLICT', '事故已关闭, 无法确认', 409)
-        actor = getattr(request.user, 'username', 'unknown')
-        inc.acked_at = timezone.now()
-        inc.acked_by = actor
-        inc.save(update_fields=['acked_at', 'acked_by', 'updated_at'])
+        with transaction.atomic():
+            visible = DatabaseConfig.objects.visible_to(request.user)
+            inc = Incident.objects.select_for_update().filter(
+                incident_id=incident_id, config__in=visible,
+            ).first()
+            if not inc:
+                return self.err('NOT_FOUND', '事故不存在或无权访问', 404)
+            if inc.status == 'closed':
+                return self.err('CONFLICT', '事故已关闭，无法确认', 409)
+            if not inc.acked_at and not inc.acked_by:
+                inc.acked_at = timezone.now()
+                inc.acked_by = request.user.username[:50]
+                inc.save(update_fields=['acked_at', 'acked_by', 'updated_at'])
         return self.ok(status=inc.status, acked_at=inc.acked_at, acked_by=inc.acked_by)
 
 
@@ -213,9 +220,14 @@ class IncidentCloseView(_BaseView):
             return self.err('NOT_FOUND', f'事故 {incident_id} 不存在', 404)
         try:
             body = json.loads(request.body or '{}')
-        except Exception:
-            body = {}
+        except ValueError:
+            return self.err('BAD_REQUEST', '结案请求必须是 JSON 对象。', 400)
+        if not isinstance(body, dict):
+            return self.err('BAD_REQUEST', '结案请求必须是 JSON 对象。', 400)
         reason = body.get('reason', '手动关闭')
+        if not isinstance(reason, str) or not 1 <= len(reason.strip()) <= 300:
+            return self.err('BAD_REQUEST', '结案原因须为 1 至 300 个字符。', 400)
+        reason = reason.strip()
         actor = getattr(request.user, 'username', 'unknown')
         try:
             inc.transition('closed', actor, reason)

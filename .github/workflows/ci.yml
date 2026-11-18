@@ -159,6 +159,8 @@ jobs:
         # 失败时无从诊断（本轮就因此盲调了两轮）。
         run: |
           set -o pipefail
+          : "${DIALECT_MYSQL_DSN:?MySQL target required}"
+          : "${DIALECT_PG_DSN:?PostgreSQL target required}"
           python manage.py test monitor.tests_dialect -v 2 2>&1 | tee /tmp/dialect.log
       - name: 失败输出写入 job summary
         if: failure()
@@ -318,15 +320,18 @@ jobs:
           cache: npm
           cache-dependency-path: frontend/package-lock.json
       - run: npm ci
+        id: install_frontend
         working-directory: frontend
       - run: npm run build
         working-directory: frontend
-      - name: 前端依赖漏洞门禁
-        working-directory: frontend
-        run: npm audit --audit-level=high
       - name: 前端单元测试
+        if: ${{ !cancelled() && steps.install_frontend.outcome == 'success' }}
         working-directory: frontend
         run: npm run test:run
+      - name: 前端依赖漏洞门禁
+        if: ${{ !cancelled() && steps.install_frontend.outcome == 'success' }}
+        working-directory: frontend
+        run: npm audit --audit-level=high
 
   # ── 安全 ───────────────────────────────────────────────
   security:

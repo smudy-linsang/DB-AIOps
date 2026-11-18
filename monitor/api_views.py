@@ -199,13 +199,7 @@ class DatabaseListView(JSONResponseMixin, View):
         """
         # 获取用户可见的数据库ID列表（RBAC 数据范围过滤）
 
-        # 预取每个数据库的最新采集日志，避免 N+1 查询
-        from .models import DatabaseConfig
-        from django.db.models import Subquery, OuterRef, CharField, DateTimeField
-
-        latest_log_subq = MonitorLog.objects.filter(
-            config=OuterRef('pk')
-        ).order_by('-create_time')
+        from monitor.collection_health import collection_state, with_collection_times
 
         # BUG-135: 此前硬过滤 is_active=True，被停用的实例从列表里彻底消失 ——
         # 前端把「启停监控」开关关掉后该行就不见了，再也无法重新启用。
@@ -219,10 +213,8 @@ class DatabaseListView(JSONResponseMixin, View):
         # __system__ 就冒到了实例列表和导航树里。必须显式排除。
         configs = configs.exclude(name=SYSTEM_CONFIG_NAME)
 
-        configs = configs.annotate(
-            latest_status=Subquery(latest_log_subq.values('status')[:1], output_field=CharField()),
-            latest_collect_time=Subquery(latest_log_subq.values('create_time')[:1], output_field=DateTimeField()),
-        )
+        configs = with_collection_times(configs)
+        now = timezone.now()
 
         result = []
         for config in configs:
@@ -237,6 +229,7 @@ class DatabaseListView(JSONResponseMixin, View):
                 'collect_interval_sec': config.collect_interval_sec or 60,
                 'template_name': config.template_name or '',
                 'status': config.latest_status or 'UNKNOWN',
+                'collection': collection_state(config, now),
                 'last_collect_time': config.latest_collect_time.isoformat() if config.latest_collect_time else None,
                 'create_time': config.create_time.isoformat() if config.create_time else None
             })
@@ -1096,89 +1089,38 @@ class AlertListView(JSONResponseMixin, View):
         查询告警列表，支持状态/级别/时间过滤
         双引擎：ES（全文检索）→ PostgreSQL（回退）
         """
-        # 解析查询参数
         status = request.GET.get('status')
         severity = request.GET.get('severity')
-        config_id = request.GET.get('config_id')
-        start_time = request.GET.get('start')
-        end_time = request.GET.get('end')
-        keyword = request.GET.get('q')  # 全文搜索关键词
-        limit = int(request.GET.get('limit', 100))
-        
-        # RBAC - 只能看有权限的数据库告警
-        allowed_db_ids = get_user_database_ids(request.user)
-        
-        # 优先从 ES 查询（支持全文检索）
+        keyword = request.GET.get('q', '')[:200]
         try:
-            from .elasticsearch_engine import query_alerts
-            start_dt = None
-            end_dt = None
-            if start_time:
-                start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
-            if end_time:
-                end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
-            
-            es_alerts = query_alerts(
-                config_id=int(config_id) if config_id else None,
-                severity=severity,
-                status=status,
-                start_time=start_dt,
-                end_time=end_dt,
-                limit=limit
-            )
-            
-            if es_alerts:
-                # RBAC 过滤
-                if allowed_db_ids is not None:
-                    es_alerts = [a for a in es_alerts if a.get('config_id') in allowed_db_ids]
-                
-                # 全文搜索过滤
-                if keyword:
-                    keyword_lower = keyword.lower()
-                    es_alerts = [a for a in es_alerts
-                                 if keyword_lower in (a.get('title', '') + a.get('description', '')).lower()]
+            limit = max(1, min(1000, int(request.GET.get('limit', 100))))
+            config_id = int(request.GET['config_id']) if 'config_id' in request.GET else None
+            start_time = request.GET.get('start')
+            end_time = request.GET.get('end')
+            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00')) if start_time else None
+            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00')) if end_time else None
+        except (ValueError, TypeError):
+            return self.error_response('告警查询参数无效', 400)
 
-                # 归一化：ES 文档字段(alert_id/fired_at) → 前端统一字段(id/create_time)
-                normalized = []
-                for a in es_alerts:
-                    a = dict(a)
-                    a.setdefault('id', a.get('alert_id'))
-                    a.setdefault('create_time', a.get('fired_at'))
-                    normalized.append(a)
-
-                return self.json_response({
-                    'total': len(normalized),
-                    'alerts': normalized,
-                    'source': 'elasticsearch'
-                })
-        except Exception as es_err:
-            pass
-        
-        # 回退：从 PostgreSQL 查询
-        queryset = AlertLog.objects.all().order_by('-create_time')
-        
-        if status:
+        # 业务库是确认与恢复状态的权威源；搜索索引异步更新。
+        from monitor.alert_lifecycle import alert_observation
+        visible = DatabaseConfig.objects.visible_to(request.user)
+        queryset = AlertLog.objects.filter(config__in=visible).order_by('-create_time', '-pk')
+        if status == 'ongoing':
+            queryset = queryset.filter(status__in=AlertLog.UNRESOLVED)
+        elif status:
             queryset = queryset.filter(status=status)
         if severity:
             queryset = queryset.filter(severity=severity)
         if config_id:
-            if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
-                return self.error_response('Permission denied', 403)
             queryset = queryset.filter(config_id=config_id)
-        elif allowed_db_ids is not None:
-            queryset = queryset.filter(config_id__in=allowed_db_ids)
-        
-        if start_time:
-            start_dt = datetime.fromisoformat(start_time.replace('Z', '+00:00'))
+        if start_dt:
             queryset = queryset.filter(create_time__gte=start_dt)
-        if end_time:
-            end_dt = datetime.fromisoformat(end_time.replace('Z', '+00:00'))
+        if end_dt:
             queryset = queryset.filter(create_time__lte=end_dt)
         if keyword:
-            queryset = queryset.filter(
-                Q(title__icontains=keyword) | Q(description__icontains=keyword)
-            )
-        
+            queryset = queryset.filter(Q(title__icontains=keyword) | Q(description__icontains=keyword))
+
         queryset = queryset[:limit]
 
         result = []
@@ -1195,6 +1137,7 @@ class AlertListView(JSONResponseMixin, View):
                 'description': alert.description,
                 'status': alert.status,
                 'last_notified_at': alert.last_notified_at.isoformat() if alert.last_notified_at else None,
+                **alert_observation(alert),
                 'resolved_at': alert.resolved_at.isoformat() if alert.resolved_at else None,
                 'create_time': alert.create_time.isoformat() if alert.create_time else None
             })
@@ -1220,36 +1163,17 @@ class AlertAcknowledgeView(JSONResponseMixin, View):
         POST /api/v1/alerts/{id}/acknowledge/
         确认告警
         """
-        try:
-            alert = AlertLog.objects.get(id=alert_id)
-        except AlertLog.DoesNotExist:
-            return self.error_response('Alert not found', 404)
-        
-        # RBAC 检查
-        allowed_db_ids = get_user_database_ids(request.user)
-        if allowed_db_ids is not None and alert.config_id not in allowed_db_ids:
-            return self.error_response('Permission denied', 403)
-        
-        # 仅活跃告警可确认：已恢复/已确认的不重复处理，避免状态回退
-        if alert.status != 'active':
-            return self.error_response(
-                f'告警当前状态为 {alert.status}，仅活跃(active)告警可确认', 409)
-        
-        # 更新告警状态
-        alert.status = 'acknowledged'
-        alert.last_notified_at = timezone.now()
-        alert.save(update_fields=['status', 'last_notified_at'])
-        # 一致性: 同步 ES 文档状态, 避免列表(优先读ES)显示陈旧 active
-        try:
-            from monitor.elasticsearch_engine import sync_alert
-            sync_alert(alert)
-        except Exception as e:
-            degrade.note('alert.ack.es_sync', exc=e)
-        
+        from monitor.alert_lifecycle import acknowledge_alert, alert_observation
+        scope = DatabaseConfig.objects.visible_to(request.user)
+        current = AlertLog.objects.filter(pk=alert_id, config__in=scope).first()
+        if not current:
+            return self.error_response('告警不存在或无权访问', 404)
+        alert = acknowledge_alert(alert_id, current.config_id, request.user.username)
+        if not alert:
+            return self.error_response('该告警已结束，无法确认', 409)
         return self.json_response({
-            'status': 'success',
-            'message': 'Alert acknowledged',
-            'alert_id': alert_id
+            'status': 'success', 'message': '已记录确认，继续监测异常状态',
+            'alert_id': alert_id, **alert_observation(alert),
         })
 
 
@@ -1426,12 +1350,20 @@ class AuditLogListView(JSONResponseMixin, View):
         # 构建查询
         queryset = AuditLog.objects.all().order_by('-create_time')
         
+        incident_id = request.GET.get('incident_id')
+        if incident_id:
+            if not has_permission(request.user, Perm.TICKETS_VIEW):
+                return self.error_response('Permission denied', 403)
+            queryset = queryset.filter(
+                incident__incident_id=incident_id,
+                config__in=DatabaseConfig.objects.visible_to(request.user),
+            )
         if status:
             queryset = queryset.filter(status=status)
         if risk_level:
             queryset = queryset.filter(risk_level=risk_level)
         if config_id:
-            if allowed_db_ids is not None and config_id not in allowed_db_ids:
+            if allowed_db_ids is not None and int(config_id) not in allowed_db_ids:
                 return self.error_response('Permission denied', 403)
             queryset = queryset.filter(config_id=config_id)
         elif allowed_db_ids is not None:
@@ -3237,11 +3169,12 @@ class DashboardStatsView(JSONResponseMixin, View):
         from .models import DatabaseConfig, HealthScore
         dbs = DatabaseConfig.objects.visible_to(request.user).filter(is_active=True)
         dbs = dbs.exclude(name=SYSTEM_CONFIG_NAME)
-        from django.db.models import Subquery, OuterRef
-        latest_status = MonitorLog.objects.filter(config=OuterRef('pk')).order_by('-create_time')
-        statuses = list(dbs.annotate(
-            _status=Subquery(latest_status.values('status')[:1])
-        ).values_list('_status', flat=True))
+        from monitor.collection_health import collection_state, with_collection_times
+        now = timezone.now()
+        statuses = [
+            'STALE' if collection_state(config, now)['state'] == 'stale' else config.latest_status
+            for config in with_collection_times(dbs)
+        ]
         scores = list(HealthScore.objects.filter(
             config__in=dbs, score_date=timezone.localdate()
         ).values_list('total_score', flat=True))
@@ -3250,10 +3183,11 @@ class DashboardStatsView(JSONResponseMixin, View):
             'online': statuses.count('UP'),
             'offline': statuses.count('DOWN'),
             'degraded': statuses.count('DEGRADED'),
-            'unknown': sum(s not in ('UP', 'DOWN', 'DEGRADED') for s in statuses),
+            'stale': statuses.count('STALE'),
+            'unknown': sum(s not in ('UP', 'DOWN', 'DEGRADED', 'STALE') for s in statuses),
             'avg_health': round(sum(scores) / len(scores), 1) if scores else None,
             'scored_count': len(scores),
-            'active_alerts': AlertLog.objects.filter(config__in=dbs, status='active').count(),
+            'active_alerts': AlertLog.objects.filter(config__in=dbs, status__in=AlertLog.UNRESOLVED).count(),
             'generated_at': timezone.now().isoformat(),
         })
 
@@ -3460,18 +3394,24 @@ class AlertStatisticsView(JSONResponseMixin, View):
     def get(self, request):
         from django.db.models import Count
         from .models import AlertLog
-        stats = AlertLog.objects.aggregate(
+        visible = DatabaseConfig.objects.visible_to(request.user)
+        alerts = AlertLog.objects.filter(config__in=visible)
+        stats = alerts.aggregate(
             total=Count('id'),
             active=Count('id', filter=Q(status='active')),
+            ongoing=Count('id', filter=Q(status__in=AlertLog.UNRESOLVED)),
             acknowledged=Count('id', filter=Q(status='acknowledged')),
             resolved=Count('id', filter=Q(status='resolved')),
         )
         by_severity = dict(
-            AlertLog.objects.values_list('severity').annotate(
+            alerts.values_list('severity').annotate(
                 count=Count('id')
             ).order_by()
         )
-        return self.json_response({**stats, 'by_severity': by_severity})
+        ongoing_by_severity = dict(alerts.filter(status__in=AlertLog.UNRESOLVED)
+                                  .values_list('severity').annotate(count=Count('id')).order_by())
+        return self.json_response({**stats, 'by_severity': by_severity,
+                                   'ongoing_by_severity': ongoing_by_severity})
 
 
 class DatabasePerformanceHubView(JSONResponseMixin, View):
@@ -3502,7 +3442,7 @@ class DatabasePerformanceHubView(JSONResponseMixin, View):
             except Exception:
                 result['metrics'] = {}
         # 告警
-        result['active_alerts'] = AlertLog.objects.filter(config=config, status='active').count()
+        result['active_alerts'] = AlertLog.objects.filter(config=config, status__in=AlertLog.UNRESOLVED).count()
         return self.json_response(result)
 
 
@@ -3987,7 +3927,7 @@ class DatabaseImpactView(JSONResponseMixin, View):
             }
 
         # 活跃告警
-        active_alerts = AlertLog.objects.filter(config=config, status='active')[:10]
+        active_alerts = AlertLog.objects.filter(config=config, status__in=AlertLog.UNRESOLVED)[:10]
         alerts_data = [{'id': a.id, 'alert_type': a.alert_type, 'severity': a.severity,
                         'title': a.title, 'create_time': a.create_time.isoformat()}
                        for a in active_alerts]

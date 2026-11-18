@@ -568,6 +568,8 @@ def sync_alert(alert) -> bool:
         metric_key=alert.metric_key,
         fired_at=alert.create_time,
         resolved_at=alert.resolved_at,
+        acknowledged_at=alert.acknowledged_at,
+        acknowledged_by=alert.acknowledged_by,
     )
 
 

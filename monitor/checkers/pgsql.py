@@ -173,29 +173,23 @@ class PostgreSQLChecker(BaseDBChecker):
         cur.execute("SHOW checkpoint_completion_target")
         checkpoint_completion_target = cur.fetchone()[0]
 
-        # BGWriter 统计
-        cur.execute("""
-            SELECT checkpoints_timed, checkpoints_req, checkpoint_write_time, 
-                   checkpoint_sync_time, buffers_checkpoint, buffers_clean, buffers_backend,
-                   buffers_backend_fsync
-            FROM pg_stat_bgwriter
-        """)
-        bgwriter_stats = cur.fetchone()
-        if bgwriter_stats:
-            checkpoints_timed = bgwriter_stats[0]
-            checkpoints_req = bgwriter_stats[1]
-            checkpoint_write_time = bgwriter_stats[2]
-            checkpoint_sync_time = bgwriter_stats[3]
-            buffers_checkpoint = bgwriter_stats[4]
-            buffers_clean = bgwriter_stats[5]
-            buffers_backend = bgwriter_stats[6]
-            buffers_backend_fsync = bgwriter_stats[7]
-            maxwritten_clean = 0
+        # PostgreSQL 17 moved its checkpoint counters into pg_stat_checkpointer.
+        # Legacy backend counters are absent in that schema; preserve missing values.
+        if int(server_version_num) >= 170000:
+            cur.execute("""
+                SELECT c.num_timed, c.num_requested, c.buffers_written,
+                       b.buffers_clean, NULL, NULL, b.maxwritten_clean, b.buffers_alloc
+                FROM pg_stat_checkpointer c CROSS JOIN pg_stat_bgwriter b
+            """)
         else:
-            checkpoints_timed = checkpoints_req = checkpoint_write_time = 0
-            checkpoint_sync_time = buffers_checkpoint = buffers_clean = buffers_backend = 0
-            buffers_backend_fsync = 0
-            maxwritten_clean = 0
+            cur.execute("""
+                SELECT checkpoints_timed, checkpoints_req, buffers_checkpoint,
+                       buffers_clean, buffers_backend, buffers_backend_fsync,
+                       maxwritten_clean, buffers_alloc
+                FROM pg_stat_bgwriter
+            """)
+        (checkpoints_timed, checkpoints_req, buffers_checkpoint, buffers_clean,
+         buffers_backend, buffers_backend_fsync, maxwritten_clean, buffers_alloc) = cur.fetchone() or (None,) * 8
 
         # =============================================
         # 5. 等待事件 (wait) - 增强
@@ -539,22 +533,6 @@ class PostgreSQLChecker(BaseDBChecker):
                 config_params[key] = cur.fetchone()[0]
             except Exception:
                 pass
-
-        # =============================================
-        # 11. 缓冲池 (buffer) - P0
-        # =============================================
-        cur.execute("""
-            SELECT buffers_checkpoint, buffers_clean, buffers_backend, buffers_alloc
-            FROM pg_stat_bgwriter
-        """)
-        bgwriter = cur.fetchone()
-        if bgwriter:
-            buffers_checkpoint_val = bgwriter[0]
-            buffers_clean_val = bgwriter[1]
-            buffers_backend_val = bgwriter[2]
-            buffers_alloc = bgwriter[3]
-        else:
-            buffers_checkpoint_val = buffers_clean_val = buffers_backend_val = buffers_alloc = 0
 
         # =============================================
         # 12. 事务统计 (transaction) - P1

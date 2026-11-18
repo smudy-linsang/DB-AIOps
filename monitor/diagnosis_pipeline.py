@@ -71,16 +71,16 @@ _SIGNAL_ROOT_CAUSE = {
 }
 
 
-def _latest_metrics(incident) -> dict:
+def _latest_metrics(incident):
     from monitor.models import MonitorLog
-    log = MonitorLog.objects.filter(config=incident.config).order_by('-create_time').first()
+    log = MonitorLog.objects.filter(config=incident.config, status='UP').order_by('-create_time', '-pk').first()
     if not log:
-        return {}
+        return {}, None
     try:
-        d = json.loads(log.message) if isinstance(log.message, str) else log.message
-        return d if isinstance(d, dict) else {}
-    except Exception:
-        return {}
+        data = json.loads(log.message)
+    except (ValueError, TypeError):
+        return {}, None
+    return (data, log) if isinstance(data, dict) else ({}, None)
 
 
 def _build_features(incident, metrics, context):
@@ -246,7 +246,12 @@ def run_diagnosis(incident_id: str) -> dict:
     # 阶段1: 上下文 (含 ASH 时间线)
     from monitor.context_aggregator import build_incident_context
     context = build_incident_context(inc)
-    metrics = _latest_metrics(inc)
+    metrics, metric_sample = _latest_metrics(inc)
+    if metric_sample:
+        context['metric_sample'] = {
+            'id': metric_sample.pk, 'at': metric_sample.create_time.isoformat(),
+            'metrics': metrics,
+        }
     features = _build_features(inc, metrics, context)
 
     # 阶段2: RCA + 案例检索 (并行)
@@ -284,6 +289,7 @@ def run_diagnosis(incident_id: str) -> dict:
         'root_causes': root_causes,
         'similar_cases': similar_cases,
         'diagnosed_at': timezone.now().isoformat(),
+        'metrics_sample_at': metric_sample.create_time.isoformat() if metric_sample else None,
         'budget_ms': int((time.time() - t0) * 1000),
     }
     if llm_extra:

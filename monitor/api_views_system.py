@@ -83,16 +83,25 @@ class SystemHealthView(View):
             })
 
         degradations = degrade.snapshot()
-        if dependencies['database'].get('status') != 'ok':
-            status = 'down'
-        elif any_stale or any_missing or degradations:
-            status = 'degraded'
-        else:
-            status = 'ok'
+        reasons = []
+        database_down = dependencies['database'].get('status') != 'ok'
+        if database_down:
+            reasons.append('business_database')
+        if any(info.get('status') not in ('ok', 'disabled')
+               for name, info in dependencies.items() if name != 'database'):
+            reasons.append('dependency')
+        if any_missing:
+            reasons.append('unreported_component')
+        if any_stale:
+            reasons.append('offline_component')
+        if degradations:
+            reasons.append('degradation_records')
+        status = 'down' if database_down else ('degraded' if reasons else 'ok')
 
         return JsonResponse({
             'status': status,
             'checked_at': now,
+            'reasons': reasons,
             'components': components,
             'dependencies': dependencies,
             'degradations': degradations,

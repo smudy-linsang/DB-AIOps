@@ -75,19 +75,14 @@ class Command(BaseCommand):
             # 生成告警
             if days_remaining <= 7:
                 severity = 'critical' if days_remaining <= 1 else 'warning'
-                existing = AlertLog.objects.filter(
-                    config=config, alert_type='password_expiry', status='active'
-                ).exists()
-                if not existing:
-                    AlertLog.objects.create(
-                        config=config,
-                        alert_type='password_expiry',
-                        metric_key='password_expiry',
-                        severity=severity,
-                        title=f'[密码过期] {config.name} 监控账号密码{status_msg}',
-                        description=f'数据库 {config.name} 的监控账号密码将在{status_msg}。请及时轮换密码。',
-                        status='active',
-                    )
+                AlertLog.objects.filter(status__in=AlertLog.UNRESOLVED).get_or_create(
+                    config=config, alert_type='password_expiry', metric_key='password_expiry',
+                    defaults={
+                        'severity': severity,
+                        'title': f'[密码过期] {config.name} 监控账号密码{status_msg}',
+                        'description': f'数据库 {config.name} 的监控账号密码将在{status_msg}。请及时轮换密码。',
+                    },
+                )
 
             # 执行轮换
             if execute and days_remaining <= 0:

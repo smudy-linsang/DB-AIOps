@@ -1,14 +1,19 @@
 import React, { useState, useEffect, useCallback, useRef } from 'react'
 import {
   Card, Descriptions, Tag, Button, Space, Statistic, Row, Col, Timeline, Alert, message, Empty, Progress,
-  Collapse, Tooltip,
+  Collapse, Tooltip, Modal, Input, Spin,
 } from 'antd'
 import {
   ArrowLeftOutlined, ReloadOutlined, CheckOutlined, LikeOutlined, DislikeOutlined,
   RobotOutlined, ExperimentOutlined,
 } from '@ant-design/icons'
-import { useParams, useNavigate } from 'react-router-dom'
+import { Link, useParams, useLocation } from 'react-router-dom'
+import IncidentOperations from '../components/IncidentOperations'
+import { DiagnosisReferences, DiagnosisUncertainty } from '../components/DiagnosticEvidence'
 import { incidentAPI } from '../services/api'
+import { errorText, safeReturnTo } from '../utils/experience'
+import { incidentStatus, operationTime } from '../utils/operations'
+import { hasPermission, Perm } from '../utils/permission'
 
 const PRIORITY_COLOR = { P1: 'red', P2: 'orange', P3: 'blue', P4: 'default' }
 const STATUS_COLOR = {
@@ -17,6 +22,7 @@ const STATUS_COLOR = {
 }
 const SOURCE_TAG = {
   rule: { color: 'blue', text: '规则' },
+  rules: { color: 'blue', text: '规则' },
   llm: { color: 'purple', text: 'AI' },
   both: { color: 'geekblue', text: '规则+AI' },
 }
@@ -38,10 +44,21 @@ function Stopwatch({ label, value, ok, budget }) {
 
 export default function IncidentDetail() {
   const { incidentId } = useParams()
-  const navigate = useNavigate()
+  const location = useLocation()
+  const requestedReturn = safeReturnTo(new URLSearchParams(location.search).get('returnTo'))
+  const returnTo = /^\/work-queue(?:[?#]|$)/.test(requestedReturn) ? requestedReturn : '/incidents'
+  const canTriage = hasPermission(Perm.ALERTS_ACKNOWLEDGE)
+  const canExecute = hasPermission(Perm.TICKETS_EXECUTE)
   const [inc, setInc] = useState(null)
   const [timeline, setTimeline] = useState([])
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(true)
+  const [detailError, setDetailError] = useState(null)
+  const [timelineError, setTimelineError] = useState(null)
+  const [actionError, setActionError] = useState(null)
+  const [submitting, setSubmitting] = useState(false)
+  const [closeOpen, setCloseOpen] = useState(false)
+  const [reason, setReason] = useState('')
+  const detailRequest = useRef(null)
   const [traces, setTraces] = useState([])
   const [investigating, setInvestigating] = useState(false)
 
@@ -59,21 +76,37 @@ export default function IncidentDetail() {
   }, [incidentId])
 
   const load = useCallback(async () => {
+    detailRequest.current?.abort()
+    const controller = new AbortController()
+    detailRequest.current = controller
     setLoading(true)
+    setDetailError(null)
+    setTimelineError(null)
     try {
-      const d = await incidentAPI.detail(incidentId)
-      setInc(d.incident || d)
-      const t = await incidentAPI.timeline(incidentId)
-      setTimeline(Array.isArray(t) ? t : (t.items || []))
+      const result = await incidentAPI.detail(incidentId, controller.signal)
+      if (controller.signal.aborted) return
+      setInc(result.incident || result)
       loadTraces()
-    } catch (e) {
-      message.error('加载事故详情失败: ' + e.message)
+      try {
+        const result = await incidentAPI.timeline(incidentId, controller.signal)
+        if (!controller.signal.aborted) setTimeline(result.items || [])
+      } catch (error) {
+        if (!controller.signal.aborted) setTimelineError(errorText(error))
+      }
+    } catch (error) {
+      if (!controller.signal.aborted) {
+        setDetailError(errorText(error))
+        if (error.status === 403 || error.status === 404) setInc(null)
+      }
     } finally {
-      setLoading(false)
+      if (!controller.signal.aborted) setLoading(false)
     }
   }, [incidentId, loadTraces])
 
-  useEffect(() => { load() }, [load])
+  useEffect(() => {
+    load()
+    return () => detailRequest.current?.abort()
+  }, [load])
 
   // 组件卸载时统一清理所有定时器（BUG-011）
   useEffect(() => () => {
@@ -92,12 +125,34 @@ export default function IncidentDetail() {
   }, [load])
 
   const doAck = async () => {
-    try { await incidentAPI.ack(incidentId); message.success('已确认'); load() }
-    catch (e) { message.error(e.message) }
+    setSubmitting(true)
+    setActionError(null)
+    try {
+      const result = await incidentAPI.ack(incidentId)
+      setInc(current => ({ ...current, acked_by: result.acked_by, acked_at: result.acked_at }))
+      load()
+    } catch (error) {
+      setActionError(errorText(error))
+    } finally {
+      setSubmitting(false)
+    }
   }
   const doClose = async () => {
-    try { await incidentAPI.close(incidentId, '手动关闭'); message.success('已关闭'); load() }
-    catch (e) { message.error(e.message) }
+    if (!reason.trim() || submitting) return
+    setSubmitting(true)
+    setActionError(null)
+    try {
+      const result = await incidentAPI.close(incidentId, reason.trim())
+      setInc(current => ({ ...current, status: result.status }))
+      setCloseOpen(false)
+      setReason('')
+      message.success('事故已结案')
+      load()
+    } catch (error) {
+      setActionError(errorText(error))
+    } finally {
+      setSubmitting(false)
+    }
   }
   const doRediagnose = async () => {
     try { await incidentAPI.rediagnose(incidentId); message.success('已触发重新诊断'); delayedLoad(2000) }
@@ -156,7 +211,14 @@ export default function IncidentDetail() {
     }
   }
 
-  if (!inc) return <div style={{ padding: 24 }}><Card loading={loading}>加载中...</Card></div>
+  const backLink = <Link to={returnTo}><ArrowLeftOutlined /> {returnTo === '/incidents' ? '返回事故中心' : '返回值班队列'}</Link>
+  if (!inc) return <section className="operations-page">
+    {backLink}
+    {detailError
+      ? <Alert className="operations-feedback" type="error" showIcon message="无法读取事故" description={detailError}
+          action={<Button onClick={load}>重试</Button>} />
+      : <p className="operations-feedback" role="status"><Spin size="small" /> 正在获取事故…</p>}
+  </section>
 
   const rca = inc.rca_result || {}
   const impact = inc.impact || {}
@@ -167,35 +229,54 @@ export default function IncidentDetail() {
 
   return (
     <div style={{ padding: 24 }}>
-      <div style={{ marginBottom: 16, display: 'flex', justifyContent: 'space-between' }}>
-        <Space>
-          <Button icon={<ArrowLeftOutlined />} onClick={() => navigate('/incidents')}>返回</Button>
-          <h2 style={{ margin: 0 }}>{inc.title}</h2>
+      <div className="experience-heading">
+        <div>
+          {backLink}
+          <h2>{inc.title}</h2>
           <Tag color={PRIORITY_COLOR[inc.priority]}>{inc.priority}</Tag>
-          <Tag color={STATUS_COLOR[inc.status]}>{inc.status}</Tag>
+          <Tag color={STATUS_COLOR[inc.status]}>{incidentStatus(inc.status)}</Tag>
           {inc.is_storm && <Tag color="volcano">事件风暴</Tag>}
-        </Space>
-        <Space>
-          {!inc.acked_by && <Button icon={<CheckOutlined />} onClick={doAck}>确认</Button>}
-          {['open', 'diagnosing', 'plan_ready'].includes(inc.status) &&
-            <Button onClick={doRediagnose}>重新诊断</Button>}
-          <Button icon={<ExperimentOutlined />} loading={investigating || hasRunning}
-            onClick={doInvestigate} disabled={inc.status === 'closed'}>深度排查</Button>
-          {inc.status !== 'closed' && <Button danger onClick={doClose}>关闭</Button>}
-          <Button icon={<ReloadOutlined />} onClick={load}>刷新</Button>
+        </div>
+        <Space wrap>
+          {canTriage && !inc.acked_at && !inc.acked_by && inc.status !== 'closed' &&
+            <Button icon={<CheckOutlined />} loading={submitting} disabled={loading || !!detailError} onClick={doAck}>确认知晓</Button>}
+          {canTriage && ['open', 'diagnosing', 'plan_ready'].includes(inc.status) &&
+            <Button disabled={loading || !!detailError} onClick={doRediagnose}>重新诊断</Button>}
+          {canExecute && <Button icon={<ExperimentOutlined />} loading={investigating || hasRunning}
+            onClick={doInvestigate} disabled={inc.status === 'closed' || loading || !!detailError}>深度排查</Button>}
+          {canTriage && inc.status !== 'closed' &&
+            <Button danger disabled={loading || submitting || !!detailError} onClick={() => { setActionError(null); setCloseOpen(true) }}>结案</Button>}
+          <Button icon={<ReloadOutlined />} loading={loading} onClick={load}>刷新</Button>
         </Space>
       </div>
+      {detailError && <Alert className="operations-feedback" type="warning" showIcon
+        message="事故刷新失败 · 正在显示上次结果" description={detailError} />}
+      {actionError && !closeOpen && <Alert className="operations-feedback" type="error" showIcon
+        message="操作未完成" description={actionError} />}
+      {(inc.acked_at || inc.acked_by) && <Alert className="operations-feedback" type="info" showIcon message="已确认知晓"
+        description={`确认人 ${inc.acked_by || '未记录'} · ${operationTime(inc.acked_at)}`} />}
+      <Modal title="确认结案" open={closeOpen} onOk={doClose}
+        onCancel={() => { if (!submitting) { setCloseOpen(false); setActionError(null); setReason('') } }}
+        okText="确认结案" cancelText="继续处理" confirmLoading={submitting}
+        okButtonProps={{ danger: true, disabled: !reason.trim() }} closable={!submitting} maskClosable={!submitting}>
+        <p><strong>{inc.title}</strong> · {inc.db_name}</p>
+        <p>结案后事故会从待办中移出，原有事件和时间线仍可查阅。</p>
+        <label htmlFor="incident-close-reason">结案原因</label>
+        <Input.TextArea id="incident-close-reason" value={reason} onChange={event => setReason(event.target.value)}
+          maxLength={300} showCount rows={3} />
+        {actionError && <Alert className="operations-feedback" type="error" showIcon message={actionError} />}
+      </Modal>
 
       {/* 1-5-10 秒表 */}
       <Row gutter={16} style={{ marginBottom: 16 }}>
-        <Col span={8}><Stopwatch label="发现" value={inc.t_detect_sec} ok={inc.sla_detect_ok} budget={60} /></Col>
-        <Col span={8}><Stopwatch label="方案" value={inc.t_plan_sec} ok={inc.sla_plan_ok} budget={300} /></Col>
-        <Col span={8}><Stopwatch label="解决" value={inc.t_resolve_sec} ok={inc.sla_resolve_ok} budget={600} /></Col>
+        <Col xs={24} md={8}><Stopwatch label="发现" value={inc.t_detect_sec} ok={inc.sla_detect_ok} budget={60} /></Col>
+        <Col xs={24} md={8}><Stopwatch label="方案" value={inc.t_plan_sec} ok={inc.sla_plan_ok} budget={300} /></Col>
+        <Col xs={24} md={8}><Stopwatch label="解决" value={inc.t_resolve_sec} ok={inc.sla_resolve_ok} budget={600} /></Col>
       </Row>
 
       {/* 元信息 */}
       <Card size="small" style={{ marginBottom: 16 }}>
-        <Descriptions column={3} size="small" bordered>
+        <Descriptions column={{ xs: 1, sm: 2, xl: 3 }} size="small" bordered>
           <Descriptions.Item label="事故ID">{inc.incident_id}</Descriptions.Item>
           <Descriptions.Item label="数据库">{inc.db_name}</Descriptions.Item>
           <Descriptions.Item label="类别">{inc.category}</Descriptions.Item>
@@ -208,8 +289,10 @@ export default function IncidentDetail() {
         </Descriptions>
       </Card>
 
+      <IncidentOperations key={inc.incident_id} incident={inc} canTriage={canTriage} />
+
       <Row gutter={16}>
-        <Col span={12}>
+        <Col xs={24} xl={12}>
           <Card title="事故时间线" size="small" style={{ marginBottom: 16 }}>
             <Timeline items={timeline.map((it) => ({
               color: it.kind === 'event' ? (it.severity === 'critical' ? 'red' : 'orange') : 'blue',
@@ -223,12 +306,15 @@ export default function IncidentDetail() {
                 </div>
               ),
             }))} />
-            {timeline.length === 0 && <Empty description="暂无时间线" />}
+            {timelineError && <Alert type="warning" showIcon message="时间线未更新" description={timelineError}
+              action={<Button onClick={load}>重试</Button>} />}
+            {!timelineError && !loading && timeline.length === 0 && <Empty description="暂无时间线" />}
           </Card>
         </Col>
-        <Col span={12}>
+        <Col xs={24} xl={12}>
           <Card title="根因诊断" size="small" style={{ marginBottom: 16 }}>
-            {rca.llm_summary && (
+            <DiagnosisUncertainty rca={rca} />
+            {rca.llm_summary && !rca.llm?.summary && (
               <Alert type="info" showIcon icon={<RobotOutlined />} style={{ marginBottom: 12 }}
                 message="AI 综合分析" description={rca.llm_summary} />
             )}
@@ -242,15 +328,17 @@ export default function IncidentDetail() {
                       <Tag color={SOURCE_TAG[rc.source].color}>{SOURCE_TAG[rc.source].text}</Tag>}
                     {rc.agent_confirmed && <Tag color="cyan">深挖确认</Tag>}
                     <span style={{ fontSize: 12 }}>置信度</span>
-                    <Progress percent={Math.round((rc.confidence || 0) * 100)} size="small" style={{ width: 120 }} />
+                    {Number.isFinite(rc.confidence)
+                      ? <Progress percent={Math.round(rc.confidence * 100)} size="small" style={{ width: 120 }} />
+                      : <span>未评估</span>}
                     <Tooltip title="根因准确">
                       <Button size="small" icon={<LikeOutlined />}
                         type={myFb.rca[rc.rule_id] === 'correct' ? 'primary' : 'default'}
-                        onClick={() => doRcaFeedback(rc.rule_id, 'correct')} />
+                        disabled={!canTriage || !!detailError} onClick={() => doRcaFeedback(rc.rule_id, 'correct')} />
                     </Tooltip>
                     <Tooltip title="根因不准">
                       <Button size="small" danger={myFb.rca[rc.rule_id] === 'wrong'} icon={<DislikeOutlined />}
-                        onClick={() => doRcaFeedback(rc.rule_id, 'wrong')} />
+                        disabled={!canTriage || !!detailError} onClick={() => doRcaFeedback(rc.rule_id, 'wrong')} />
                     </Tooltip>
                   </Space>
                   <div style={{ color: '#555', margin: '4px 0' }}>{rc.summary}</div>
@@ -261,6 +349,10 @@ export default function IncidentDetail() {
                   {rc.llm_dissent && (
                     <Alert type="warning" showIcon style={{ margin: '4px 0' }} banner
                       message={`AI 异议: ${rc.llm_dissent}`} />)}
+                  {(rc.source === 'llm' || rc.source === 'both' || rc.evidence_refs?.length > 0) &&
+                    <DiagnosisReferences references={rc.evidence_refs} index={rca.llm?.meta?.evidence_index} />}
+                  {!!rc.dissent_evidence_refs?.length && <DiagnosisReferences
+                    references={rc.dissent_evidence_refs} index={rca.llm?.meta?.evidence_index} />}
                   {(rc.evidence || []).length > 0 && (
                     <div style={{ background: '#fafafa', padding: 8, borderRadius: 4 }}>
                       <div style={{ fontSize: 12, color: '#888', marginBottom: 4 }}>证据链:</div>
@@ -353,15 +445,15 @@ export default function IncidentDetail() {
                     <Tooltip title="采纳且有效">
                       <Button size="small" icon={<LikeOutlined />}
                         type={myFb.plan[p.scenario] === 'adopted' ? 'primary' : 'default'}
-                        onClick={() => doPlanFeedback(p.scenario, 'adopted')} />
+                        disabled={!canTriage || !!detailError} onClick={() => doPlanFeedback(p.scenario, 'adopted')} />
                     </Tooltip>
                     <Tooltip title="没有帮助">
                       <Button size="small" danger={myFb.plan[p.scenario] === 'adopted_failed'} icon={<DislikeOutlined />}
-                        onClick={() => doPlanFeedback(p.scenario, 'useless')} />
+                        disabled={!canTriage || !!detailError} onClick={() => doPlanFeedback(p.scenario, 'useless')} />
                     </Tooltip>
                     {!isAdvisory && <Button size="small" type="primary"
                       disabled={!['plan_ready', 'executing'].includes(inc.status) || !p.playbook_ref}
-                      onClick={() => doExecute(p.scenario)}>执行</Button>}
+                      disabled={!canExecute || !!detailError} onClick={() => doExecute(p.scenario)}>执行</Button>}
                   </Space>}>
                   <div style={{ fontSize: 12, color: '#888' }}>
                     {isAdvisory

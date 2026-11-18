@@ -409,7 +409,7 @@ def _emit_verify(run, pb, params=None):
     params = params or {}
     metric = _render(v.get('metric') or '', params)
     if not metric:
-        # 无验证判据(如纯建议类) → 直接标成功并解决事故
+        # 无验证判据：记录执行已结束，业务恢复待人工验证
         _finish_no_verify(run)
         return
     emit_verify({
@@ -429,6 +429,6 @@ def _emit_verify(run, pb, params=None):
 def _finish_no_verify(run):
     """无验证判据的剧本: 直接成功(不改事故状态, 由人工决定)。"""
     run.status = 'succeeded'
-    run.verify_result = {'recovered': None, 'note': '无验证判据(建议类), 需人工确认'}
+    run.verify_result = {'state': 'manual_required', 'recovered': None, 'note': '无验证判据，需人工确认'}
     run.finished_at = timezone.now()
     run.save(update_fields=['status', 'verify_result', 'finished_at'])

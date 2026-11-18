@@ -58,7 +58,7 @@ const createApiClient = (baseURL) => {
       err.requestId = error.response?.headers?.['x-request-id']
       return Promise.reject(err)
     }
-    if (axios.isCancel(error)) return Promise.reject(error)
+    if (axios.isCancel(error) || config?.signal?.aborted) return Promise.reject(error)
 
     // 5xx 服务端错误：对幂等请求自动重试
     // BUG-116: 上一版第 52 行用 `!config` 做了短路保护，第 53 行却无条件解引用
@@ -77,6 +77,7 @@ const createApiClient = (baseURL) => {
       // 指数退避延迟
       const delay = RETRY_DELAY_MS * Math.pow(2, cfg.__retryCount - 1)
       await new Promise(resolve => setTimeout(resolve, delay))
+      if (cfg.signal?.aborted) return Promise.reject(error)
       return client(cfg)
     }
 
@@ -152,6 +153,7 @@ export const databaseAPI = {
   
   // 获取数据库状态
   getStatus: (id) => api.get(`/databases/${id}/status/`),
+  collectionHealth: (id, signal) => api.get(`/databases/${id}/collection-health/`, { signal }),
   
   // 获取数据库指标
   getMetrics: (id, params = {}) =>
@@ -571,10 +573,17 @@ export const inspectionAPI = {
 }
 
 // Phase 6A: 事故中心
+export const operationsAPI = {
+  queue: (params, signal) => api.get('/work-queue/', { params, signal }),
+}
+
 export const incidentAPI = {
   list: (params = {}) => api.get('/incidents/', { params }),
-  detail: (id) => api.get(`/incidents/${id}/`),
-  timeline: (id) => api.get(`/incidents/${id}/timeline/`),
+  detail: (id, signal) => api.get(`/incidents/${id}/`, { signal }),
+  context: (id, signal) => api.get(`/incidents/${encodeURIComponent(id)}/context/`, { signal }),
+  saveHandoff: (id, data) => api.post(`/incidents/${encodeURIComponent(id)}/handoff/`, data),
+  linkTicket: (id, ticket_id) => api.post(`/incidents/${encodeURIComponent(id)}/tickets/`, { ticket_id }),
+  timeline: (id, signal) => api.get(`/incidents/${id}/timeline/`, { signal }),
   ack: (id) => api.post(`/incidents/${id}/ack/`, {}),
   close: (id, reason) => api.post(`/incidents/${id}/close/`, { reason }),
   rediagnose: (id) => api.post(`/incidents/${id}/rediagnose/`, {}),
@@ -658,8 +667,8 @@ export const perfAPI = {
 
 // W4: 系统自监控 (契约 PROJECT_IMPROVEMENT_DESIGN.md §4.1)
 export const systemAPI = {
-  health: () => api.get('/system/health'),
-  components: (params = {}) => api.get('/system/components', { params }),
+  health: signal => api.get('/system/health', { signal }),
+  components: (params = {}, signal) => api.get('/system/components', { params, signal }),
   degradations: () => api.get('/system/degradations'),
 }
 
