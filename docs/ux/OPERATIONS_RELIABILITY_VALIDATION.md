@@ -23,9 +23,16 @@
 | 前端 | Vite 生产构建和 Vitest | 构建通过，85 项单测通过 |
 | 新增浏览器 UAT | Chromium 156 操作实际提供页面和 API 的 Django 服务，业务数据库为 PostgreSQL；桌面 1440px 和窄屏 390px | 9 个流程通过，0 个未捕获页面异常 |
 | 浏览器回归 | 既有两组验收脚本覆盖值班队列、权限、网络失败重试、登录续接与 PostgreSQL 纳管 | 21 个流程通过，0 个未捕获页面异常 |
-| 依赖审计 | 全量审计和 `--omit=dev` 审计 | 生产依赖审计报告 0 项。全量审计仍报告 6 个高危依赖项，来自 `picomatch` 的同一公告和传递依赖路径。Vitest 相关的原中危项已消除 |
+| 初次依赖审计 | 全量审计和 `--omit=dev` 审计 | 生产依赖审计报告 0 项。全量审计报告 6 个高危依赖项、0 个中危项。6 项均来自 `picomatch` 的同一公告和传递依赖路径，修复复验见下方 |
 
-全量审计报告关联至 `GHSA-fc5q-39xc-vjpf`。验收时注册表的最新 `picomatch` 仍在受影响范围内，公告未提供已修补版本。当前工作流保留高危审计失败状态。上述结论来自本地运行，尚无本次改动的 GitHub Actions 运行结果。[GitHub 安全公告](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+## 依赖修复与复验
+
+上游尚未发布 `GHSA-fc5q-39xc-vjpf` 的修复版本。前端固定使用仓库内的 `picomatch` 安全补丁。解析器会将包含内部无界量词的重复扩展通配组按字面匹配，保留普通通配符、否定匹配和可安全编译的重复组。构建、测试和 Docker 安装路径解析到同一份补丁源码。[补丁来源和维护说明](../../frontend/vendor/picomatch/UPSTREAM.md) · [GitHub 安全公告](https://github.com/advisories/GHSA-fc5q-39xc-vjpf)
+
+- Node 22 干净安装后，`npm audit` 全量审计及 `npm audit --omit=dev` 均报告 0 项。CI 继续执行 `npm audit --audit-level=high`。审计检查发布公告，补丁行为和实际依赖解析另由回归测试验证。
+- 前端构建和 97 个测试通过，其中 12 个新增用例验证补丁加载路径、已公告问题的处理及普通匹配。后端门禁复跑通过，642 项中 611 通过、31 跳过、0 失败。
+- Chromium 重新跑完三组共 30 个流程，全部通过，零未捕获页面异常。复验记录位于 `/workspace/dbaiops-evidence/audit-backport/`。
+- Docker 镜像构建通过。此工作区的网络代理要求容器信任其 CA，验证构建在依赖下载时临时挂载该 CA，最终镜像不包含该文件。
 
 ## 浏览器验收记录
 

@@ -1,0 +1,8 @@
+{
+  "name": "picomatch",
+  "version": "4.0.7-dbaiops.1",
+  "description": "DB-AIOps security backport of picomatch 4.0.7",
+  "license": "MIT",
+  "main": "index.js",
+  "private": true
+}
