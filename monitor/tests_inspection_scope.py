@@ -689,3 +689,426 @@ class InspectionBatch2Part1ImplementationTests(TestCase):
             res = executor._run_single(self.mysql_db, item, 'daily')
             self.assertIsNotNone(res)
             self.assertIn(res.status, ('ok', 'warning', 'critical', 'skip', 'error'))
+
+
+@tag('unit')
+class Db024DetectorFixTests(TestCase):
+    """DB-024: 验证 DB-022 检测器 DictCursor 兼容、零吞异常、方言 SQL 修复与 UP 容量预测。"""
+
+    def setUp(self):
+        self.mysql_db = make_db('db024-mysql', db_type='mysql', port=13306)
+        self.dm_db = make_db('db024-dm', db_type='dm', port=5236)
+        self.gbase_db = make_db('db024-gbase', db_type='gbase', port=5258)
+        self.pg_db = make_db('db024-pg', db_type='pgsql', port=5432)
+
+    @staticmethod
+    def _make_connector(handler):
+        class ScriptedCursor:
+            def __init__(self):
+                self.executed_sqls = []
+                self._rows = []
+                self._pos = 0
+                self.description = []
+
+            def execute(self, sql, params=None):
+                self.executed_sqls.append(' '.join(sql.split()))
+                res = handler(sql, params)
+                if isinstance(res, Exception):
+                    raise res
+                if isinstance(res, tuple) and len(res) == 2:
+                    rows, cols = res
+                else:
+                    rows, cols = res, None
+                self._rows = list(rows or [])
+                self._pos = 0
+                if cols is None and self._rows and isinstance(self._rows[0], dict):
+                    cols = list(self._rows[0].keys())
+                self.description = [(c,) for c in (cols or [])]
+
+            def fetchone(self):
+                if self._pos < len(self._rows):
+                    row = self._rows[self._pos]
+                    self._pos += 1
+                    return row
+                return None
+
+            def fetchall(self):
+                rest = self._rows[self._pos:]
+                self._pos = len(self._rows)
+                return rest
+
+            def close(self):
+                return None
+
+        class ScriptedConn:
+            def __init__(self, cur):
+                self._cur = cur
+
+            def cursor(self):
+                return self._cur
+
+        class ScriptedConnector:
+            def __init__(self):
+                self.cur = ScriptedCursor()
+                self.conn = ScriptedConn(self.cur)
+
+            def connect(self):
+                return self.conn
+
+            def close(self):
+                return None
+
+        return ScriptedConnector()
+
+    def test_root_cause_a_dictcursor_compatibility(self):
+        """验证 pymysql DictCursor (dict 行) 下不再 KeyError 或把列名当行值。"""
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+
+        # 1. USER-LOCKED: MySQL DictCursor 返回 3 个锁定账号
+        fc_lock = self._make_connector(lambda sql, p: (
+            [
+                {'user': 'mysql.infoschema', 'host': 'localhost', 'account_locked': 'Y'},
+                {'user': 'mysql.session', 'host': 'localhost', 'account_locked': 'Y'},
+                {'user': 'mysql.sys', 'host': 'localhost', 'account_locked': 'Y'},
+            ],
+            ['user', 'host', 'account_locked'],
+        ))
+        res_lock = GenericDetector.detect_locked_users(
+            DetectionContext(db_config=self.mysql_db, db_connector=fc_lock, db_type='mysql', item={'item_id': 'INS-COM-USER-LOCKED'})
+        )
+        self.assertEqual(res_lock.status, 'warning')
+        self.assertEqual(len(res_lock.metrics['locked_users']), 3)
+        self.assertEqual(res_lock.metrics['locked_users'][0]['user'], 'mysql.infoschema')
+
+        # 2. SPARSE-INDEX: DictCursor 保留真实字段值而非列名
+        fc_sparse = self._make_connector(lambda sql, p: (
+            [{'table_schema': 'appdb', 'table_name': 'orders', 'index_name': 'idx_flag', 'cardinality': 5, 'table_rows': 2723}],
+            ['TABLE_SCHEMA', 'TABLE_NAME', 'INDEX_NAME', 'CARDINALITY', 'TABLE_ROWS'],
+        ))
+        res_sparse = GenericDetector.detect_sparse_index(
+            DetectionContext(db_config=self.mysql_db, db_connector=fc_sparse, db_type='mysql', item={'item_id': 'INS-COM-SPARSE-INDEX'})
+        )
+        self.assertEqual(res_sparse.status, 'ok')
+        row = res_sparse.metrics['sparse_indexes'][0]
+        self.assertEqual(row['table_schema'], 'appdb')
+        self.assertEqual(row['table_name'], 'orders')
+        self.assertEqual(row['cardinality'], 5)
+
+        # 3. PARAM-DEV: DictCursor SHOW VARIABLES
+        fc_param = self._make_connector(lambda sql, p: (
+            [{'Variable_name': 'max_connections', 'Value': '64'}],
+            ['Variable_name', 'Value'],
+        ))
+        res_param = GenericDetector.detect_param_deviation(
+            DetectionContext(db_config=self.mysql_db, db_connector=fc_param, db_type='mysql', item={'item_id': 'INS-COM-PARAM-DEV'})
+        )
+        self.assertEqual(res_param.status, 'warning')
+        self.assertEqual(res_param.metrics['deviations'][0]['val'], '64')
+
+        # 4. DEADLOCK-24H: MySQL 8.0 Innodb_deadlocks 空 -> INNODB_METRICS.lock_deadlocks
+        def deadlock_handler(sql, p):
+            if 'SHOW GLOBAL STATUS' in sql:
+                return ([], ['Variable_name', 'Value'])
+            if 'INNODB_METRICS' in sql:
+                return ([{'COUNT': 3}], ['COUNT'])
+            return ([], [])
+
+        fc_dl = self._make_connector(deadlock_handler)
+        res_dl = GenericDetector.detect_deadlock_count(
+            DetectionContext(db_config=self.mysql_db, db_connector=fc_dl, db_type='mysql', item={'item_id': 'INS-COM-DEADLOCK-24H'})
+        )
+        self.assertEqual(res_dl.status, 'warning')
+        self.assertEqual(res_dl.metrics['deadlock_count'], 3)
+
+    def test_root_cause_b_no_silent_error_swallowing(self):
+        """验证内层 SQL 异常时不再静默返回 ok/0/空列表，而是 status='error' 且 degrade 留痕。"""
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+
+        cases = [
+            ('mysql', self.mysql_db, 'INS-COM-USER-LOCKED', GenericDetector.detect_locked_users),
+            ('mysql', self.mysql_db, 'INS-COM-PWD-EXPIRE', GenericDetector.detect_expiring_passwords),
+            ('mysql', self.mysql_db, 'INS-COM-DEADLOCK-24H', GenericDetector.detect_deadlock_count),
+            ('mysql', self.mysql_db, 'INS-COM-MISSING-INDEX', GenericDetector.detect_missing_indexes),
+            ('dm', self.dm_db, 'INS-COM-ARCH-GAP', GenericDetector.detect_archive_gap),
+            ('mysql', self.mysql_db, 'INS-COM-LOCK-WAIT', GenericDetector.detect_lock_waits),
+            ('mysql', self.mysql_db, 'INS-COM-BLOCK-SESSION', GenericDetector.detect_blocked_sessions),
+            ('dm', self.dm_db, 'INS-COM-OPEN-CURSOR', GenericDetector.detect_open_cursors),
+            ('mysql', self.mysql_db, 'INS-COM-TEMP-USAGE', GenericDetector.detect_temp_usage),
+            ('dm', self.dm_db, 'INS-COM-UNDO-USAGE', GenericDetector.detect_undo_usage),
+        ]
+        for db_type, cfg, item_id, fn in cases:
+            with self.subTest(db_type=db_type, item_id=item_id):
+                fc = self._make_connector(lambda sql, p: RuntimeError('simulated sql error'))
+                with self.assertLogs('monitor.degrade', level='WARNING'):
+                    res = fn(DetectionContext(db_config=cfg, db_connector=fc, db_type=db_type, item={'item_id': item_id}))
+                self.assertEqual(res.status, 'error')
+                self.assertIn('simulated sql error', res.error)
+
+    def test_dm8_detector_fixes(self):
+        """验证 DM8 修复的 9 项 SQL、非归档 skip、动态游标上限与 UNDO pct_used 计算。"""
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+
+        # 1. ARCH-GAP: ARCH_MODE='N' 应返回 skip 而非假绿
+        fc_arch_off = self._make_connector(lambda sql, p: ([('N',)], ['ARCH_MODE']))
+        res_arch_off = GenericDetector.detect_archive_gap(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_arch_off, db_type='dm', item={'item_id': 'INS-COM-ARCH-GAP'})
+        )
+        self.assertEqual(res_arch_off.status, 'skip')
+        self.assertIn('ARCH_MODE=N', res_arch_off.summary)
+
+        # ARCH-GAP: ARCH_MODE='Y' 检测目的端异常与序号间隙
+        def arch_on_handler(sql, p):
+            if 'V$DATABASE' in sql:
+                return ([('Y',)], ['ARCH_MODE'])
+            if 'V$ARCH_STATUS' in sql:
+                return ([('LOCAL', '/dmarch', 'INVALID', 'PRIMARY')], ['ARCH_TYPE', 'ARCH_DEST', 'ARCH_STATUS', 'ARCH_SRC'])
+            if 'V$ARCH_FILE' in sql:
+                return ([(1001, 10, 20, 'ACTIVE'), (1001, 25, 30, 'ACTIVE')], ['DB_MAGIC', 'ARCH_SEQ', 'NEXT_SEQ', 'STATUS'])
+            return ([], [])
+
+        fc_arch_on = self._make_connector(arch_on_handler)
+        res_arch_on = GenericDetector.detect_archive_gap(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_arch_on, db_type='dm', item={'item_id': 'INS-COM-ARCH-GAP'})
+        )
+        self.assertEqual(res_arch_on.status, 'warning')
+        self.assertEqual(len(res_arch_on.metrics['archive_gaps']), 2)
+
+        # 2. OPEN-CURSOR: 使用 V$OPEN_STMT / N_USED_STMT / MAX_SESSION_STATEMENT，不硬编码 1000
+        def cursor_handler(sql, p):
+            if 'V$OPEN_STMT' in sql:
+                return ([(120,)], ['current_open'])
+            if 'V$SESSIONS' in sql:
+                return ([(17000,)], ['max_sess_open'])
+            if 'MAX_SESSION_STATEMENT' in sql:
+                return ([('20000',)], ['VALUE'])
+            return ([], [])
+
+        fc_cur = self._make_connector(cursor_handler)
+        res_cur = GenericDetector.detect_open_cursors(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_cur, db_type='dm', item={'item_id': 'INS-COM-OPEN-CURSOR'})
+        )
+        self.assertEqual(res_cur.status, 'warning')  # 17000 / 20000 = 85% >= 80%
+        self.assertEqual(res_cur.metrics['max_open'], 20000)
+        self.assertEqual(res_cur.metrics['session_usage_pct'], 85.0)
+
+        # MAX_SESSION_STATEMENT 缺失时不回落硬编码 1000，而是报错
+        def cursor_missing_param(sql, p):
+            if 'V$OPEN_STMT' in sql:
+                return ([(5,)], ['current_open'])
+            if 'V$SESSIONS' in sql:
+                return ([(5,)], ['max_sess_open'])
+            return ([], ['VALUE'])
+
+        with self.assertLogs('monitor.degrade', level='WARNING'):
+            res_cur_err = GenericDetector.detect_open_cursors(
+                DetectionContext(db_config=self.dm_db, db_connector=self._make_connector(cursor_missing_param), db_type='dm', item={'item_id': 'INS-COM-OPEN-CURSOR'})
+            )
+        self.assertEqual(res_cur_err.status, 'error')
+
+        # 3. TEMP-USAGE & UNDO-USAGE: 正确更新 pct_used 并按阈值触发告警
+        fc_temp = self._make_connector(lambda sql, p: ([('TEMP', 64.0, 48.0)], ['tablespace_name', 'total_mb', 'used_mb']))
+        res_temp = GenericDetector.detect_temp_usage(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_temp, db_type='dm', item={'item_id': 'INS-COM-TEMP-USAGE'})
+        )
+        self.assertEqual(res_temp.status, 'warning')
+        self.assertEqual(res_temp.metrics['pct_used'], 75.0)
+
+        fc_undo = self._make_connector(lambda sql, p: ([('ROLL', 128.0, 96.0)], ['tablespace_name', 'total_mb', 'used_mb']))
+        res_undo = GenericDetector.detect_undo_usage(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_undo, db_type='dm', item={'item_id': 'INS-COM-UNDO-USAGE'})
+        )
+        self.assertEqual(res_undo.status, 'warning')
+        self.assertEqual(res_undo.metrics['pct_used'], 75.0)
+        self.assertEqual(len(res_undo.findings), 1)
+        self.assertIn('75.0%', res_undo.summary)
+
+        # 4. PWD-EXPIRE / PART-NEEDED / PARAM-DEV / LOCK-WAIT / BLOCK-SESSION SQL 验证
+        fc_pwd = self._make_connector(lambda sql, p: ([('APP1', '2026-11-15')], ['username', 'expiry_date']))
+        res_pwd = GenericDetector.detect_expiring_passwords(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_pwd, db_type='dm', item={'item_id': 'INS-COM-PWD-EXPIRE'})
+        )
+        self.assertEqual(res_pwd.status, 'warning')
+        self.assertIn('expiry_date', fc_pwd.cur.executed_sqls[0].lower())
+
+        fc_part = self._make_connector(lambda sql, p: ([('APP', 'BIG_T', 12.5)], ['owner', 'segment_name', 'size_gb']))
+        res_part = GenericDetector.detect_large_table_not_partitioned(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_part, db_type='dm', item={'item_id': 'INS-COM-PART-NEEDED'})
+        )
+        self.assertEqual(res_part.status, 'warning')
+        self.assertIn('dba_part_tables', fc_part.cur.executed_sqls[0].lower())
+
+        fc_pdev = self._make_connector(lambda sql, p: ([('MAX_SESSIONS', '50')], ['NAME', 'VALUE']))
+        res_pdev = GenericDetector.detect_param_deviation(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_pdev, db_type='dm', item={'item_id': 'INS-COM-PARAM-DEV'})
+        )
+        self.assertEqual(res_pdev.status, 'warning')
+        self.assertIn('SELECT NAME, VALUE FROM V$PARAMETER', fc_pdev.cur.executed_sqls[0])
+
+        fc_lw = self._make_connector(lambda sql, p: ([('101', 'SYSDBA', '202', 'SELECT 1', 'X', 1)], ['sess_id', 'user_name', 'transaction_id', 'sql_text', 'lmode', 'blocked']))
+        res_lw = GenericDetector.detect_lock_waits(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_lw, db_type='dm', item={'item_id': 'INS-COM-LOCK-WAIT'})
+        )
+        self.assertEqual(res_lw.status, 'ok')
+        self.assertEqual(len(res_lw.metrics['lock_waits']), 1)
+        self.assertIn('V$LOCK', fc_lw.cur.executed_sqls[0])
+
+        fc_blk = self._make_connector(lambda sql, p: ([('202', '101', 'SYSDBA', '201', '99', 350.0)], ['waiting_trx_id', 'sess_id', 'user_name', 'blocking_trx_id', 'blocker_sess_id', 'wait_sec']))
+        res_blk = GenericDetector.detect_blocked_sessions(
+            DetectionContext(db_config=self.dm_db, db_connector=fc_blk, db_type='dm', item={'item_id': 'INS-COM-BLOCK-SESSION'})
+        )
+        self.assertEqual(res_blk.status, 'warning')
+        self.assertIn('WAIT_TIME >= 300000', fc_blk.cur.executed_sqls[0])
+
+    def test_gbase_and_mysql8_dialect_fixes(self):
+        """验证 GBase 8a 真实数据源 / skip 边界，与 MySQL 8.0 视图及 temp 阈值计算。"""
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+
+        # GBase DEADLOCK-24H 能力边界 skip（无需连接）
+        res_gb_dl = GenericDetector.detect_deadlock_count(
+            DetectionContext(db_config=self.gbase_db, db_type='gbase', item={'item_id': 'INS-COM-DEADLOCK-24H'})
+        )
+        self.assertEqual(res_gb_dl.status, 'skip')
+        self.assertIn('EXPRESS', res_gb_dl.summary)
+
+        # GBase USER-LOCKED / PWD-EXPIRE 查 gbase.user_check
+        fc_gb_lock = self._make_connector(lambda sql, p: ([{'user': 'u1', 'host': '%', 'status': 'Y'}], ['user', 'host', 'status']))
+        res_gb_lock = GenericDetector.detect_locked_users(
+            DetectionContext(db_config=self.gbase_db, db_connector=fc_gb_lock, db_type='gbase', item={'item_id': 'INS-COM-USER-LOCKED'})
+        )
+        self.assertEqual(res_gb_lock.status, 'warning')
+        self.assertIn('gbase.user_check', fc_gb_lock.cur.executed_sqls[0])
+
+        fc_gb_pwd = self._make_connector(lambda sql, p: ([{'user': 'u1', 'host': '%', 'password_expired': 'Y', 'expiry_date': '2026-11-14'}], ['user', 'host', 'password_expired', 'expiry_date']))
+        res_gb_pwd = GenericDetector.detect_expiring_passwords(
+            DetectionContext(db_config=self.gbase_db, db_connector=fc_gb_pwd, db_type='gbase', item={'item_id': 'INS-COM-PWD-EXPIRE'})
+        )
+        self.assertEqual(res_gb_pwd.status, 'warning')
+        self.assertIn('gbase.user_check', fc_gb_pwd.cur.executed_sqls[0])
+
+        # GBase LOCK-WAIT 查 PROCESSLIST + TABLE_LOCKS
+        def gb_lw_handler(sql, p):
+            if 'PROCESSLIST' in sql:
+                return ([{'source': 'processlist', 'pid': 10, 'state': 'Waiting for table lock'}], ['source', 'pid', 'state'])
+            return ([{'source': 'table_locks', 'db': 'gbase', 'table_name': 't1', 'receive_write_locks': 1}], ['source', 'db', 'table_name', 'receive_write_locks'])
+
+        fc_gb_lw = self._make_connector(gb_lw_handler)
+        res_gb_lw = GenericDetector.detect_lock_waits(
+            DetectionContext(db_config=self.gbase_db, db_connector=fc_gb_lw, db_type='gbase', item={'item_id': 'INS-COM-LOCK-WAIT'})
+        )
+        self.assertEqual(res_gb_lw.status, 'ok')
+        self.assertEqual(len(res_gb_lw.metrics['lock_waits']), 2)
+
+        # GBase TEMP-USAGE 查 Meminfo_temp_heap_* + SESSION_MEMORY_USAGE_INFO
+        def gb_temp_handler(sql, p):
+            if 'SHOW GLOBAL STATUS' in sql:
+                return (
+                    [
+                        {'Variable_name': 'Meminfo_temp_heap_total_size', 'Value': str(1000 * 1024 * 1024)},
+                        {'Variable_name': 'Meminfo_temp_heap_used_size', 'Value': str(750 * 1024 * 1024)},
+                    ],
+                    ['Variable_name', 'Value'],
+                )
+            return ([{'temp_bytes': 1024}], ['temp_bytes'])
+
+        fc_gb_temp = self._make_connector(gb_temp_handler)
+        res_gb_temp = GenericDetector.detect_temp_usage(
+            DetectionContext(db_config=self.gbase_db, db_connector=fc_gb_temp, db_type='gbase', item={'item_id': 'INS-COM-TEMP-USAGE'})
+        )
+        self.assertEqual(res_gb_temp.status, 'warning')
+        self.assertEqual(res_gb_temp.metrics['pct_used'], 75.0)
+
+        # MySQL 8.0 LOCK-WAIT 走 performance_schema.data_lock_waits
+        def my8_lw_handler(sql, p):
+            if 'SELECT VERSION()' in sql:
+                return ([{'VERSION()': '8.0.45'}], ['VERSION()'])
+            return ([{'waiting_trx_id': '1', 'waiting_thread': 10, 'blocking_trx_id': '2', 'blocking_thread': 11}], None)
+
+        fc_my8_lw = self._make_connector(my8_lw_handler)
+        res_my8_lw = GenericDetector.detect_lock_waits(
+            DetectionContext(db_config=self.mysql_db, db_connector=fc_my8_lw, db_type='mysql', item={'item_id': 'INS-COM-LOCK-WAIT'})
+        )
+        self.assertEqual(res_my8_lw.status, 'ok')
+        self.assertTrue(any('performance_schema.data_lock_waits' in s for s in fc_my8_lw.cur.executed_sqls))
+
+        # MySQL 8.0 TEMP-USAGE autoextend 无上限时不误报 83.3%
+        def my8_temp_handler(sql, p):
+            if 'SELECT VERSION()' in sql:
+                return ([{'VERSION()': '8.0.45'}], ['VERSION()'])
+            if 'INNODB_SESSION_TEMP_TABLESPACES' in sql:
+                return ([{'session_temp_mb': 0.08}], ['session_temp_mb'])
+            if 'information_schema.FILES' in sql:
+                return ([{'used_mb': 10.0, 'alloc_mb': 12.0, 'max_bytes': 0, 'all_bounded': 0}], None)
+            if 'temptable_max_ram' in sql:
+                return ([{'Variable_name': 'temptable_max_ram', 'Value': str(1024 * 1024 * 1024)}], ['Variable_name', 'Value'])
+            return ([], [])
+
+        res_my8_temp = GenericDetector.detect_temp_usage(
+            DetectionContext(db_config=self.mysql_db, db_connector=self._make_connector(my8_temp_handler), db_type='mysql', item={'item_id': 'INS-COM-TEMP-USAGE'})
+        )
+        self.assertEqual(res_my8_temp.status, 'ok')
+        self.assertEqual(res_my8_temp.metrics['pct_used'], 1.0)
+
+    def test_capacity_prediction_filters_up_and_computes_trend(self):
+        """验证 CAP-7D/30D 仅计 status='UP'、区分元数据库与实库容量增长外推。"""
+        from datetime import timedelta
+        from monitor.inspection_executor import DetectionContext, GenericDetector
+        from monitor.models import DatabaseConfig, MonitorLog
+
+        # 1. 未关联 DatabaseConfig pk（如平台元数据库）应明确 skip
+        unsaved_cfg = DatabaseConfig(name='db_monitor_meta', db_type='pgsql', host='127.0.0.1', port=5432, service_name='db_monitor')
+        res_meta = GenericDetector.detect_7d_capacity(
+            DetectionContext(db_config=unsaved_cfg, db_type='pgsql', item={'item_id': 'INS-COM-CAP-7D'})
+        )
+        self.assertEqual(res_meta.status, 'skip')
+
+        res_none = GenericDetector.detect_30d_capacity(
+            DetectionContext(db_config=None, db_type='pgsql', item={'item_id': 'INS-COM-CAP-30D'})
+        )
+        self.assertEqual(res_none.status, 'skip')
+
+        # 2. 存在大量 DOWN 记录但 UP < 3 应 skip（禁止把 DOWN 当有效采样）
+        now = timezone.now()
+        for i in range(10):
+            MonitorLog.objects.create(config=self.dm_db, status='DOWN', message='connect fail')
+            MonitorLog.objects.filter(config=self.dm_db).order_by('-id').update(create_time=now - timedelta(hours=i + 1))
+        for i in range(2):
+            log = MonitorLog.objects.create(
+                config=self.dm_db,
+                status='UP',
+                message=json.dumps({'tablespaces': [{'name': 'ROLL', 'total_mb': 128.0, 'used_mb': 22.5 + i}]}),
+            )
+            MonitorLog.objects.filter(pk=log.pk).update(create_time=now - timedelta(days=i + 1))
+
+        res_dm_cap = GenericDetector.detect_7d_capacity(
+            DetectionContext(db_config=self.dm_db, db_type='dm', item={'item_id': 'INS-COM-CAP-7D'})
+        )
+        self.assertEqual(res_dm_cap.status, 'skip')
+        self.assertEqual(res_dm_cap.metrics['samples_count'], 2)
+        self.assertEqual(res_dm_cap.metrics['non_up_samples_excluded'], 10)
+
+        # 3. PG 实库 10 天稳定增长 -> CAP-7D 与 CAP-30D 正确算出日均斜率与预测值
+        for day_offset, size_mb in [(10, 100.0), (8, 300.0), (6, 500.0), (4, 700.0), (2, 900.0), (0, 1100.0)]:
+            log = MonitorLog.objects.create(
+                config=self.pg_db,
+                status='UP',
+                message=json.dumps({'database_sizes': [{'name': 'timeseriesdb', 'size_mb': size_mb}]}),
+            )
+            MonitorLog.objects.filter(pk=log.pk).update(create_time=now - timedelta(days=day_offset))
+
+        res_pg_cap7 = GenericDetector.detect_7d_capacity(
+            DetectionContext(db_config=self.pg_db, db_type='pgsql', item={'item_id': 'INS-COM-CAP-7D'})
+        )
+        self.assertEqual(res_pg_cap7.status, 'warning')  # +100 MB/day -> +700 MB (+63.6%) >= +50% & >=512MB
+        self.assertEqual(res_pg_cap7.metrics['samples_count'], 4)
+        self.assertAlmostEqual(res_pg_cap7.metrics['daily_growth_mb'], 100.0, places=1)
+        self.assertAlmostEqual(res_pg_cap7.metrics['predicted_used_mb'], 1800.0, places=1)
+        self.assertEqual(len(res_pg_cap7.findings), 1)
+
+        res_pg_cap30 = GenericDetector.detect_30d_capacity(
+            DetectionContext(db_config=self.pg_db, db_type='pgsql', item={'item_id': 'INS-COM-CAP-30D'})
+        )
+        self.assertEqual(res_pg_cap30.status, 'warning')
+        self.assertEqual(res_pg_cap30.metrics['samples_count'], 6)
+        self.assertAlmostEqual(res_pg_cap30.metrics['daily_growth_mb'], 100.0, places=1)
+        self.assertAlmostEqual(res_pg_cap30.metrics['predicted_used_mb'], 4100.0, places=1)
+

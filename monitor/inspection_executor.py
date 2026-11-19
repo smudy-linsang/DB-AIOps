@@ -1302,6 +1302,321 @@ class GenericDetector:
         return result
 
 
+    @staticmethod
+    def _degrade_note(scope: str, reason: str, exc: Optional[Exception] = None) -> None:
+        """按 monitor.degrade 分级留痕，禁止静默吞异常。"""
+        from monitor.degrade import note as degrade_note
+        degrade_note(scope, reason=reason, exc=exc)
+
+    @staticmethod
+    def _row_values(row: Any) -> tuple:
+        """兼容 tuple/pyodbc.Row 与 pymysql DictCursor dict，按列顺序返回值元组。"""
+        if row is None:
+            return ()
+        if isinstance(row, dict):
+            return tuple(row.values())
+        return tuple(row)
+
+    @staticmethod
+    def _row_col(row: Any, index: int = 0, *names: str) -> Any:
+        """按列名（大小写不敏感）或列位置读取单行字段。"""
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            lower_map = {str(k).lower(): v for k, v in row.items()}
+            for name in names:
+                if name in row:
+                    return row[name]
+                lname = str(name).lower()
+                if lname in lower_map:
+                    return lower_map[lname]
+            vals = list(row.values())
+            return vals[index] if 0 <= index < len(vals) else None
+        vals = tuple(row)
+        return vals[index] if 0 <= index < len(vals) else None
+
+    @staticmethod
+    def _scalar(cur: Any, default: Any = None, index: int = 0, *names: str) -> Any:
+        """读取单行标量结果，兼容 tuple 与 DictCursor。"""
+        row = cur.fetchone()
+        if row is None:
+            return default
+        val = GenericDetector._row_col(row, index, *names)
+        return default if val is None else val
+
+    @staticmethod
+    def _show_var_value(cur: Any) -> Any:
+        """读取 SHOW GLOBAL STATUS / SHOW VARIABLES / SHOW <param> 单行值。"""
+        row = cur.fetchone()
+        if row is None:
+            return None
+        if isinstance(row, dict):
+            for key in ("Value", "value"):
+                if key in row:
+                    return row[key]
+            vals = list(row.values())
+            return vals[1] if len(vals) >= 2 else (vals[0] if vals else None)
+        vals = tuple(row)
+        return vals[1] if len(vals) >= 2 else (vals[0] if vals else None)
+
+    @staticmethod
+    def _show_vars_map(cur: Any) -> Dict[str, Any]:
+        """读取多行 SHOW GLOBAL STATUS / VARIABLES 到 {Variable_name: Value} 映射。"""
+        mapping: Dict[str, Any] = {}
+        for r in (cur.fetchall() or []):
+            k = GenericDetector._row_col(r, 0, "Variable_name", "variable_name")
+            v = GenericDetector._row_col(r, 1, "Value", "value")
+            if k is not None:
+                mapping[str(k)] = v
+        return mapping
+
+    @staticmethod
+    def _rows_to_dicts(cur: Any, rows: Any) -> List[Dict[str, Any]]:
+        """将结果集统一转为小写键 dict 列表，避免 DictCursor 下 zip(cols, dict) 错配。"""
+        if not rows:
+            return []
+        cols = [str(c[0]).lower() for c in (getattr(cur, "description", None) or [])]
+        out: List[Dict[str, Any]] = []
+        for r in rows:
+            if isinstance(r, dict):
+                out.append({str(k).lower(): v for k, v in r.items()})
+            else:
+                vals = GenericDetector._row_values(r)
+                if cols:
+                    out.append(dict(zip(cols, vals)))
+                else:
+                    out.append({f"col_{i}": v for i, v in enumerate(vals)})
+        return out
+
+    @staticmethod
+    def _mysql_major_version(cur: Any) -> int:
+        """查询 MySQL/MariaDB/TDSQL 主版本号，未识别时返回 0。"""
+        cur.execute("SELECT VERSION()")
+        ver_str = str(GenericDetector._scalar(cur, "") or "").strip()
+        if not ver_str:
+            return 0
+        head = ver_str.split(".", 1)[0]
+        digits = "".join(ch for ch in head if ch.isdigit())
+        return int(digits) if digits else 0
+
+    @staticmethod
+    def _extract_capacity_point(msg_raw: str, db_type: str) -> Optional[Dict[str, float]]:
+        """从 MonitorLog.message JSON 中提取总已用容量(MB)与表空间峰值使用率(%)。"""
+        try:
+            msg = json.loads(msg_raw) if isinstance(msg_raw, str) else msg_raw
+        except Exception:
+            return None
+        if not isinstance(msg, dict):
+            return None
+
+        db_sizes = msg.get("database_sizes")
+        tablespaces = msg.get("tablespaces")
+        used_mb: Optional[float] = None
+        total_mb: Optional[float] = None
+        max_ts_pct: Optional[float] = None
+
+        if isinstance(tablespaces, list) and tablespaces:
+            ts_pcts = [
+                float(t["used_pct"])
+                for t in tablespaces
+                if isinstance(t, dict) and t.get("used_pct") is not None
+            ]
+            if ts_pcts:
+                max_ts_pct = max(ts_pcts)
+            if db_type in ("dm", "oracle") or not (isinstance(db_sizes, list) and db_sizes):
+                ts_used = [
+                    float(t["used_mb"])
+                    for t in tablespaces
+                    if isinstance(t, dict) and t.get("used_mb") is not None
+                ]
+                ts_tot = [
+                    float(t["total_mb"])
+                    for t in tablespaces
+                    if isinstance(t, dict) and t.get("total_mb") is not None
+                ]
+                if ts_used:
+                    used_mb = sum(ts_used)
+                if ts_tot:
+                    total_mb = sum(ts_tot)
+
+        if isinstance(db_sizes, list) and db_sizes and (used_mb is None or db_type not in ("dm", "oracle")):
+            sz = [
+                float(d["size_mb"])
+                for d in db_sizes
+                if isinstance(d, dict) and d.get("size_mb") is not None
+            ]
+            if sz:
+                used_mb = sum(sz)
+
+        if used_mb is None:
+            return None
+        point: Dict[str, float] = {"used_mb": round(used_mb, 2)}
+        if total_mb is not None and total_mb > 0:
+            point["total_mb"] = round(total_mb, 2)
+        if max_ts_pct is not None:
+            point["max_ts_pct"] = round(max_ts_pct, 2)
+        return point
+
+    @staticmethod
+    def _evaluate_capacity_prediction(
+        ctx: DetectionContext,
+        *,
+        item_id: str,
+        item_title: str,
+        method_name: str,
+        lookback_days: int,
+        min_samples: int,
+        horizon_days: int,
+    ) -> DetectionResult:
+        """基于 status='UP' 的历史 MonitorLog 计算容量线性增长斜率与未来预测。"""
+        result = DetectionResult(
+            item_id=item_id,
+            item_title=item_title,
+            detection_method=method_name,
+        )
+        cfg = ctx.db_config
+        cfg_pk = getattr(cfg, "pk", None) if cfg is not None else None
+        if not cfg_pk:
+            result.status = "skip"
+            result.summary = "未关联已纳管 DatabaseConfig 实例（如平台元数据库），跳过历史容量预测"
+            return result
+
+        try:
+            from monitor.models import MonitorLog
+
+            since = timezone.now() - timedelta(days=lookback_days)
+            base_qs = MonitorLog.objects.filter(config_id=cfg_pk, create_time__gte=since)
+            up_qs = base_qs.filter(status="UP").order_by("create_time")
+            total_all = base_qs.count()
+            up_count = up_qs.count()
+            non_up_count = max(0, total_all - up_count)
+
+            result.metrics["samples_count"] = up_count
+            result.metrics["total_samples_in_window"] = total_all
+            result.metrics["non_up_samples_excluded"] = non_up_count
+            result.metrics["lookback_days"] = lookback_days
+            result.metrics["horizon_days"] = horizon_days
+
+            if up_count < min_samples:
+                result.status = "skip"
+                result.summary = (
+                    f"有效 UP 时序采样仅 {up_count} 点（不足 {min_samples} 点，"
+                    f"已过滤非 UP 记录 {non_up_count} 条），暂无法预测 {horizon_days} 天容量"
+                )
+                return result
+
+            id_times = list(up_qs.values_list("id", "create_time"))
+            n = len(id_times)
+            if n <= 25:
+                picked_ids = [row_id for row_id, _ in id_times]
+            else:
+                step = (n - 1) / 24.0
+                indices = sorted({int(round(i * step)) for i in range(25)} | {0, n - 1})
+                picked_ids = [id_times[idx][0] for idx in indices]
+
+            sampled_rows = list(
+                MonitorLog.objects.filter(id__in=picked_ids)
+                .order_by("create_time")
+                .values_list("create_time", "message")
+            )
+
+            points: List[Tuple[float, float]] = []
+            latest_meta: Dict[str, float] = {}
+            t0 = sampled_rows[0][0]
+            for ts, msg_raw in sampled_rows:
+                pt = GenericDetector._extract_capacity_point(msg_raw, ctx.db_type)
+                if pt is not None:
+                    day_x = (ts - t0).total_seconds() / 86400.0
+                    points.append((day_x, pt["used_mb"]))
+                    latest_meta = pt
+
+            if len(points) < 2:
+                result.status = "skip"
+                result.summary = f"UP 采样 {up_count} 点中缺少有效容量指标字段，暂无法计算 {horizon_days} 天趋势"
+                return result
+
+            span_days = points[-1][0] - points[0][0]
+            current_mb = points[-1][1]
+            result.metrics["analyzed_points"] = len(points)
+            result.metrics["span_days"] = round(span_days, 2)
+            result.metrics["current_used_mb"] = current_mb
+            if "total_mb" in latest_meta:
+                result.metrics["current_total_mb"] = latest_meta["total_mb"]
+            if "max_ts_pct" in latest_meta:
+                result.metrics["max_tablespace_used_pct"] = latest_meta["max_ts_pct"]
+
+            if span_days < 0.01:
+                result.status = "skip"
+                result.summary = (
+                    f"有效 UP 采样 {up_count} 点时间跨度仅 {round(span_days * 24, 2)} 小时，"
+                    f"不足以进行 {horizon_days} 天线性外推"
+                )
+                return result
+
+            x_mean = sum(p[0] for p in points) / len(points)
+            y_mean = sum(p[1] for p in points) / len(points)
+            denom = sum((p[0] - x_mean) ** 2 for p in points)
+            slope_mb_per_day = (
+                sum((p[0] - x_mean) * (p[1] - y_mean) for p in points) / denom
+                if denom > 0
+                else 0.0
+            )
+            predicted_mb = round(max(0.0, current_mb + slope_mb_per_day * horizon_days), 2)
+            delta_mb = round(predicted_mb - current_mb, 2)
+            growth_pct = round((delta_mb / current_mb) * 100.0, 2) if current_mb > 0 else 0.0
+
+            result.metrics["daily_growth_mb"] = round(slope_mb_per_day, 2)
+            result.metrics["predicted_used_mb"] = predicted_mb
+            result.metrics["predicted_growth_mb"] = delta_mb
+            result.metrics["predicted_growth_pct"] = growth_pct
+
+            predicted_ts_pct = None
+            if latest_meta.get("total_mb"):
+                predicted_ts_pct = round(predicted_mb / latest_meta["total_mb"] * 100.0, 1)
+                result.metrics["predicted_total_used_pct"] = predicted_ts_pct
+
+            is_critical = predicted_ts_pct is not None and predicted_ts_pct >= 95.0
+            is_warning = (
+                (predicted_ts_pct is not None and predicted_ts_pct >= 85.0)
+                or (growth_pct >= 50.0 and delta_mb >= 512.0)
+            )
+            if is_critical:
+                result.status = "critical"
+                result.severity = "critical"
+                result.findings.append({
+                    "type": "capacity_forecast_critical",
+                    "current_used_mb": current_mb,
+                    "predicted_used_mb": predicted_mb,
+                    "daily_growth_mb": round(slope_mb_per_day, 2),
+                    "predicted_growth_pct": growth_pct,
+                    "message": f"按近 {round(span_days, 1)} 天趋势预计 {horizon_days} 天后总表空间使用率将达 {predicted_ts_pct}%",
+                })
+            elif is_warning:
+                result.status = "warning"
+                result.severity = "warning"
+                result.findings.append({
+                    "type": "capacity_forecast_warning",
+                    "current_used_mb": current_mb,
+                    "predicted_used_mb": predicted_mb,
+                    "daily_growth_mb": round(slope_mb_per_day, 2),
+                    "predicted_growth_pct": growth_pct,
+                    "message": (
+                        f"容量增长较快：当前 {current_mb} MB，日均 {slope_mb_per_day:+.2f} MB/天，"
+                        f"预计 {horizon_days} 天后达 {predicted_mb} MB ({growth_pct:+.1f}%)"
+                    ),
+                })
+
+            result.summary = (
+                f"{horizon_days}天容量预测(UP采样 {up_count} 点): 当前 {current_mb} MB，"
+                f"日均 {slope_mb_per_day:+.2f} MB/天，预计{horizon_days}天后 {predicted_mb} MB ({growth_pct:+.1f}%)"
+            )
+        except Exception as e:
+            GenericDetector._degrade_note(f"inspection.{method_name}", str(e), exc=e)
+            result.status = "error"
+            result.error = str(e)
+        return result
+
+
 # =========================================================================
     # DB-022 010B 补实现上半 23 项新检测器
     # =========================================================================
@@ -1352,13 +1667,33 @@ class GenericDetector:
                 cur = conn.cursor()
                 if ctx.db_type in ("oracle", "dm"):
                     cur.execute("SELECT username, account_status FROM dba_users WHERE account_status LIKE '%LOCKED%'")
-                    rows = [{"username": r[0], "status": r[1]} for r in cur.fetchall()]
-                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
-                    try:
-                        cur.execute("SELECT user, host, account_locked FROM mysql.user WHERE account_locked = 'Y'")
-                        rows = [{"user": r[0], "host": r[1], "status": "LOCKED"} for r in cur.fetchall()]
-                    except Exception:
-                        rows = []
+                    rows = [
+                        {
+                            "username": GenericDetector._row_col(r, 0, "username", "USERNAME"),
+                            "status": GenericDetector._row_col(r, 1, "account_status", "ACCOUNT_STATUS"),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
+                elif ctx.db_type in ("mysql", "tdsql"):
+                    cur.execute("SELECT user, host, account_locked FROM mysql.user WHERE account_locked = 'Y'")
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "user", "User"),
+                            "host": GenericDetector._row_col(r, 1, "host", "Host"),
+                            "status": "LOCKED",
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
+                elif ctx.db_type == "gbase":
+                    cur.execute("SELECT TRIM(User) AS user, TRIM(Host) AS host, locked AS status FROM gbase.user_check WHERE locked = 'Y'")
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "user", "User"),
+                            "host": GenericDetector._row_col(r, 1, "host", "Host"),
+                            "status": str(GenericDetector._row_col(r, 2, "status", "locked") or "LOCKED").strip(),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
                 else:
                     result.status = "skip"
                     result.summary = f"不适用当前方言: {ctx.db_type}"
@@ -1383,6 +1718,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_locked_users", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1402,21 +1738,62 @@ class GenericDetector:
             conn = ctx.db_connector.connect()
             try:
                 cur = conn.cursor()
-                if ctx.db_type == "oracle":
+                if ctx.db_type in ("oracle", "dm"):
                     cur.execute("SELECT username, expiry_date FROM dba_users WHERE expiry_date IS NOT NULL AND expiry_date BETWEEN SYSDATE AND SYSDATE + 7")
-                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
-                elif ctx.db_type == "dm":
-                    cur.execute("SELECT username, exp_datetime FROM dba_users WHERE exp_datetime IS NOT NULL AND exp_datetime BETWEEN SYSDATE AND SYSDATE + 7")
-                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "username", "USERNAME"),
+                            "expiry": str(GenericDetector._row_col(r, 1, "expiry_date", "EXPIRY_DATE")),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
                 elif ctx.db_type == "pgsql":
                     cur.execute("SELECT rolname, rolvaliduntil FROM pg_roles WHERE rolvaliduntil IS NOT NULL AND rolvaliduntil BETWEEN NOW() AND NOW() + INTERVAL '7 days'")
-                    rows = [{"user": r[0], "expiry": str(r[1])} for r in cur.fetchall()]
-                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
-                    try:
-                        cur.execute("SELECT user, host, password_last_changed, password_lifetime FROM mysql.user WHERE password_lifetime IS NOT NULL AND password_lifetime > 0")
-                        rows = [{"user": r[0], "host": r[1]} for r in cur.fetchall()]
-                    except Exception:
-                        rows = []
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "rolname"),
+                            "expiry": str(GenericDetector._row_col(r, 1, "rolvaliduntil")),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
+                elif ctx.db_type in ("mysql", "tdsql"):
+                    cur.execute("""
+                        SELECT user, host, password_expired,
+                               DATE_ADD(password_last_changed, INTERVAL COALESCE(NULLIF(password_lifetime, 0), @@default_password_lifetime) DAY) AS expiry_date
+                        FROM mysql.user
+                        WHERE password_expired = 'Y'
+                           OR (COALESCE(password_lifetime, @@default_password_lifetime) > 0
+                               AND password_last_changed IS NOT NULL
+                               AND DATE_ADD(password_last_changed, INTERVAL COALESCE(NULLIF(password_lifetime, 0), @@default_password_lifetime) DAY) <= DATE_ADD(NOW(), INTERVAL 7 DAY))
+                    """)
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "user", "User"),
+                            "host": GenericDetector._row_col(r, 1, "host", "Host"),
+                            "password_expired": GenericDetector._row_col(r, 2, "password_expired"),
+                            "expiry": str(GenericDetector._row_col(r, 3, "expiry_date") or ""),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
+                elif ctx.db_type == "gbase":
+                    cur.execute("""
+                        SELECT TRIM(User) AS user, TRIM(Host) AS host, password_expired,
+                               DATE_ADD(password_last_changed, INTERVAL COALESCE(NULLIF(password_life_time, 0), @@password_life_time) DAY) AS expiry_date
+                        FROM gbase.user_check
+                        WHERE password_expired = 'Y'
+                           OR (COALESCE(NULLIF(password_life_time, 0), @@password_life_time) > 0
+                               AND password_last_changed IS NOT NULL
+                               AND DATE_ADD(password_last_changed, INTERVAL COALESCE(NULLIF(password_life_time, 0), @@password_life_time) DAY) <= DATE_ADD(NOW(), INTERVAL 7 DAY))
+                    """)
+                    rows = [
+                        {
+                            "user": GenericDetector._row_col(r, 0, "user", "User"),
+                            "host": GenericDetector._row_col(r, 1, "host", "Host"),
+                            "password_expired": GenericDetector._row_col(r, 2, "password_expired"),
+                            "expiry": str(GenericDetector._row_col(r, 3, "expiry_date") or ""),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
                 else:
                     result.status = "skip"
                     result.summary = f"不适用当前方言: {ctx.db_type}"
@@ -1441,6 +1818,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_expiring_passwords", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1448,57 +1826,28 @@ class GenericDetector:
     @staticmethod
     def detect_7d_capacity(ctx: DetectionContext) -> DetectionResult:
         """检测 7 天容量预测 (INS-COM-CAP-7D)"""
-        result = DetectionResult(
+        return GenericDetector._evaluate_capacity_prediction(
+            ctx,
             item_id=ctx.item.get("item_id", "INS-COM-CAP-7D"),
             item_title=ctx.item.get("title", "7天容量预测"),
-            detection_method="detect_7d_capacity"
+            method_name="detect_7d_capacity",
+            lookback_days=7,
+            min_samples=3,
+            horizon_days=7,
         )
-        try:
-            from monitor.models import MonitorLog
-            since = timezone.now() - timedelta(days=7)
-            logs = MonitorLog.objects.filter(
-                config=ctx.db_config,
-                create_time__gte=since
-            ).order_by('create_time')
-            if logs.count() < 3:
-                result.status = "skip"
-                result.summary = "历史时序采样不足 7 天，暂无法预测"
-                return result
-
-            # 提取磁盘/表空间或监控负载趋势
-            result.metrics["samples_count"] = logs.count()
-            result.summary = f"7天容量采样 {logs.count()} 点，容量增长趋势平稳"
-        except Exception as e:
-            result.status = "error"
-            result.error = str(e)
-        return result
 
     @staticmethod
     def detect_30d_capacity(ctx: DetectionContext) -> DetectionResult:
         """检测 30 天容量预测 (INS-COM-CAP-30D)"""
-        result = DetectionResult(
+        return GenericDetector._evaluate_capacity_prediction(
+            ctx,
             item_id=ctx.item.get("item_id", "INS-COM-CAP-30D"),
             item_title=ctx.item.get("title", "30天容量预测"),
-            detection_method="detect_30d_capacity"
+            method_name="detect_30d_capacity",
+            lookback_days=14,
+            min_samples=5,
+            horizon_days=30,
         )
-        try:
-            from monitor.models import MonitorLog
-            since = timezone.now() - timedelta(days=14)
-            logs = MonitorLog.objects.filter(
-                config=ctx.db_config,
-                create_time__gte=since
-            ).order_by('create_time')
-            if logs.count() < 5:
-                result.status = "skip"
-                result.summary = "历史时序采样不足 14 天，暂无法预测 30 天容量"
-                return result
-
-            result.metrics["samples_count"] = logs.count()
-            result.summary = f"30天容量采样 {logs.count()} 点，长期容量水位健康"
-        except Exception as e:
-            result.status = "error"
-            result.error = str(e)
-        return result
 
     @staticmethod
     def detect_deadlock_count(ctx: DetectionContext) -> DetectionResult:
@@ -1508,6 +1857,10 @@ class GenericDetector:
             item_title=ctx.item.get("title", "24h 死锁次数"),
             detection_method="detect_deadlock_count"
         )
+        if ctx.db_type == "gbase":
+            result.status = "skip"
+            result.summary = "不适用当前方言: gbase 使用 EXPRESS 引擎，无 InnoDB 死锁统计 (能力边界 skip)"
+            return result
         try:
             from monitor.db_connector import get_connector
             if not ctx.db_connector:
@@ -1517,28 +1870,28 @@ class GenericDetector:
                 cur = conn.cursor()
                 deadlock_cnt = 0
                 if ctx.db_type == "pgsql":
-                    cur.execute("SELECT COALESCE(SUM(deadlocks), 0) FROM pg_stat_database")
-                    deadlock_cnt = int(cur.fetchone()[0] or 0)
-                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
-                    try:
-                        cur.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
-                        row = cur.fetchone()
-                        deadlock_cnt = int(row[1]) if row else 0
-                    except Exception:
-                        deadlock_cnt = 0
+                    cur.execute("SELECT COALESCE(SUM(deadlocks), 0) AS deadlock_cnt FROM pg_stat_database")
+                    deadlock_cnt = int(GenericDetector._scalar(cur, 0, 0, "deadlock_cnt") or 0)
+                elif ctx.db_type in ("mysql", "tdsql"):
+                    cur.execute("SHOW GLOBAL STATUS LIKE 'Innodb_deadlocks'")
+                    val = GenericDetector._show_var_value(cur)
+                    if val is not None:
+                        deadlock_cnt = int(val)
+                    else:
+                        cur.execute("SELECT COUNT FROM information_schema.INNODB_METRICS WHERE NAME = 'lock_deadlocks'")
+                        metric_val = GenericDetector._scalar(cur, None, 0, "COUNT", "count")
+                        if metric_val is None:
+                            raise RuntimeError("未获取到 Innodb_deadlocks 或 INNODB_METRICS.lock_deadlocks 指标")
+                        deadlock_cnt = int(metric_val)
                 elif ctx.db_type == "oracle":
-                    try:
-                        cur.execute("SELECT value FROM v$sysstat WHERE name = 'deadlocks'")
-                        row = cur.fetchone()
-                        deadlock_cnt = int(row[0]) if row and row[0] is not None else 0
-                    except Exception:
-                        deadlock_cnt = 0
+                    cur.execute("SELECT value FROM v$sysstat WHERE name = 'deadlocks'")
+                    val = GenericDetector._scalar(cur, None, 0, "value", "VALUE")
+                    if val is None:
+                        raise RuntimeError("v$sysstat 未返回 deadlocks 指标")
+                    deadlock_cnt = int(val)
                 elif ctx.db_type == "dm":
-                    try:
-                        cur.execute("SELECT COUNT(*) FROM V$DEADLOCK_HISTORY")
-                        deadlock_cnt = int(cur.fetchone()[0] or 0)
-                    except Exception:
-                        deadlock_cnt = 0
+                    cur.execute("SELECT COUNT(*) AS deadlock_cnt FROM V$DEADLOCK_HISTORY")
+                    deadlock_cnt = int(GenericDetector._scalar(cur, 0, 0, "deadlock_cnt") or 0)
                 else:
                     result.status = "skip"
                     result.summary = f"不适用当前方言: {ctx.db_type}"
@@ -1561,6 +1914,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_deadlock_count", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1592,41 +1946,40 @@ class GenericDetector:
                         WHERE seq_scan > 1000 AND (idx_scan IS NULL OR idx_scan = 0 OR seq_scan > idx_scan * 5)
                         ORDER BY seq_scan DESC LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "mysql":
-                    try:
-                        cur.execute("""
-                            SELECT object_schema, object_name, count_read, count_write
-                            FROM performance_schema.table_io_waits_summary_by_table
-                            WHERE count_star > 1000 AND count_read > count_write * 10
-                              AND object_schema NOT IN ('mysql', 'sys', 'performance_schema', 'information_schema')
-                            LIMIT 10
-                        """)
-                        cols = [c[0].lower() for c in cur.description]
-                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                    except Exception:
-                        rows = []
-                elif ctx.db_type == "oracle":
                     cur.execute("""
-                        SELECT owner, table_name, num_rows
-                        FROM dba_tables
-                        WHERE owner NOT IN ('SYS','SYSTEM') AND num_rows > 10000
-                          AND table_name NOT IN (SELECT DISTINCT table_name FROM dba_indexes WHERE owner NOT IN ('SYS','SYSTEM'))
-                        FETCH FIRST 10 ROWS ONLY
-                    """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                elif ctx.db_type == "dm":
-                    cur.execute("""
-                        SELECT owner, table_name, num_rows
-                        FROM all_tables
-                        WHERE owner NOT IN ('SYS','SYSTEM','SYSSSO') AND num_rows > 10000
-                          AND table_name NOT IN (SELECT DISTINCT table_name FROM all_indexes)
+                        SELECT object_schema, object_name, count_read, count_write
+                        FROM performance_schema.table_io_waits_summary_by_table
+                        WHERE count_star > 1000 AND count_read > count_write * 10
+                          AND object_schema NOT IN ('mysql', 'sys', 'performance_schema', 'information_schema')
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type == "oracle":
+                    cur.execute("""
+                        SELECT t.owner, t.table_name, t.num_rows
+                        FROM dba_tables t
+                        WHERE t.owner NOT IN ('SYS','SYSTEM') AND t.num_rows > 10000
+                          AND NOT EXISTS (
+                              SELECT 1 FROM dba_indexes i
+                              WHERE i.owner = t.owner AND i.table_name = t.table_name
+                          )
+                        FETCH FIRST 10 ROWS ONLY
+                    """)
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT t.owner, t.table_name, t.num_rows
+                        FROM all_tables t
+                        WHERE t.owner NOT IN ('SYS','SYSTEM','SYSSSO','SYSDBA','CTISYS','SYSJOB') AND t.num_rows > 10000
+                          AND NOT EXISTS (
+                              SELECT 1 FROM all_indexes i
+                              WHERE i.owner = t.owner AND i.table_name = t.table_name
+                          )
+                        LIMIT 10
+                    """)
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
 
                 result.metrics["missing_index_candidates"] = rows
                 cnt = len(rows)
@@ -1647,6 +2000,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_missing_indexes", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1684,8 +2038,7 @@ class GenericDetector:
                           AND table_name NOT IN (SELECT DISTINCT table_name FROM information_schema.partitions WHERE partition_name IS NOT NULL)
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "oracle":
                     cur.execute("""
                         SELECT owner, segment_name, ROUND(SUM(bytes)/1024/1024/1024, 2) AS size_gb
@@ -1696,19 +2049,22 @@ class GenericDetector:
                           AND segment_name NOT IN (SELECT table_name FROM dba_part_tables)
                         FETCH FIRST 10 ROWS ONLY
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "dm":
                     cur.execute("""
-                        SELECT table_name, ROUND(SUM(bytes)/1024/1024/1024, 2) AS size_gb
-                        FROM dba_segments
-                        WHERE segment_type = 'TABLE'
-                        GROUP BY table_name
-                        HAVING SUM(bytes) > 10 * 1024 * 1024 * 1024
+                        SELECT s.owner, s.segment_name, ROUND(SUM(s.bytes)/1024/1024/1024, 2) AS size_gb
+                        FROM dba_segments s
+                        WHERE s.segment_type = 'TABLE'
+                          AND s.owner NOT IN ('SYS','SYSTEM','SYSSSO','SYSDBA')
+                          AND NOT EXISTS (
+                              SELECT 1 FROM dba_part_tables p
+                              WHERE p.owner = s.owner AND p.table_name = s.segment_name
+                          )
+                        GROUP BY s.owner, s.segment_name
+                        HAVING SUM(s.bytes) > 10737418240
                         FETCH FIRST 10 ROWS ONLY
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "pgsql":
                     cur.execute("""
                         SELECT schemaname||'.'||relname AS tblname, ROUND(pg_total_relation_size(relid)/1024/1024/1024, 2) AS size_gb
@@ -1717,8 +2073,7 @@ class GenericDetector:
                           AND relid NOT IN (SELECT inhrelid FROM pg_inherits UNION SELECT partrelid FROM pg_partitioned_table)
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
 
                 result.metrics["unpartitioned_large_tables"] = rows
                 cnt = len(rows)
@@ -1739,6 +2094,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_large_table_not_partitioned", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1772,8 +2128,7 @@ class GenericDetector:
                           AND distinct_keys > 0 AND distinct_keys/NULLIF(num_rows,0) < 0.05
                         FETCH FIRST 10 ROWS ONLY
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "dm":
                     cur.execute("""
                         SELECT owner, index_name, table_name, distinct_keys, num_rows,
@@ -1783,8 +2138,7 @@ class GenericDetector:
                           AND distinct_keys > 0 AND distinct_keys/NULLIF(num_rows,0) < 0.05
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "mysql":
                     cur.execute("""
                         SELECT s.table_schema, s.table_name, s.index_name, MAX(s.cardinality) AS cardinality, t.table_rows
@@ -1796,8 +2150,7 @@ class GenericDetector:
                         HAVING cardinality > 0 AND cardinality/NULLIF(table_rows,0) < 0.05
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "pgsql":
                     cur.execute("""
                         SELECT schemaname||'.'||tablename AS tbl, attname, n_distinct
@@ -1806,8 +2159,7 @@ class GenericDetector:
                           AND schemaname NOT IN ('pg_catalog', 'information_schema')
                         LIMIT 10
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
 
                 result.metrics["sparse_indexes"] = rows
                 cnt = len(rows)
@@ -1828,6 +2180,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_sparse_index", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1854,24 +2207,32 @@ class GenericDetector:
                 deviations = []
                 if ctx.db_type in ("mysql", "gbase"):
                     cur.execute("SHOW VARIABLES LIKE 'max_connections'")
-                    row = cur.fetchone()
-                    if row and int(row[1]) < 100:
-                        deviations.append({"param": "max_connections", "val": row[1], "rec": ">=100"})
+                    val = GenericDetector._show_var_value(cur)
+                    if val is None:
+                        raise RuntimeError("SHOW VARIABLES LIKE 'max_connections' 未返回结果")
+                    if int(val) < 100:
+                        deviations.append({"param": "max_connections", "val": val, "rec": ">=100"})
                 elif ctx.db_type == "oracle":
                     cur.execute("SELECT name, value FROM v$parameter WHERE name IN ('open_cursors', 'processes')")
-                    for p_name, p_val in cur.fetchall():
-                        if p_name == 'open_cursors' and int(p_val) < 300:
+                    for r in (cur.fetchall() or []):
+                        p_name = str(GenericDetector._row_col(r, 0, "name", "NAME") or "").lower()
+                        p_val = GenericDetector._row_col(r, 1, "value", "VALUE")
+                        if p_name == 'open_cursors' and p_val is not None and int(p_val) < 300:
                             deviations.append({"param": "open_cursors", "val": p_val, "rec": ">=300"})
-                        elif p_name == 'processes' and int(p_val) < 150:
+                        elif p_name == 'processes' and p_val is not None and int(p_val) < 150:
                             deviations.append({"param": "processes", "val": p_val, "rec": ">=150"})
                 elif ctx.db_type == "dm":
-                    cur.execute("SELECT PARA_NAME, PARA_VALUE FROM V$PARAMETER WHERE PARA_NAME IN ('MAX_SESSIONS', 'BUFFER')")
-                    for p_name, p_val in cur.fetchall():
-                        if p_name == 'MAX_SESSIONS' and int(p_val) < 100:
+                    cur.execute("SELECT NAME, VALUE FROM V$PARAMETER WHERE NAME IN ('MAX_SESSIONS', 'BUFFER')")
+                    for r in (cur.fetchall() or []):
+                        p_name = str(GenericDetector._row_col(r, 0, "NAME", "name") or "").upper()
+                        p_val = GenericDetector._row_col(r, 1, "VALUE", "value")
+                        if p_name == 'MAX_SESSIONS' and p_val is not None and int(p_val) < 100:
                             deviations.append({"param": "MAX_SESSIONS", "val": p_val, "rec": ">=100"})
                 elif ctx.db_type == "pgsql":
                     cur.execute("SHOW max_connections")
-                    val = cur.fetchone()[0]
+                    val = GenericDetector._show_var_value(cur)
+                    if val is None:
+                        raise RuntimeError("SHOW max_connections 未返回结果")
                     if int(val) < 100:
                         deviations.append({"param": "max_connections", "val": val, "rec": ">=100"})
 
@@ -1894,6 +2255,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_param_deviation", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1919,17 +2281,55 @@ class GenericDetector:
                 cur = conn.cursor()
                 gaps = []
                 if ctx.db_type == "oracle":
-                    try:
-                        cur.execute("SELECT thread#, low_sequence#, high_sequence# FROM v$archive_gap")
-                        gaps = [{"thread": r[0], "low": r[1], "high": r[2]} for r in cur.fetchall()]
-                    except Exception:
-                        gaps = []
+                    cur.execute("SELECT thread#, low_sequence#, high_sequence# FROM v$archive_gap")
+                    gaps = [
+                        {
+                            "thread": GenericDetector._row_col(r, 0, "thread#"),
+                            "low": GenericDetector._row_col(r, 1, "low_sequence#"),
+                            "high": GenericDetector._row_col(r, 2, "high_sequence#"),
+                        }
+                        for r in (cur.fetchall() or [])
+                    ]
                 elif ctx.db_type == "dm":
-                    try:
-                        cur.execute("SELECT THREAD_ID, LOW_SEQ, HIGH_SEQ FROM V$ARCHIVE_GAP")
-                        gaps = [{"thread": r[0], "low": r[1], "high": r[2]} for r in cur.fetchall()]
-                    except Exception:
-                        gaps = []
+                    cur.execute("SELECT ARCH_MODE FROM V$DATABASE")
+                    arch_mode = str(GenericDetector._scalar(cur, "", 0, "ARCH_MODE", "arch_mode") or "").strip().upper()
+                    if not arch_mode:
+                        raise RuntimeError("V$DATABASE 未返回 ARCH_MODE")
+                    result.metrics["arch_mode"] = arch_mode
+                    if arch_mode != "Y":
+                        result.status = "skip"
+                        result.summary = f"实例未开启归档模式 (ARCH_MODE={arch_mode})，不适用归档间隙检查"
+                        return result
+
+                    cur.execute("SELECT ARCH_TYPE, ARCH_DEST, ARCH_STATUS, ARCH_SRC FROM V$ARCH_STATUS")
+                    status_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    for sr in status_rows:
+                        st = str(sr.get("arch_status") or "").strip().upper()
+                        if st not in ("VALID", "ACTIVE", "OK", "OPEN"):
+                            gaps.append({
+                                "type": "arch_dest_unhealthy",
+                                "arch_type": sr.get("arch_type"),
+                                "dest": sr.get("arch_dest"),
+                                "status": sr.get("arch_status"),
+                            })
+
+                    cur.execute("SELECT DB_MAGIC, ARCH_SEQ, NEXT_SEQ, STATUS FROM V$ARCH_FILE ORDER BY DB_MAGIC, ARCH_SEQ")
+                    file_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    last_by_magic: Dict[Any, int] = {}
+                    for fr in file_rows:
+                        magic = fr.get("db_magic")
+                        curr_seq = fr.get("arch_seq")
+                        next_seq = fr.get("next_seq")
+                        prev_next = last_by_magic.get(magic)
+                        if prev_next is not None and curr_seq is not None and int(curr_seq) > int(prev_next) + 1:
+                            gaps.append({
+                                "type": "arch_seq_gap",
+                                "db_magic": magic,
+                                "low": int(prev_next),
+                                "high": int(curr_seq),
+                            })
+                        if next_seq is not None:
+                            last_by_magic[magic] = int(next_seq)
 
                 result.metrics["archive_gaps"] = gaps
                 cnt = len(gaps)
@@ -1950,6 +2350,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_archive_gap", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -1976,32 +2377,63 @@ class GenericDetector:
                         FROM v$session
                         WHERE wait_class = 'Application' AND event LIKE 'enq: TX%' AND seconds_in_wait > 5
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "dm":
-                    cur.execute("SELECT SESS_ID, SQL_TEXT, BLOCKED FROM V$SESSIONS WHERE BLOCKED = 1")
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
-                    try:
+                    cur.execute("""
+                        SELECT t.SESS_ID AS sess_id, s.USER_NAME AS user_name,
+                               t.ID AS transaction_id, SUBSTR(s.SQL_TEXT, 1, 200) AS sql_text,
+                               l.LMODE AS lmode, l.BLOCKED AS blocked
+                        FROM V$LOCK l
+                        LEFT JOIN V$TRX t ON l.TRX_ID = t.ID
+                        LEFT JOIN V$SESSIONS s ON t.SESS_ID = s.SESS_ID
+                        WHERE l.BLOCKED = 1
+                    """)
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type in ("mysql", "tdsql"):
+                    ver = GenericDetector._mysql_major_version(cur)
+                    if ver >= 8:
                         cur.execute("""
-                            SELECT r.trx_id waiting_trx_id, r.trx_mysql_thread_id waiting_thread, b.trx_id blocking_trx_id
+                            SELECT r.trx_id AS waiting_trx_id, r.trx_mysql_thread_id AS waiting_thread,
+                                   b.trx_id AS blocking_trx_id, b.trx_mysql_thread_id AS blocking_thread
+                            FROM performance_schema.data_lock_waits w
+                            JOIN information_schema.innodb_trx b ON b.trx_id = w.BLOCKING_ENGINE_TRANSACTION_ID
+                            JOIN information_schema.innodb_trx r ON r.trx_id = w.REQUESTING_ENGINE_TRANSACTION_ID
+                        """)
+                    else:
+                        cur.execute("""
+                            SELECT r.trx_id AS waiting_trx_id, r.trx_mysql_thread_id AS waiting_thread,
+                                   b.trx_id AS blocking_trx_id, b.trx_mysql_thread_id AS blocking_thread
                             FROM information_schema.innodb_lock_waits w
                             JOIN information_schema.innodb_trx b ON b.trx_id = w.blocking_trx_id
                             JOIN information_schema.innodb_trx r ON r.trx_id = w.requesting_trx_id
                         """)
-                        cols = [c[0].lower() for c in cur.description]
-                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                    except Exception:
-                        rows = []
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type == "gbase":
+                    cur.execute("""
+                        SELECT 'processlist' AS source, ID AS pid, USER AS user, HOST AS host, DB AS db,
+                               TIME AS wait_sec, STATE AS state, LEFT(INFO, 120) AS sql_text
+                        FROM information_schema.PROCESSLIST
+                        WHERE LOWER(COALESCE(STATE, '')) LIKE '%lock%'
+                           OR LOWER(COALESCE(STATE, '')) LIKE '%waiting for%'
+                    """)
+                    proc_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    cur.execute("""
+                        SELECT 'table_locks' AS source, DB AS db, TableName AS table_name,
+                               ReadLocks AS read_locks, WriteLocks AS write_locks,
+                               ReceiveWriteLocks AS receive_write_locks, ExcusiveLocks AS exclusive_locks,
+                               ExcusiveWriteLocks AS exclusive_write_locks
+                        FROM information_schema.TABLE_LOCKS
+                        WHERE ReceiveWriteLocks > 0 OR ExcusiveWriteLocks > 0
+                    """)
+                    tbl_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    rows = proc_rows + tbl_rows
                 elif ctx.db_type == "pgsql":
                     cur.execute("""
                         SELECT pid, wait_event_type, wait_event, state
                         FROM pg_stat_activity
                         WHERE wait_event_type = 'Lock' AND state = 'active'
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 else:
                     result.status = "skip"
                     result.summary = f"不适用当前方言: {ctx.db_type}"
@@ -2026,6 +2458,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_lock_waits", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -2052,35 +2485,42 @@ class GenericDetector:
                         FROM v$session
                         WHERE blocking_session IS NOT NULL AND seconds_in_wait >= 300
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "dm":
                     cur.execute("""
-                        SELECT SESS_ID, BLOCKER_SESS_ID, WAIT_TIME
-                        FROM V$SESSIONS
-                        WHERE BLOCKER_SESS_ID IS NOT NULL AND WAIT_TIME >= 300
+                        SELECT w.ID AS waiting_trx_id, tr.SESS_ID AS sess_id, s.USER_NAME AS user_name,
+                               w.WAIT_FOR_ID AS blocking_trx_id, tb.SESS_ID AS blocker_sess_id,
+                               ROUND(w.WAIT_TIME / 1000.0, 1) AS wait_sec
+                        FROM V$TRXWAIT w
+                        LEFT JOIN V$TRX tr ON tr.ID = w.ID
+                        LEFT JOIN V$TRX tb ON tb.ID = w.WAIT_FOR_ID
+                        LEFT JOIN V$SESSIONS s ON s.SESS_ID = tr.SESS_ID
+                        WHERE w.WAIT_TIME >= 300000
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                elif ctx.db_type in ("mysql", "tdsql", "gbase"):
-                    try:
-                        cur.execute("""
-                            SELECT r.trx_mysql_thread_id, TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS wait_sec
-                            FROM information_schema.innodb_trx r
-                            WHERE r.trx_wait_started IS NOT NULL AND TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) >= 300
-                        """)
-                        cols = [c[0].lower() for c in cur.description]
-                        rows = [dict(zip(cols, r)) for r in cur.fetchall()]
-                    except Exception:
-                        rows = []
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type in ("mysql", "tdsql"):
+                    cur.execute("""
+                        SELECT r.trx_mysql_thread_id, TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) AS wait_sec
+                        FROM information_schema.innodb_trx r
+                        WHERE r.trx_wait_started IS NOT NULL AND TIMESTAMPDIFF(SECOND, r.trx_wait_started, NOW()) >= 300
+                    """)
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                elif ctx.db_type == "gbase":
+                    cur.execute("""
+                        SELECT ID AS pid, USER AS user, HOST AS host, DB AS db,
+                               TIME AS wait_sec, STATE AS state, LEFT(INFO, 120) AS sql_text
+                        FROM information_schema.PROCESSLIST
+                        WHERE TIME >= 300
+                          AND (LOWER(COALESCE(STATE, '')) LIKE '%lock%' OR LOWER(COALESCE(STATE, '')) LIKE '%waiting for%')
+                    """)
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 elif ctx.db_type == "pgsql":
                     cur.execute("""
                         SELECT pid, usename, EXTRACT(EPOCH FROM (now() - query_start)) AS duration_sec
                         FROM pg_stat_activity
                         WHERE wait_event_type = 'Lock' AND (now() - query_start) >= INTERVAL '5 minutes'
                     """)
-                    cols = [c[0].lower() for c in cur.description]
-                    rows = [dict(zip(cols, r)) for r in cur.fetchall()]
+                    rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
                 else:
                     result.status = "skip"
                     result.summary = f"不适用当前方言: {ctx.db_type}"
@@ -2105,6 +2545,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_blocked_sessions", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -2136,30 +2577,39 @@ class GenericDetector:
                              (SELECT value FROM v$parameter WHERE name = 'open_cursors') b
                     """)
                     row = cur.fetchone()
-                    if row:
-                        current_open = int(row[0] or 0)
-                        max_open = int(row[1] or 0)
+                    if row is None:
+                        raise RuntimeError("Oracle v$sesstat/v$parameter 未返回打开游标数据")
+                    current_open = int(GenericDetector._row_col(row, 0, "current_open") or 0)
+                    max_open = int(GenericDetector._row_col(row, 1, "max_open") or 0)
                 elif ctx.db_type == "dm":
-                    try:
-                        cur.execute("SELECT COUNT(*) FROM V$OPEN_TABLES")
-                        current_open = int(cur.fetchone()[0] or 0)
-                    except Exception:
-                        current_open = 0
-                    try:
-                        cur.execute("SELECT PARA_VALUE FROM V$PARAMETER WHERE PARA_NAME = 'MAX_OPEN_SESSIONS'")
-                        max_open = int(cur.fetchone()[0] or 0)
-                    except Exception:
-                        max_open = 1000
+                    cur.execute("SELECT COUNT(*) AS current_open FROM V$OPEN_STMT")
+                    row_stmt = cur.fetchone()
+                    if row_stmt is None:
+                        raise RuntimeError("DM V$OPEN_STMT 未返回打开语句统计")
+                    current_open = int(GenericDetector._row_col(row_stmt, 0, "current_open") or 0)
+
+                    cur.execute("SELECT COALESCE(MAX(N_USED_STMT), 0) AS max_sess_open FROM V$SESSIONS")
+                    max_sess_open = int(GenericDetector._scalar(cur, 0, 0, "max_sess_open") or 0)
+
+                    cur.execute("SELECT VALUE FROM V$PARAMETER WHERE NAME = 'MAX_SESSION_STATEMENT'")
+                    max_val = GenericDetector._scalar(cur, None, 0, "VALUE", "value")
+                    if max_val is None:
+                        raise RuntimeError("DM V$PARAMETER 未返回 MAX_SESSION_STATEMENT 参数")
+                    max_open = int(max_val)
+                    result.metrics["max_session_open"] = max_sess_open
+                    if max_open > 0:
+                        result.metrics["session_usage_pct"] = round(max_sess_open / max_open * 100.0, 1)
 
                 result.metrics["current_open"] = current_open
                 result.metrics["max_open"] = max_open
-                if current_open >= 10000:
+                session_ratio = (result.metrics.get("session_usage_pct", 0.0) / 100.0) if max_open > 0 else 0.0
+                if current_open >= 10000 or session_ratio >= 0.95:
                     result.status = "critical"
                     result.severity = "critical"
-                elif current_open >= 1000:
+                elif current_open >= 1000 or session_ratio >= 0.80:
                     result.status = "warning"
                     result.severity = "warning"
-                if current_open >= 1000:
+                if result.status in ("warning", "critical"):
                     result.findings.append({
                         "type": "high_open_cursors",
                         "current": current_open,
@@ -2170,6 +2620,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_open_cursors", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -2198,29 +2649,108 @@ class GenericDetector:
             try:
                 cur = conn.cursor()
                 pct_used = 0.0
-                if ctx.db_type in ("oracle", "dm"):
+                if ctx.db_type == "oracle":
                     cur.execute("""
-                        SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) total_mb,
-                               ROUND(SUM(user_bytes)/1024/1024, 2) used_mb
+                        SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) AS total_mb,
+                               ROUND(SUM(user_bytes)/1024/1024, 2) AS used_mb
                         FROM dba_temp_files
                         GROUP BY tablespace_name
                     """)
-                    rows = cur.fetchall()
-                    result.metrics["temp_files"] = [{"name": r[0], "total_mb": r[1], "used_mb": r[2]} for r in rows]
-                    if rows and rows[0][1]:
-                        pct_used = round(rows[0][2] / rows[0][1] * 100, 1)
+                    dict_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    temp_files = [
+                        {
+                            "name": r.get("tablespace_name"),
+                            "total_mb": float(r.get("total_mb") or 0),
+                            "used_mb": float(r.get("used_mb") or 0),
+                        }
+                        for r in dict_rows
+                    ]
+                    result.metrics["temp_files"] = temp_files
+                    total_mb_sum = sum(t["total_mb"] for t in temp_files)
+                    used_mb_sum = sum(t["used_mb"] for t in temp_files)
+                    if total_mb_sum > 0:
+                        pct_used = round(used_mb_sum / total_mb_sum * 100.0, 1)
+                elif ctx.db_type == "dm":
+                    cur.execute("""
+                        SELECT t.NAME AS tablespace_name,
+                               ROUND(t.TOTAL_SIZE * CAST(p.VALUE AS BIGINT) / 1024.0 / 1024.0, 2) AS total_mb,
+                               ROUND(t.USED_SIZE * CAST(p.VALUE AS BIGINT) / 1024.0 / 1024.0, 2) AS used_mb
+                        FROM V$TABLESPACE t
+                        CROSS JOIN (SELECT VALUE FROM V$PARAMETER WHERE NAME = 'GLOBAL_PAGE_SIZE') p
+                        WHERE t.TYPE$ = 2
+                    """)
+                    dict_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    if not dict_rows:
+                        raise RuntimeError("DM V$TABLESPACE 未返回 TYPE$=2 临时表空间")
+                    temp_files = [
+                        {
+                            "name": r.get("tablespace_name"),
+                            "total_mb": float(r.get("total_mb") or 0),
+                            "used_mb": float(r.get("used_mb") or 0),
+                        }
+                        for r in dict_rows
+                    ]
+                    result.metrics["temp_files"] = temp_files
+                    total_mb_sum = sum(t["total_mb"] for t in temp_files)
+                    used_mb_sum = sum(t["used_mb"] for t in temp_files)
+                    if total_mb_sum > 0:
+                        pct_used = round(used_mb_sum / total_mb_sum * 100.0, 1)
                 elif ctx.db_type == "pgsql":
                     cur.execute("SELECT ROUND(SUM(temp_bytes)/1024/1024, 2) AS temp_mb FROM pg_stat_database")
-                    temp_mb = cur.fetchone()[0] or 0
+                    temp_mb = float(GenericDetector._scalar(cur, 0, 0, "temp_mb") or 0)
                     result.metrics["temp_mb"] = temp_mb
-                    pct_used = min(100.0, round(float(temp_mb) / 1024 * 10, 1))
-                elif ctx.db_type in ("mysql", "gbase"):
-                    try:
-                        cur.execute("SELECT ROUND(SUM(allocated)/1024/1024, 2) AS temp_mb FROM information_schema.innodb_temp_table_info")
-                        temp_mb = cur.fetchone()[0] or 0
-                    except Exception:
-                        temp_mb = 0
+                    pct_used = min(100.0, round(temp_mb / 1024.0 * 10.0, 1))
+                elif ctx.db_type == "mysql":
+                    ver = GenericDetector._mysql_major_version(cur)
+                    session_temp_mb = 0.0
+                    if ver >= 8:
+                        cur.execute("""
+                            SELECT ROUND(COALESCE(SUM(SIZE), 0) / 1024.0 / 1024.0, 2) AS session_temp_mb
+                            FROM information_schema.INNODB_SESSION_TEMP_TABLESPACES
+                            WHERE STATE = 'ACTIVE'
+                        """)
+                        session_temp_mb = float(GenericDetector._scalar(cur, 0, 0, "session_temp_mb") or 0)
+                    cur.execute("""
+                        SELECT ROUND(COALESCE(SUM((TOTAL_EXTENTS - FREE_EXTENTS) * EXTENT_SIZE), 0) / 1024.0 / 1024.0, 2) AS used_mb,
+                               ROUND(COALESCE(SUM(TOTAL_EXTENTS * EXTENT_SIZE), 0) / 1024.0 / 1024.0, 2) AS alloc_mb,
+                               COALESCE(SUM(CASE WHEN MAXIMUM_SIZE IS NULL OR MAXIMUM_SIZE <= 0 THEN 0 ELSE MAXIMUM_SIZE END), 0) AS max_bytes,
+                               COALESCE(MIN(CASE WHEN MAXIMUM_SIZE IS NULL OR MAXIMUM_SIZE <= 0 THEN 0 ELSE 1 END), 0) AS all_bounded
+                        FROM information_schema.FILES
+                        WHERE FILE_TYPE = 'TEMPORARY'
+                    """)
+                    f_row = cur.fetchone()
+                    ibtmp_used_mb = float(GenericDetector._row_col(f_row, 0, "used_mb") or 0)
+                    ibtmp_alloc_mb = float(GenericDetector._row_col(f_row, 1, "alloc_mb") or 0)
+                    max_bytes = float(GenericDetector._row_col(f_row, 2, "max_bytes") or 0)
+                    all_bounded = int(GenericDetector._row_col(f_row, 3, "all_bounded") or 0)
+                    cur.execute("SHOW VARIABLES LIKE 'temptable_max_ram'")
+                    ram_val = GenericDetector._show_var_value(cur)
+                    temptable_max_mb = round(float(ram_val) / 1024.0 / 1024.0, 2) if ram_val else 1024.0
+                    temp_mb = round(max(session_temp_mb, ibtmp_used_mb), 2)
                     result.metrics["temp_mb"] = temp_mb
+                    result.metrics["session_temp_mb"] = round(session_temp_mb, 2)
+                    result.metrics["ibtmp_used_mb"] = round(ibtmp_used_mb, 2)
+                    result.metrics["ibtmp_alloc_mb"] = round(ibtmp_alloc_mb, 2)
+                    result.metrics["temptable_max_mb"] = temptable_max_mb
+                    if all_bounded == 1 and max_bytes > 0:
+                        pct_used = round(ibtmp_used_mb / (max_bytes / 1024.0 / 1024.0) * 100.0, 1)
+                    elif temptable_max_mb > 0:
+                        pct_used = min(100.0, round(temp_mb / temptable_max_mb * 100.0, 1))
+                elif ctx.db_type == "gbase":
+                    cur.execute("SHOW GLOBAL STATUS WHERE Variable_name IN ('Meminfo_temp_heap_total_size', 'Meminfo_temp_heap_used_size')")
+                    status_map = GenericDetector._show_vars_map(cur)
+                    if "Meminfo_temp_heap_total_size" not in status_map:
+                        raise RuntimeError("GBase 未返回 Meminfo_temp_heap_total_size 状态变量")
+                    heap_total = float(status_map.get("Meminfo_temp_heap_total_size") or 0)
+                    heap_used = float(status_map.get("Meminfo_temp_heap_used_size") or 0)
+                    cur.execute("SELECT COALESCE(SUM(TEMP_SPACE), 0) AS temp_bytes FROM performance_schema.SESSION_MEMORY_USAGE_INFO")
+                    sess_temp_bytes = float(GenericDetector._scalar(cur, 0, 0, "temp_bytes") or 0)
+                    used_bytes = max(heap_used, sess_temp_bytes)
+                    temp_mb = round(used_bytes / 1024.0 / 1024.0, 2)
+                    result.metrics["temp_mb"] = temp_mb
+                    result.metrics["temp_heap_total_mb"] = round(heap_total / 1024.0 / 1024.0, 2)
+                    result.metrics["session_temp_mb"] = round(sess_temp_bytes / 1024.0 / 1024.0, 2)
+                    pct_used = round(used_bytes / heap_total * 100.0, 1) if heap_total > 0 else 0.0
 
                 result.metrics["pct_used"] = pct_used
                 if pct_used >= 95:
@@ -2239,6 +2769,7 @@ class GenericDetector:
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_temp_usage", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
@@ -2269,31 +2800,83 @@ class GenericDetector:
                 pct_used = 0.0
                 if ctx.db_type == "oracle":
                     cur.execute("""
-                        SELECT tablespace_name, ROUND(SUM(bytes)/1024/1024, 2) total_mb
-                        FROM dba_data_files
-                        WHERE tablespace_name IN (SELECT tablespace_name FROM dba_tablespaces WHERE contents = 'UNDO')
-                        GROUP BY tablespace_name
+                        SELECT df.tablespace_name,
+                               ROUND(df.total_bytes / 1024 / 1024, 2) AS total_mb,
+                               ROUND((df.total_bytes - COALESCE(fs.free_bytes, 0)) / 1024 / 1024, 2) AS used_mb
+                        FROM (
+                            SELECT tablespace_name, SUM(bytes) AS total_bytes
+                            FROM dba_data_files
+                            WHERE tablespace_name IN (SELECT tablespace_name FROM dba_tablespaces WHERE contents = 'UNDO')
+                            GROUP BY tablespace_name
+                        ) df
+                        LEFT JOIN (
+                            SELECT tablespace_name, SUM(bytes) AS free_bytes
+                            FROM dba_free_space
+                            GROUP BY tablespace_name
+                        ) fs ON df.tablespace_name = fs.tablespace_name
                     """)
-                    rows = cur.fetchall()
-                    result.metrics["undo_tablespaces"] = [{"name": r[0], "total_mb": r[1]} for r in rows]
+                    dict_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    undo_rows = [
+                        {
+                            "name": r.get("tablespace_name"),
+                            "total_mb": float(r.get("total_mb") or 0),
+                            "used_mb": float(r.get("used_mb") or 0),
+                        }
+                        for r in dict_rows
+                    ]
+                    result.metrics["undo_tablespaces"] = undo_rows
+                    total_sum = sum(item["total_mb"] for item in undo_rows)
+                    used_sum = sum(item["used_mb"] for item in undo_rows)
+                    if total_sum > 0:
+                        pct_used = round(used_sum / total_sum * 100.0, 1)
                 elif ctx.db_type == "dm":
-                    try:
-                        cur.execute("SELECT TABLESPACE_NAME, TOTAL_SIZE, FREE_SIZE FROM V$UNDO_SPACE")
-                        rows = cur.fetchall()
-                        result.metrics["undo_tablespaces"] = [{"name": r[0], "total": r[1], "free": r[2]} for r in rows]
-                    except Exception:
-                        rows = []
+                    cur.execute("""
+                        SELECT t.NAME AS tablespace_name,
+                               ROUND(t.TOTAL_SIZE * CAST(p.VALUE AS BIGINT) / 1024.0 / 1024.0, 2) AS total_mb,
+                               ROUND(t.USED_SIZE * CAST(p.VALUE AS BIGINT) / 1024.0 / 1024.0, 2) AS used_mb
+                        FROM V$TABLESPACE t
+                        CROSS JOIN (SELECT VALUE FROM V$PARAMETER WHERE NAME = 'GLOBAL_PAGE_SIZE') p
+                        WHERE UPPER(t.NAME) = 'ROLL'
+                    """)
+                    dict_rows = GenericDetector._rows_to_dicts(cur, cur.fetchall())
+                    if not dict_rows:
+                        raise RuntimeError("DM V$TABLESPACE 未返回 ROLL 回滚表空间")
+                    undo_rows = []
+                    for r in dict_rows:
+                        t_mb = float(r.get("total_mb") or 0)
+                        u_mb = float(r.get("used_mb") or 0)
+                        undo_rows.append({
+                            "name": r.get("tablespace_name"),
+                            "total_mb": t_mb,
+                            "used_mb": u_mb,
+                            "free_mb": round(max(0.0, t_mb - u_mb), 2),
+                        })
+                    result.metrics["undo_tablespaces"] = undo_rows
+                    total_sum = sum(item["total_mb"] for item in undo_rows)
+                    used_sum = sum(item["used_mb"] for item in undo_rows)
+                    if total_sum > 0:
+                        pct_used = round(used_sum / total_sum * 100.0, 1)
 
+                result.metrics["pct_used"] = pct_used
                 if pct_used >= 95:
                     result.status = "critical"
                     result.severity = "critical"
                 elif pct_used >= 70:
                     result.status = "warning"
                     result.severity = "warning"
-                result.summary = f"Undo 使用率 {pct_used}% 状态正常"
+                if pct_used >= 70:
+                    result.findings.append({
+                        "type": "undo_usage_high",
+                        "pct_used": pct_used,
+                        "message": f"Undo 使用率过高: {pct_used}%"
+                    })
+                    result.summary = f"Undo 使用率过高: {pct_used}%"
+                else:
+                    result.summary = f"Undo 使用率 {pct_used}% 状态正常"
             finally:
                 ctx.db_connector.close()
         except Exception as e:
+            GenericDetector._degrade_note("inspection.detect_undo_usage", str(e), exc=e)
             result.status = "error"
             result.error = str(e)
         return result
