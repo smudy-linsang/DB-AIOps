@@ -148,10 +148,10 @@ export default function IncidentOperations({ incident, canTriage }) {
         })}>编辑交接</Button>}
         {editing && <Space direction="vertical" style={{ width: '100%' }}>
           <label htmlFor="handoff-owner">负责人账号</label>
-          <Input id="handoff-owner" placeholder="填写有权查看本事故的账号" value={editing.owner} maxLength={150}
+          <Input id="handoff-owner" autoComplete="off" placeholder="填写有权查看本事故的账号" value={editing.owner} maxLength={150}
             onChange={evt => setEditing(current => ({ ...current, owner: evt.target.value }))} />
           <label htmlFor="handoff-step">下一步行动</label>
-          <Input.TextArea id="handoff-step" value={editing.next_step} maxLength={500} showCount
+          <Input.TextArea id="handoff-step" autoComplete="off" value={editing.next_step} maxLength={500} showCount
             onChange={evt => setEditing(current => ({ ...current, next_step: evt.target.value }))} />
           <Space>
             <Button type="primary" loading={action.pending === 'handoff'} disabled={!!error || !!action.pending}
@@ -200,7 +200,7 @@ export default function IncidentOperations({ incident, canTriage }) {
           </ul> : <Text type="secondary">暂无关联工单。</Text>}
           <Link style={{ display: 'block' }} to={`/tickets?incident_id=${encodeURIComponent(id)}`}>打开该事故工单</Link>
           {canLinkTicket && <Space wrap style={{ marginTop: 8 }}>
-            <Input aria-label="要关联的工单编号" inputMode="numeric" placeholder="同实例工单编号" value={ticketId}
+            <Input id="incident-ticket-id" aria-label="要关联的工单编号" autoComplete="off" inputMode="numeric" placeholder="同实例工单编号" value={ticketId}
               onChange={evt => setTicketId(evt.target.value)} />
             <Button disabled={!/^[1-9]\d{0,14}$/.test(ticketId) || !!action.pending || !!error}
               loading={action.pending === 'ticket'} onClick={() => update('ticket')}>关联现有工单</Button>

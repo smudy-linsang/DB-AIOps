@@ -1,6 +1,6 @@
 import { useState } from 'react'
 import { useNavigate, useLocation } from 'react-router-dom'
-import { Form, Input, Button, Card, Typography, message, Alert } from 'antd'
+import { Form, Input, Button, Card, Typography, App as AntApp, Alert } from 'antd'
 import { UserOutlined, LockOutlined } from '@ant-design/icons'
 import { safeReturnTo, errorText } from '../utils/experience'
 import { authAPI, setAuthToken, setUser } from '../services/api'
@@ -8,6 +8,7 @@ import { authAPI, setAuthToken, setUser } from '../services/api'
 const { Title, Text } = Typography
 
 const Login = () => {
+  const { message } = AntApp.useApp()
   const [loading, setLoading] = useState(false)
   const navigate = useNavigate()
   const location = useLocation()
@@ -52,7 +53,7 @@ const Login = () => {
           boxShadow: '0 14px 40px rgba(0,0,0,0.2)',
           borderRadius: 8
         }}
-        bordered={false}
+        variant="borderless"
       >
         <div style={{ textAlign: 'center', marginBottom: 32 }}>
           <Title level={2} style={{ marginBottom: 8 }}>DB-AIOps</Title>

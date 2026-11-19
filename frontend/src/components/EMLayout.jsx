@@ -12,7 +12,7 @@
  */
 import React, { useState, useEffect, useCallback, useMemo } from 'react';
 import {
-  Layout, Input, AutoComplete, Button, Empty, Badge, Dropdown, Avatar, Space, Typography, Tag, Menu, Breadcrumb,
+  Layout, Input, AutoComplete, Button, Empty, Badge, Dropdown, Avatar, Space, Typography, Tag, Menu, Breadcrumb, Alert,
 } from 'antd';
 import {
   MenuFoldOutlined, MenuUnfoldOutlined, SearchOutlined,
@@ -41,7 +41,7 @@ const EMLayout = ({ children }) => {
   const {
     collapsed, toggleCollapsed, setCollapsed, selectedDbId, selectedDbName, selectedDbType,
     alertCounts, setAlertCounts, globalSearchKeyword, setGlobalSearchKeyword,
-    connectSSE, disconnectSSE,
+    connectSSE, disconnectSSE, sseUnavailableReason,
   } = useAppStore();
 
   const [guideVisible, setGuideVisible] = useState(false);
@@ -104,9 +104,10 @@ const EMLayout = ({ children }) => {
   useEffect(() => {
     connectSSE();
     return () => disconnectSSE();
-  }, []);
+  }, [connectSSE, disconnectSSE]);
 
   const totalAlerts = alertCounts.warning + alertCounts.error + alertCounts.critical;
+  const systemStatus = sseUnavailableReason && sysHealth?.status !== 'down' ? 'degraded' : sysHealth?.status;
 
   // 根据路径获取面包屑
   const getBreadcrumbs = () => {
@@ -257,7 +258,7 @@ const EMLayout = ({ children }) => {
             <DatabaseOutlined style={{ fontSize: 22, color: '#1890ff' }} />
             DB-AIOps
           </div>
-          <AutoComplete className="experience-search" value={globalSearchKeyword} options={searchOptions}
+          <AutoComplete id="global-search" className="experience-search" value={globalSearchKeyword} options={searchOptions}
             onChange={setGlobalSearchKeyword} onSelect={selectSearch}
             notFoundContent={<Empty image={Empty.PRESENTED_IMAGE_SIMPLE} description="未找到入口。支持功能名称、已加载实例的名称或主机；仅显示有权限的结果。" />}>
             <Input prefix={<SearchOutlined />} placeholder="搜索功能或实例…" aria-label="搜索功能或实例" allowClear
@@ -269,7 +270,7 @@ const EMLayout = ({ children }) => {
           <Button ghost onClick={() => setGuideVisible(true)}>使用指南</Button>
           {hasPermission(Perm.DASHBOARD_VIEW) && (
             <Button ghost size="small" aria-label="查看系统健康" onClick={() => navigate('/system/health')}>
-              {({ ok: '系统正常', degraded: '系统降级', down: '系统不可用' })[sysHealth?.status] || '系统健康'}
+              {({ ok: '系统正常', degraded: '系统降级', down: '系统不可用' })[systemStatus] || '系统健康'}
             </Button>
           )}
 
@@ -364,6 +365,11 @@ const EMLayout = ({ children }) => {
 
           {/* 页面内容 */}
           <div className="experience-content" style={{ padding: '12px 24px 24px' }}>
+            {sseUnavailableReason && (
+              <Alert type="warning" showIcon message="实时推送不可用"
+                description={<>{sseUnavailableReason}<br />系统仍会每分钟尝试刷新顶部告警计数。</>}
+                style={{ marginBottom: 12 }} />
+            )}
             {children}
           </div>
         </Content>

@@ -2,7 +2,7 @@ import React, { useState, useEffect, useCallback } from 'react'
 import { useNavigate, useParams } from 'react-router-dom'
 import {
   Card, Table, Button, Space, Tag, Select, Input, Modal, Form,
-  Statistic, Row, Col, Tabs, Alert, message, Spin, Progress, Tooltip
+  Statistic, Row, Col, Tabs, Alert, App as AntApp, Spin, Progress, Tooltip
 } from 'antd'
 import {
   PlayCircleOutlined, ReloadOutlined, FileTextOutlined,
@@ -12,13 +12,13 @@ import {
 import { inspectionAPI } from '../services/api'
 
 const { Option } = Select
-const { TabPane } = Tabs
 
 /**
  * 巡检中心页面 - Phase 5 P1-6
  * 提供巡检执行、查看、报告生成
  */
 const InspectionCenter = () => {
+  const { message } = AntApp.useApp()
   const navigate = useNavigate()
   const [activeTab, setActiveTab] = useState('runs')
   const [runs, setRuns] = useState([])
@@ -43,7 +43,7 @@ const InspectionCenter = () => {
     } finally {
       setRunsLoading(false)
     }
-  }, [])
+  }, [message])
 
   // 加载巡检项定义
   const loadItems = useCallback(async () => {
@@ -56,7 +56,7 @@ const InspectionCenter = () => {
     } finally {
       setItemsLoading(false)
     }
-  }, [])
+  }, [message])
 
   // 加载问题模式
   const loadPatterns = useCallback(async () => {
@@ -69,7 +69,7 @@ const InspectionCenter = () => {
     } finally {
       setPatternsLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     loadRuns()
@@ -260,34 +260,29 @@ const InspectionCenter = () => {
         </Space>
       </div>
 
-      <Tabs activeKey={activeTab} onChange={setActiveTab}>
-        <TabPane tab={<span><ClockCircleOutlined />巡检记录</span>} key="runs">
-          <Table
-            loading={runsLoading}
-            dataSource={runs}
-            columns={runColumns}
-            rowKey="run_id"
-            pagination={{ pageSize: 20 }}
-          />
-        </TabPane>
-        <TabPane tab={<span><BulbOutlined />巡检项定义</span>} key="items">
+      <Tabs activeKey={activeTab} onChange={setActiveTab} items={[
+        { key: 'runs', label: '巡检记录', icon: <ClockCircleOutlined />, children: (
+          <Table loading={runsLoading} dataSource={runs} columns={runColumns} rowKey="run_id"
+                 pagination={{ pageSize: 20 }} />
+        ) },
+        { key: 'items', label: '巡检项定义', icon: <BulbOutlined />, children: (<>
           <Alert type="info" message={`共 ${items.length} 项巡检规则,涵盖 Oracle/MySQL/PG/DM/GBase/TDSQL 6 类数据库`}
                  style={{ marginBottom: 16 }} showIcon />
           <Table loading={itemsLoading} dataSource={items} columns={itemColumns} rowKey="item_code"
                  pagination={{ pageSize: 30 }} />
-        </TabPane>
-        <TabPane tab={<span><WarningOutlined />问题模式</span>} key="patterns">
+        </>) },
+        { key: 'patterns', label: '问题模式', icon: <WarningOutlined />, children: (<>
           <Alert type="warning" message="系统自动识别的共性问题模式,推荐优先处理" style={{ marginBottom: 16 }} />
           <Table loading={patternsLoading} dataSource={patterns} columns={patternColumns} rowKey="id" />
-        </TabPane>
-      </Tabs>
+        </>) },
+      ]} />
 
       {/* 触发巡检对话框 */}
       <Modal title="触发巡检" open={triggerVisible} onCancel={() => setTriggerVisible(false)}
              onOk={handleTrigger} confirmLoading={triggering} okText="启动">
-        <Form form={form} layout="vertical" initialValues={{ level: 'daily' }}>
+        <Form form={form} name="inspection-trigger" layout="vertical" autoComplete="off" initialValues={{ level: 'daily' }}>
           <Form.Item label="数据库 ID" name="db_id" tooltip="留空则对所有数据库巡检">
-            <Input placeholder="留空表示全部" allowClear />
+            <Input placeholder="留空表示全部" autoComplete="off" allowClear />
           </Form.Item>
           <Form.Item label="巡检级别" name="level" rules={[{ required: true }]}>
             <Select>

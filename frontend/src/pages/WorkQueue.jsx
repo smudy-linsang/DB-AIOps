@@ -100,13 +100,13 @@ export default function WorkQueue() {
       </Space>
       <Form layout="inline" onFinish={() => setQuery({ q: keyword.trim(), page: '' })} className="operations-search">
         <Form.Item>
-          <Input value={keyword} onChange={event => setKeyword(event.target.value)} maxLength={100}
+          <Input id="work-queue-search" autoComplete="off" value={keyword} onChange={event => setKeyword(event.target.value)} maxLength={100}
             aria-label="检索队列" placeholder="标题、实例名或编号" />
         </Form.Item>
         <Form.Item><Button htmlType="submit" type="primary">检索</Button></Form.Item>
         <Form.Item><Button onClick={() => { setKeyword(''); setQuery({ stage: '', q: '', page: '' }) }}>清除筛选</Button></Form.Item>
       </Form>
-      <Radio.Group value={stage} aria-label="处理阶段" onChange={event => setQuery({ stage: event.target.value, page: '' })}>
+      <Radio.Group name="work-queue-stage" value={stage} aria-label="处理阶段" onChange={event => setQuery({ stage: event.target.value, page: '' })}>
         {Object.entries(STAGES).map(([value, label]) => (
           <Radio.Button key={value} value={value}>{label}{data ? ` (${data.counts[value]})` : ''}</Radio.Button>
         ))}

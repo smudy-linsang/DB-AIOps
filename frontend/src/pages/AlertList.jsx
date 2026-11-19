@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback } from 'react'
 import {
   Table, Tag, Space, Button, Select, Card,
   Typography, Statistic, Row, Col, Modal, Descriptions,
-  message, Tabs, Popconfirm, Badge, Tooltip
+  App as AntApp, Tabs, Popconfirm, Badge, Tooltip
 } from 'antd'
 import {
   ReloadOutlined, BellOutlined, CheckCircleOutlined,
@@ -93,7 +93,8 @@ function AlertDetailModal({ alert, onClose, onAck, onDelete }) {
 // ─────────────────────────────────────────────
 // 通用表格组件
 // ─────────────────────────────────────────────
-function AlertTable({ alerts, loading, showAck, onAck, onDelete, onBatchDelete }) {
+function AlertTable({ alerts, loading, showAck, onView, onAck, onDelete, onBatchDelete }) {
+  const { modal } = AntApp.useApp()
   const [selectedKeys, setSelectedKeys] = useState([])
 
   // 数据刷新/切换后，剔除已不存在于当前列表的选中项，避免误删不可见行
@@ -102,7 +103,7 @@ function AlertTable({ alerts, loading, showAck, onAck, onDelete, onBatchDelete }
   }, [alerts])
 
   const confirmBatchDelete = () => {
-    Modal.confirm({
+    modal.confirm({
       title: `批量删除 ${selectedKeys.length} 条告警？`,
       content: '删除后相关指标可重新触发告警，该操作不可恢复。',
       okText: '确认删除', okType: 'danger', cancelText: '取消',
@@ -192,6 +193,8 @@ function AlertTable({ alerts, loading, showAck, onAck, onDelete, onBatchDelete }
         rowSelection={{
           selectedRowKeys: selectedKeys,
           onChange: setSelectedKeys,
+          getCheckboxProps: row => ({ name: 'selected-alert', 'aria-label': `选择告警 ${row.title || row.id}` }),
+          getTitleCheckboxProps: () => ({ name: 'select-all-alerts', 'aria-label': '选择当前页全部告警' }),
         }}
         pagination={{ defaultPageSize: 20, showSizeChanger: true, showTotal: t => `共 ${t} 条` }}
         rowClassName={r => r.status === 'active' ? 'alert-row-active' : ''}
@@ -204,6 +207,7 @@ function AlertTable({ alerts, loading, showAck, onAck, onDelete, onBatchDelete }
 // 主页面
 // ─────────────────────────────────────────────
 export default function AlertList() {
+  const { message } = AntApp.useApp()
   const [allAlerts, setAllAlerts] = useState([])
   const [loading, setLoading] = useState(false)
   const [severityFilter, setSeverityFilter] = useState('all')
@@ -219,7 +223,7 @@ export default function AlertList() {
     } finally {
       setLoading(false)
     }
-  }, [])
+  }, [message])
 
   useEffect(() => {
     fetchAlerts()
@@ -317,7 +321,7 @@ export default function AlertList() {
 
       {/* 过滤栏 */}
       <Space style={{ marginBottom: 16 }} wrap>
-        <Select value={severityFilter} onChange={setSeverityFilter} style={{ width: 120 }}>
+        <Select id="alerts-severity-filter" aria-label="告警级别" value={severityFilter} onChange={setSeverityFilter} style={{ width: 120 }}>
           <Option value="all">全部级别</Option>
           <Option value="critical">严重</Option>
           <Option value="error">高危</Option>

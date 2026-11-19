@@ -211,6 +211,7 @@ const TargetNavigationTree = () => {
       <div style={{ padding: '0 12px 8px' }}>
         <div style={{ display: 'flex', alignItems: 'center', gap: 4, marginBottom: 8 }}>
           <Input
+            id="target-search" aria-label="搜索目标数据库" autoComplete="off"
             size="small"
             prefix={<SearchOutlined style={{ color: '#999' }} />}
             placeholder="搜索..."

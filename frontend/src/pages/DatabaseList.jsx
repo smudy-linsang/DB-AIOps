@@ -2,7 +2,7 @@ import { useState, useEffect, useCallback, useRef } from 'react'
 import { Link, useNavigate } from 'react-router-dom'
 import {
   Table, Tag, Space, Button, Input, Select, Card,
-  Typography, Tooltip, Statistic, Row, Col, message,
+  Typography, Tooltip, Statistic, Row, Col, App as AntApp,
   Badge, Progress, Switch, Dropdown, Alert, Modal, Form,
   InputNumber, Popconfirm, Skeleton
 } from 'antd'
@@ -20,6 +20,7 @@ import { CollectionStatusTag } from '../components/CollectionHealth'
 import { errorText } from '../utils/experience'
 import { Perm } from '../utils/permission'
 import dayjs from 'dayjs'
+import 'dayjs/locale/zh-cn'
 import relativeTime from 'dayjs/plugin/relativeTime'
 
 dayjs.extend(relativeTime)
@@ -135,6 +136,7 @@ const setCachedData = (key, data) => {
 
 const DatabaseList = () => {
   const navigate = useNavigate()
+  const { message, modal } = AntApp.useApp()
   const [databases, setDatabases] = useState([])
   const [initialLoading, setInitialLoading] = useState(true)
   const [loading, setLoading] = useState(false)
@@ -192,10 +194,18 @@ const DatabaseList = () => {
     const close = () => {
       revisions.current[kind]++
       setDirty(old => ({ ...old, [kind]: false }))
-      if (kind === 'add') { setAddModalVisible(false); setTestResult(null) }
-      else { setEditModalVisible(false); setEditTestResult(null); setEditingDb(null) }
+      if (kind === 'add') {
+        form.resetFields()
+        setAddModalVisible(false)
+        setTestResult(null)
+      } else {
+        editForm.resetFields()
+        setEditModalVisible(false)
+        setEditTestResult(null)
+        setEditingDb(null)
+      }
     }
-    if (dirty[kind]) Modal.confirm({ title: '放弃未保存的配置？', content: '输入的修改尚未保存。继续编辑可保留当前输入。', okText: '放弃修改', cancelText: '继续编辑', onOk: close })
+    if (dirty[kind]) modal.confirm({ title: '放弃未保存的配置？', content: '输入的修改尚未保存。继续编辑可保留当前输入。', okText: '放弃修改', cancelText: '继续编辑', onOk: close })
     else close()
   }
   useEffect(() => {
@@ -221,7 +231,7 @@ const DatabaseList = () => {
       setLoading(false)
       setInitialLoading(false)
     }
-  }, [])
+  }, [message])
 
   // 打开添加数据库弹窗
   const openAddModal = () => {
@@ -345,6 +355,7 @@ const DatabaseList = () => {
     // 获取最新配置详情
     try {
       const detail = await databaseAPI.getDetail(db.id)
+      editForm.resetFields()
       editForm.setFieldsValue({
         name: detail.name,
         db_type: detail.db_type,
@@ -434,7 +445,7 @@ const DatabaseList = () => {
     const selectedDbs = databases.filter(db => selectedRowKeys.includes(db.id))
     const dbNames = selectedDbs.map(db => db.name).join('、')
     
-    Modal.confirm({
+    modal.confirm({
       title: '确认批量删除',
       icon: <ExclamationCircleOutlined />,
       content: (
@@ -1032,7 +1043,7 @@ const DatabaseList = () => {
         return (
           <Tooltip title={time.format('YYYY-MM-DD HH:mm:ss')}>
             <Text type={isStale ? 'danger' : 'secondary'} style={{ fontSize: 12 }}>
-              {time.fromNow()}
+              {time.locale('zh-cn').fromNow()}
             </Text>
           </Tooltip>
         )
@@ -1249,6 +1260,7 @@ const DatabaseList = () => {
           <Col flex="auto">
             <Space wrap>
               <Input
+                id="database-search" aria-label="搜索数据库名称" autoComplete="off"
                 placeholder="搜索数据库名称"
                 prefix={<SearchOutlined />}
                 style={{ width: 200 }}
@@ -1256,6 +1268,7 @@ const DatabaseList = () => {
                 allowClear
               />
               <Select
+                id="database-type-filter" aria-label="数据库类型筛选"
                 value={filters.dbType}
                 onChange={(value) => setFilters(prev => ({ ...prev, dbType: value }))}
                 style={{ width: 120 }}
@@ -1266,6 +1279,7 @@ const DatabaseList = () => {
                 ))}
               </Select>
               <Select
+                id="database-status-filter" aria-label="数据库状态筛选"
                 value={filters.status}
                 onChange={(value) => setFilters(prev => ({ ...prev, status: value }))}
                 style={{ width: 100 }}
@@ -1277,6 +1291,7 @@ const DatabaseList = () => {
                 <Option value="unknown">未知</Option>
               </Select>
               <Select
+                id="database-health-filter" aria-label="数据库健康筛选"
                 value={filters.healthLevel}
                 onChange={(value) => setFilters(prev => ({ ...prev, healthLevel: value }))}
                 style={{ width: 120 }}
@@ -1352,6 +1367,8 @@ const DatabaseList = () => {
         rowSelection={{
           selectedRowKeys,
           onChange: setSelectedRowKeys,
+          getCheckboxProps: record => ({ name: 'selected-database', 'aria-label': `选择数据库 ${record.name}` }),
+          getTitleCheckboxProps: () => ({ name: 'select-all-databases', 'aria-label': '选择当前页全部数据库' }),
           columnWidth: 50
         }}
         pagination={{
@@ -1388,12 +1405,14 @@ const DatabaseList = () => {
         onCancel={() => closeForm('add')}
         footer={null}
         width={500}
-        destroyOnClose
+        forceRender
       >
         <Alert type="info" showIcon message="连接测试只验证当次连通性，保存后需等待采集；修改参数后请重新测试。" style={{ marginBottom: 16 }} />
         <Form
           form={form}
+          name="add-database"
           layout="vertical"
+          autoComplete="off"
           onValuesChange={() => changed('add')}
           onFinish={handleAddDatabase}
           initialValues={{
@@ -1408,7 +1427,7 @@ const DatabaseList = () => {
             label="数据库名称"
             rules={[{ required: true, message: '请输入数据库名称' }]}
           >
-            <Input placeholder="例如: 核心交易库_主节点" />
+            <Input placeholder="例如: 核心交易库_主节点" autoComplete="off" />
           </Form.Item>
 
           <Form.Item
@@ -1432,7 +1451,7 @@ const DatabaseList = () => {
                 label="主机地址"
                 rules={[{ required: true, message: '请输入主机地址' }]}
               >
-                <Input placeholder="例如: 192.168.1.100 或 localhost" />
+                <Input placeholder="例如: 192.168.1.100 或 localhost" autoComplete="off" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1451,7 +1470,7 @@ const DatabaseList = () => {
             label="用户名"
             rules={[{ required: true, message: '请输入用户名' }]}
           >
-            <Input placeholder="请输入数据库用户名" />
+            <Input placeholder="请输入数据库用户名" autoComplete="off" />
           </Form.Item>
 
           <Form.Item
@@ -1459,7 +1478,7 @@ const DatabaseList = () => {
             label="密码"
             rules={[{ required: true, message: '请输入密码' }]}
           >
-            <Input.Password placeholder="请输入数据库密码" />
+            <Input.Password placeholder="请输入数据库密码" autoComplete="new-password" />
           </Form.Item>
 
           <Form.Item
@@ -1498,7 +1517,7 @@ const DatabaseList = () => {
                 label="服务名/数据库名"
                 extra="Oracle: 服务名(SID), MySQL/PG: 数据库名"
               >
-                <Input placeholder="Oracle必填，其他可留空" />
+                <Input placeholder="Oracle必填，其他可留空" autoComplete="off" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1566,11 +1585,13 @@ const DatabaseList = () => {
         onCancel={() => closeForm('edit')}
         footer={null}
         width={500}
-        destroyOnClose
+        forceRender
       >
         <Form
           form={editForm}
+          name="edit-database"
           layout="vertical"
+          autoComplete="off"
           onValuesChange={() => changed('edit')}
           onFinish={handleEditDatabase}
           initialValues={{
@@ -1582,7 +1603,7 @@ const DatabaseList = () => {
             label="数据库名称"
             rules={[{ required: true, message: '请输入数据库名称' }]}
           >
-            <Input placeholder="例如: 核心交易库_主节点" />
+            <Input placeholder="例如: 核心交易库_主节点" autoComplete="off" />
           </Form.Item>
 
           <Form.Item
@@ -1606,7 +1627,7 @@ const DatabaseList = () => {
                 label="主机地址"
                 rules={[{ required: true, message: '请输入主机地址' }]}
               >
-                <Input placeholder="例如: 192.168.1.100 或 localhost" />
+                <Input placeholder="例如: 192.168.1.100 或 localhost" autoComplete="off" />
               </Form.Item>
             </Col>
             <Col span={8}>
@@ -1625,7 +1646,7 @@ const DatabaseList = () => {
             label="用户名"
             rules={[{ required: true, message: '请输入用户名' }]}
           >
-            <Input placeholder="请输入数据库用户名" />
+            <Input placeholder="请输入数据库用户名" autoComplete="off" />
           </Form.Item>
 
           <Form.Item
@@ -1633,7 +1654,7 @@ const DatabaseList = () => {
             label="密码"
             extra="留空则不修改密码"
           >
-            <Input.Password placeholder="留空则不修改密码" />
+            <Input.Password placeholder="留空则不修改密码" autoComplete="new-password" />
           </Form.Item>
 
           <Form.Item
@@ -1672,7 +1693,7 @@ const DatabaseList = () => {
                 label="服务名/数据库名"
                 extra="Oracle: 服务名(SID), MySQL/PG: 数据库名"
               >
-                <Input placeholder="Oracle必填，其他可留空" />
+                <Input placeholder="Oracle必填，其他可留空" autoComplete="off" />
               </Form.Item>
             </Col>
             <Col span={8}>

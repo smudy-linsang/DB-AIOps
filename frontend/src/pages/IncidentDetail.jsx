@@ -217,7 +217,7 @@ export default function IncidentDetail() {
     {detailError
       ? <Alert className="operations-feedback" type="error" showIcon message="无法读取事故" description={detailError}
           action={<Button onClick={load}>重试</Button>} />
-      : <p className="operations-feedback" role="status"><Spin size="small" /> 正在获取事故…</p>}
+      : <div className="operations-feedback" role="status"><Spin size="small" /> 正在获取事故…</div>}
   </section>
 
   const rca = inc.rca_result || {}
@@ -262,7 +262,7 @@ export default function IncidentDetail() {
         <p><strong>{inc.title}</strong> · {inc.db_name}</p>
         <p>结案后事故会从待办中移出，原有事件和时间线仍可查阅。</p>
         <label htmlFor="incident-close-reason">结案原因</label>
-        <Input.TextArea id="incident-close-reason" value={reason} onChange={event => setReason(event.target.value)}
+        <Input.TextArea id="incident-close-reason" autoComplete="off" value={reason} onChange={event => setReason(event.target.value)}
           maxLength={300} showCount rows={3} />
         {actionError && <Alert className="operations-feedback" type="error" showIcon message={actionError} />}
       </Modal>

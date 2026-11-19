@@ -86,12 +86,14 @@ const useAppStore = create((set, get) => ({
   // --- SSE 实时连接状态 ---
   sseConnected: false,
   sseConnection: null,
+  sseUnavailableReason: null,
   _sseReconnectAttempts: 0,
+  _sseReconnectTimer: null,
   setSseConnected: (connected) => set({ sseConnected: connected }),
 
   connectSSE: () => {
     const state = get();
-    if (state.sseConnection) return; // 已连接
+    if (state.sseConnection || state._sseReconnectTimer !== null || state.sseUnavailableReason) return;
 
     const token = localStorage.getItem('auth_token');
     const baseApi = import.meta.env.VITE_API_BASE || '/api/v1';
@@ -100,9 +102,25 @@ const useAppStore = create((set, get) => ({
       : `${baseApi}/events/`;
 
     const es = new EventSource(url);
+    const isCurrentConnection = () => get().sseConnection === es;
 
     es.addEventListener('connected', () => {
-      set({ sseConnected: true, _sseReconnectAttempts: 0 });
+      if (isCurrentConnection()) set({ sseConnected: true, _sseReconnectAttempts: 0 });
+    });
+
+    // A server-declared fallback is terminal for this session. Close before
+    // EventSource can turn the end of the stream into a reconnect attempt.
+    es.addEventListener('degraded', event => {
+      if (!isCurrentConnection()) return;
+      let reason = '服务端已停用实时事件流。';
+      try {
+        const message = JSON.parse(event.data)?.message;
+        if (typeof message === 'string' && message.trim()) reason = message.trim();
+      } catch {
+        // The event type alone is enough to end this session's stream.
+      }
+      set({ sseConnection: null, sseConnected: false, sseUnavailableReason: reason, _sseReconnectAttempts: 0 });
+      es.close();
     });
 
     es.addEventListener('alert', (e) => {
@@ -147,28 +165,32 @@ const useAppStore = create((set, get) => ({
     });
 
     es.onerror = () => {
+      if (!isCurrentConnection()) return;
       set({ sseConnected: false, sseConnection: null });
       es.close();
       // 指数退避重连，最多5次后停止
       const attempts = get()._sseReconnectAttempts;
       if (attempts >= 5) {
-        console.warn('[SSE] 重连次数已达上限，停止重连。实时推送不可用，请刷新页面重试。');
+        set({ sseUnavailableReason: '实时连接中断且未能重新建立。可以刷新页面重试。' });
         return;
       }
       const delay = Math.min(1000 * Math.pow(2, attempts), 30000);
-      set({ _sseReconnectAttempts: attempts + 1 });
-      setTimeout(() => get().connectSSE(), delay);
+      const timer = setTimeout(() => {
+        set({ _sseReconnectTimer: null });
+        get().connectSSE();
+      }, delay);
+      set({ _sseReconnectAttempts: attempts + 1, _sseReconnectTimer: timer });
     };
 
     set({ sseConnection: es });
   },
 
   disconnectSSE: () => {
-    const state = get();
-    if (state.sseConnection) {
-      state.sseConnection.close();
-      set({ sseConnection: null, sseConnected: false });
-    }
+    const { sseConnection, _sseReconnectTimer } = get();
+    clearTimeout(_sseReconnectTimer);
+    set({ sseConnection: null, sseConnected: false, sseUnavailableReason: null,
+      _sseReconnectAttempts: 0, _sseReconnectTimer: null });
+    sseConnection?.close();
   },
 }));
 
