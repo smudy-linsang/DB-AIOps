@@ -1,0 +1,94 @@
+{
+  "order": "DB-027",
+  "title": "体验改进独立 UAT（MMMan 独立执行）",
+  "executed_by": "MMMan 落笔方会话 mvs_3eb0251f679c4b8baf72f98bf1aae579",
+  "date": "2026-11-19",
+  "tested_commit": "64912d5",
+  "batches": ["ab79a04", "4e607c7", "0e06290", "c911170"],
+  "environment": {
+    "repo": "C:/DB-AIOps（main == origin/main, 0/0）",
+    "backend": "http://127.0.0.1:8009（Django，当前 main 代码）",
+    "frontend": "http://localhost:3000（vite 8.3.8 dev，/api 代理到 8009）",
+    "browser": "系统 Chrome（chrome-devtools MCP 驱动，真实鼠标/键盘事件）",
+    "viewports": ["1440x900", "390x844（mobile+touch）"],
+    "db": "真实 PostgreSQL 业务库（db_monitor / timeseriesdb）"
+  },
+  "conclusion": "有条件通过",
+  "flows_total": 47,
+  "flows_passed": 45,
+  "flows_failed": 1,
+  "flows_partial": 1,
+  "defects": [
+    {
+      "id": "D-01",
+      "severity": "中",
+      "title": "告警中心「详情」按钮点击必然抛未捕获异常，告警详情抽屉打不开",
+      "scope": "frontend/src/pages/AlertList.jsx:149",
+      "root_cause": "列定义在模块作用域，render 函数内引用了作用域外的 onView（真实 prop 名在同文件 L277 通过 tableProps.onView = setDetailAlert 传入），点击时 onView 未定义 → ReferenceError",
+      "repro": ["/alerts", "点任一行「详情」按钮", "控制台出现 Uncaught ReferenceError: onView is not defined（栈指向 AlertList.jsx:149:70）", "抽屉未打开（.ant-modal/.ant-drawer 数量为 0，无详情请求发出）"],
+      "console": "Uncaught ReferenceError: onView is not defined — at AlertList.jsx:149:70（4 次）",
+      "impact": "告警中心内的恢复依据（实测值/阈值/判据）无法查看；工作台「查看告警摘要」抽屉可正常展示同一证据，故缺陷限于告警中心入口",
+      "evidence": ["F18-alert-list.png", "F21b-alert-detail-view.png", "F21c-alert-detail-after-click.png"],
+      "contradicts_o_report": "O《运维闭环与证据可靠性交付报告》「浏览器验收记录 3. 刷新后查看已恢复告警，核对保留的确认人和恢复依据中的实际零值」——该路径在本轮独立复现中不可用"
+    },
+    {
+      "id": "D-02",
+      "severity": "中",
+      "title": "实时推送降级时前端不识别后端 degraded 事件，页面无任何可见提示",
+      "scope": "frontend/src/stores/useAppStore.js:92-160（未监听 degraded 事件）",
+      "root_cause": "/api/v1/events/ 在 USE_REDIS_CACHE=False 下立即返回 event: degraded（Redis 未启用）并关闭连接；前端只监听 connected/alert/metric/heartbeat，EventSource 直接进入 onerror，指数退避重连 5 次（1/2/4/8/16 秒）后仅 console.warn 停止",
+      "repro": ["打开任一页面", "等待 SSE 断连重连达上限", "控制台出现 [SSE] 重连次数已达上限，停止重连。实时推送不可用，请刷新页面重试。", "页面无任何降级提示"],
+      "console": "[SSE] 重连次数已达上限，停止重连。实时推送不可用，请刷新页面重试。（warn）",
+      "api_evidence": "GET /api/v1/events/ → 200，108 字节，body: event: degraded / data: Redis 未启用，实时事件流不可用（USE_REDIS_CACHE=False）；直连 8009 与经 3000 代理一致（http=200 size=108 time=0.003/0.020 秒）",
+      "impact": "与批一「失败要显式说明、不能静默吞掉」的设计原则不一致；用户对实时推送已失效毫不知情",
+      "evidence": ["F24-dashboard-1440.png"]
+    },
+    {
+      "id": "D-03",
+      "severity": "低",
+      "title": "事故详情页 DOM 嵌套非法（antd Spin 渲染在 p 内）",
+      "scope": "frontend/src/pages/IncidentDetail.jsx:96",
+      "console": "Warning: validateDOMNesting(...): div cannot appear as a descendant of p.（栈：Spin → p → section → IncidentDetail）",
+      "repro": ["打开任一事故详情页"],
+      "evidence": ["F14-incident-detail.png"]
+    },
+    {
+      "id": "D-04",
+      "severity": "低",
+      "title": "纳管弹窗 useForm 实例未连接到任何 Form 元素",
+      "scope": "frontend/src/pages/DatabaseList.jsx（添加数据库弹窗）",
+      "console": "Warning: Instance created by useForm is not connected to any Form element. Forget to pass form prop?",
+      "impact": "该弹窗的 antd 规则校验很可能不生效（本轮未做绕过校验的破坏性验证，仅登记告警事实）",
+      "evidence": ["F42-add-form-open.png"]
+    },
+    {
+      "id": "D-05",
+      "severity": "低",
+      "title": "antd 弃用告警以 console error 形式出现（4 类）",
+      "detail": ["[antd: Card] bordered is deprecated（登录页）", "[antd: Modal] destroyOnClose is deprecated", "[antd: Modal] Static function can not consume context like dynamic theme", "[antd: Tabs] Tabs.TabPane is deprecated（巡检页）"],
+      "repro": ["分别打开 /login、/databases（添加数据库）、/inspection"]
+    },
+    {
+      "id": "D-06",
+      "severity": "低",
+      "title": "可访问性 issue：表单字段缺 id/name、4 处元素缺 autocomplete",
+      "console": "issue: A form field element should have an id or name attribute (count: 2~3/页)；issue: An element doesn't have an autocomplete attribute (count: 4)"
+    },
+    {
+      "id": "D-07",
+      "severity": "低",
+      "title": "i18n 不一致：实例列表「最后采集」列显示英文相对时间",
+      "detail": "a few seconds ago / 6 minutes ago / 2 minutes ago（其余界面为中文）",
+      "evidence": ["F34-db-list-collection-health.png"]
+    }
+  ],
+  "flow_results_summary": {
+    "A_auth_recovery": ["A1 空提交就地提示", "A2 错误口令就地提示且保留用户名", "A3 深链登录后精确回原页（query+hash）", "A4 404 页与返回入口", "A5 会话失效 401 未复现（仅代码核对）"],
+    "B_dashboard_truth": ["B1 逐来源状态与时间戳", "B2 统计只算可见且启用实例", "B3 趋势窗口 hours 贯通", "B4 快速连点无迟到覆盖", "B5 断网保留旧值不吞成零", "B6 恢复后一次重试重载", "B7 刷新期间导航不闪空", "B8 搜索无结果说明", "B9 搜索回车导航", "B10 测试连接保留后端原文", "B11 改参数撤销旧结论", "B12 未保存关闭确认"],
+    "C_duty_queue": ["C1 事故/告警切换", "C2 阶段计数与列表一致", "C3 阶段地址交接", "C4 键盘可达", "C5 检索地址交接", "C6 超尾页回落末页", "C7 非法参数 400 且带请求编号", "C8 空态与失败态可区分", "C9 确认首次回执", "C10 重复确认同回执", "C11 恢复依据含实测零值", "C12 结案取消零写请求", "C13 原因为空不可提交", "C14 结案提交与回执", "C15 交接字段", "C16 系统健康组件与心跳", "C17 巡检 0%/0s 与缺分数", "C18 只读账号无写入口", "C19 范围隔离 403/404"],
+    "D_evidence_loop": ["D1 告警中心详情入口（失败＝D-01）", "D2 事故详情证据链", "D3 验证报告四态", "D4 诊断证据索引与不可解析引用", "D5 OAM 轨迹分页后定位第 11 轮", "D6 采集健康五态"],
+    "E_break_it": ["E1 12 次连切窗口 123-227ms 无空白无异常", "E2 窄屏 390px 四页无横向溢出", "E3 越权账号探查", "E4 错误输入与非法参数", "E5 断网恢复"]
+  },
+  "evidence_dir": "docs/pm/reports/evidence/DB-027-20261119/",
+  "evidence_note": "同目录 PNG 截图 46 张按仓库惯例不入库（.gitignore L161 *.png）；本 JSON 与报告入库，PNG 保留在宿主同名目录"
+}
