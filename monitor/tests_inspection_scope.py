@@ -1052,7 +1052,7 @@ class Db024DetectorFixTests(TestCase):
         """验证 CAP-7D/30D 仅计 status='UP'、区分元数据库与实库容量增长外推。"""
         from datetime import timedelta
         from monitor.inspection_executor import DetectionContext, GenericDetector
-        from monitor.models import DatabaseConfig, MonitorLog
+        from monitor.models import MonitorLog
 
         # 1. 未关联 DatabaseConfig pk（如平台元数据库）应明确 skip
         unsaved_cfg = DatabaseConfig(name='db_monitor_meta', db_type='pgsql', host='127.0.0.1', port=5432, service_name='db_monitor')
