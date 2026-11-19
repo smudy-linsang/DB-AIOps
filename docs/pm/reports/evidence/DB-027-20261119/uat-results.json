@@ -90,5 +90,5 @@
     "E_break_it": ["E1 12 次连切窗口 123-227ms 无空白无异常", "E2 窄屏 390px 四页无横向溢出", "E3 越权账号探查", "E4 错误输入与非法参数", "E5 断网恢复"]
   },
   "evidence_dir": "docs/pm/reports/evidence/DB-027-20261119/",
-  "evidence_note": "同目录 PNG 截图 46 张按仓库惯例不入库（.gitignore L161 *.png）；本 JSON 与报告入库，PNG 保留在宿主同名目录"
+  "evidence_note": "同目录 PNG 截图 44 张按仓库惯例不入库（.gitignore L161 *.png）；本 JSON 与报告入库，PNG 保留在宿主同名目录"
 }

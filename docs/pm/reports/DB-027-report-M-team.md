@@ -6,7 +6,7 @@
 - 执行：MMMan（落笔方会话 mvs_3eb0251f679c4b8baf72f98bf1aae579）
 - 成文：2026-11-19 CST
 - 被测版本：origin/main @ 64912d5（含 ab79a04 工作台透明度与交互恢复、4e607c7 值班队列与可追溯事故交接、0e06290 告警恢复与事故证据闭环、c911170 picomatch 高危漏洞回补）
-- 证据目录：docs/pm/reports/evidence/DB-027-20261119/（结构化读数见 uat-results.json；46 张 PNG 截图按仓库惯例不入库，见 §八）
+- 证据目录：docs/pm/reports/evidence/DB-027-20261119/（结构化读数见 uat-results.json；44 张 PNG 截图按仓库惯例不入库，见 §八）
 - 流程总数：47（通过 45 / 失败 1 / 未复现 1）；缺陷 7 条（中 2 / 低 5）
 
 ## 一、结论与判定依据
@@ -202,7 +202,7 @@
 ## 八、证据保存路径
 
 - 结构化读数（入库）：docs/pm/reports/evidence/DB-027-20261119/uat-results.json —— 含 7 条缺陷的复现步骤、控制台原文、根因、影响面与截图索引。
-- 截图 46 张（**按仓库惯例不入库**，.gitignore L161 忽略 PNG）：宿主目录 C:\DB-AIOps\docs\pm\reports\evidence\DB-027-20261119\，命名 F01…F46，与本报告 §五各缺陷「截图」字段一一对应。关键张：F18/F21b/F21c（D-01）、F24（D-02）、F14（D-03）、F42（D-04）、F34（D-07）、F29（断网态）、F30–F33（390px）。
+- 截图 44 张（**按仓库惯例不入库**，.gitignore L161 忽略 PNG）：宿主目录 C:\DB-AIOps\docs\pm\reports\evidence\DB-027-20261119\，命名 F01…F46，与本报告 §五各缺陷「截图」字段一一对应。关键张：F18/F21b/F21c（D-01）、F24（D-02）、F14（D-03）、F42（D-04）、F34（D-07）、F29（断网态）、F30–F33（390px）。
 - 仓外脚本（验收后仍可复跑）：C:\dispatcher\_db027_seed.py（seed / cleanup）、C:\dispatcher\_db027_purge.py（按前缀强制清理）、C:\dispatcher\_db027_set_reader_pw.py。
 
 ## 九、复跑方法
