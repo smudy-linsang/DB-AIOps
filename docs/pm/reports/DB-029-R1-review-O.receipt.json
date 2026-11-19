@@ -1,0 +1,42 @@
+{
+  "schema_version": 1,
+  "role": "O",
+  "task_id": "DB-029",
+  "round": 1,
+  "source_sha": "cfc5832cfd6e041bf4963e574a284a81d86cf7d6",
+  "job_key": "85993c8db666858d2a725ca103b87ae93373919f645219f8b3f7ed312c76f62b",
+  "conclusion": "不通过",
+  "report_path": "docs/pm/reports/DB-029-R1-review-O.md",
+  "report_sha256": "30e2437ecacf0614fbdfbc7a68657e64a8da28c819197a9a0fc4b121ceac7626",
+  "checks": [
+    {
+      "name": "D-01 详情处理器静态检查",
+      "result": "FAIL"
+    },
+    {
+      "name": "D-02 降级事件与重连静态检查",
+      "result": "FAIL"
+    },
+    {
+      "name": "D-03 至 D-07 静态抽查",
+      "result": "FAIL"
+    },
+    {
+      "name": "前端构建和既有测试",
+      "result": "PASS"
+    },
+    {
+      "name": "unit 测试（缺少 Django）",
+      "result": "BLOCKED"
+    },
+    {
+      "name": "D-01 与 D-02 真浏览器复验",
+      "result": "BLOCKED"
+    },
+    {
+      "name": "GitHub CI 核验",
+      "result": "BLOCKED"
+    }
+  ],
+  "evidence": []
+}
