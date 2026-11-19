@@ -1277,18 +1277,94 @@ def _dm_rlog(ctx, result, cur):
     _apply_high(result, grade, th, summary, 'dm_rlog', 'grade')
 
 
-def _gbase_nodes(cur):
-    rows = _query(cur, """
-        SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED
-        FROM gcluster_v$node_info
+def _is_gbase_missing_cluster_view(exc):
+    """识别 GBase 8a 未选默认库或缺少 MPP 集群视图导致的明确错误（1046/1109/1146）。"""
+    text = str(exc).lower()
+    return (
+        _missing_view(exc)
+        or 'no database selected' in text
+        or '(1046,' in text
+        or '1046' in text and 'database' in text
+        or 'unknown table' in text
+        or '(1109,' in text
+        or "doesn't exist" in text
+        or '(1146,' in text
+    )
+
+
+def _probe_gbase_cluster_view(cur, view_name):
+    """核查全库 information_schema.TABLES 是否存在指定 GBase 集群视图，并采集实例版本与集群标志。"""
+    schema_rows = _query(cur, f"""
+        SELECT TABLE_SCHEMA, TABLE_NAME
+        FROM information_schema.TABLES
+        WHERE LOWER(TABLE_NAME) = '{view_name.lower()}'
     """)
+    for row in schema_rows:
+        schema = str(row.get('table_schema') or '').strip()
+        if schema and all(ch.isalnum() or ch == '_' for ch in schema):
+            return schema, {'view': view_name, 'table_schema': schema, 'schema_matches': len(schema_rows)}
+
+    version_str = ''
+    node_flag = ''
+    try:
+        ver_rows = _query(cur, 'SELECT VERSION() AS ver')
+        if ver_rows:
+            version_str = str(ver_rows[0].get('ver') or '').strip()
+    except Exception as exc:
+        degrade_note('inspection.gbase.probe_version', '读取 GBase 版本失败', exc)
+    try:
+        flag_rows = _query(cur, "SHOW GLOBAL VARIABLES LIKE 'gbase_gcluster_node_flag'")
+        node_flag = str(_show_map(flag_rows).get('gbase_gcluster_node_flag') or '').strip()
+    except Exception as exc:
+        degrade_note('inspection.gbase.probe_cluster_flag', '读取 gbase_gcluster_node_flag 失败', exc)
+
+    return None, {
+        'view': view_name,
+        'schema_matches': 0,
+        'version': version_str or 'unknown',
+        'gbase_gcluster_node_flag': node_flag if node_flag != '' else 'unknown',
+    }
+
+
+def _gbase_nodes(cur, result=None, method='detect_gbase_node_balance', scene='集群节点'):
+    try:
+        rows = _query(cur, """
+            SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED
+            FROM gcluster_v$node_info
+        """)
+    except Exception as exc:
+        if not _is_gbase_missing_cluster_view(exc):
+            raise
+        schema, evidence = _probe_gbase_cluster_view(cur, 'gcluster_v$node_info')
+        if schema:
+            degrade_note(
+                f'inspection.{method}.qualified_view',
+                f'默认库未选中，改用 {schema}.gcluster_v$node_info 重查',
+                exc,
+            )
+            rows = _query(cur, f"""
+                SELECT NODEID, NODENAME, NODETYPE, STATUS, CPU_USED, MEM_USED
+                FROM {schema}.gcluster_v$node_info
+            """)
+        else:
+            if result is not None:
+                result.metrics['gbase_cluster_evidence'] = evidence
+            degrade_note(
+                f'inspection.{method}.no_cluster_view',
+                f"实例无集群视图 gcluster_v$node_info (version={evidence['version']}, flag={evidence['gbase_gcluster_node_flag']})",
+                exc,
+            )
+            raise NotApplicable(
+                f"当前 GBase 8a 实例（{evidence['version']}，gbase_gcluster_node_flag={evidence['gbase_gcluster_node_flag']}）"
+                f"全库无集群视图 gcluster_v$node_info（information_schema.TABLES 0 匹配），属非 MPP 集群/单机版，不适用{scene}检查"
+            ) from exc
     if not rows:
         raise RuntimeError('未取得 gcluster_v$node_info 节点清单，不能把空结果当成均衡或无宕机')
     return rows
 
 
 def _gbase_balance(ctx, result, cur):
-    rows = _gbase_nodes(cur)
+    rows = _gbase_nodes(cur, result=result, method='detect_gbase_node_balance', scene='节点负载均衡')
     if len(rows) < 2:
         raise NotApplicable('节点数不足 2，负载均衡不适用')
     cpu = _spread_pct([row.get('cpu_used') for row in rows])
@@ -1306,11 +1382,39 @@ def _gbase_balance(ctx, result, cur):
 
 
 def _gbase_distribution(ctx, result, cur):
-    rows = _query(cur, """
-        SELECT NODEID, SUM(DATA_SIZE) AS bytes
-        FROM gcluster_v$table_distribution
-        GROUP BY NODEID
-    """)
+    try:
+        rows = _query(cur, """
+            SELECT NODEID, SUM(DATA_SIZE) AS bytes
+            FROM gcluster_v$table_distribution
+            GROUP BY NODEID
+        """)
+    except Exception as exc:
+        if not _is_gbase_missing_cluster_view(exc):
+            raise
+        schema, evidence = _probe_gbase_cluster_view(cur, 'gcluster_v$table_distribution')
+        if schema:
+            degrade_note(
+                'inspection.detect_gbase_distribution.qualified_view',
+                f'默认库未选中，改用 {schema}.gcluster_v$table_distribution 重查',
+                exc,
+            )
+            rows = _query(cur, f"""
+                SELECT NODEID, SUM(DATA_SIZE) AS bytes
+                FROM {schema}.gcluster_v$table_distribution
+                GROUP BY NODEID
+            """)
+        else:
+            result.metrics['gbase_cluster_evidence'] = evidence
+            degrade_note(
+                'inspection.detect_gbase_distribution.no_cluster_view',
+                f"实例无集群视图 gcluster_v$table_distribution (version={evidence['version']}, flag={evidence['gbase_gcluster_node_flag']})",
+                exc,
+            )
+            raise NotApplicable(
+                f"当前 GBase 8a 实例（{evidence['version']}，gbase_gcluster_node_flag={evidence['gbase_gcluster_node_flag']}）"
+                "全库无集群视图 gcluster_v$table_distribution（information_schema.TABLES 0 匹配；gbase.table_distribution 为非同口径基表，不冒充），"
+                "属非 MPP 集群/单机版，不适用数据分布均衡检查"
+            ) from exc
     if not rows:
         raise RuntimeError('未取得数据分布，不能把空结果当成均衡')
     if len(rows) < 2:
@@ -1327,7 +1431,7 @@ def _gbase_distribution(ctx, result, cur):
 
 
 def _gbase_node_down(ctx, result, cur):
-    rows = _gbase_nodes(cur)
+    rows = _gbase_nodes(cur, result=result, method='detect_gbase_node_down', scene='节点宕机')
     down = []
     for row in rows:
         status = str(row.get('status') or '')

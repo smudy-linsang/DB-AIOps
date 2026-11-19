@@ -869,3 +869,76 @@ class Db023DetectorTests(TestCase):
         )
         self.assertEqual(hidden.status_code, 404)
         self.assertEqual(InspectionRun.objects.count(), before)
+
+
+@tag('unit')
+class Db025GbaseViewResolutionTests(TestCase):
+    """DB-025: 验证 GBase 8a 单机无集群视图 skip、未选默认库补全 schema 与权限/通用报错不误判。"""
+
+    def test_gbase_standalone_missing_cluster_views_returns_skip_with_evidence(self):
+        err_1046 = RuntimeError("(1046, 'No database selected')")
+        for item_id, view_name in (
+            ('INS-GBASE-BALANCE', 'gcluster_v$node_info'),
+            ('INS-GBASE-DIST', 'gcluster_v$table_distribution'),
+            ('INS-GBASE-NODE-DOWN', 'gcluster_v$node_info'),
+        ):
+            steps = [
+                {'match': view_name, 'error': err_1046},
+                D('information_schema.TABLES', []),
+                D('SELECT VERSION()', [{'ver': '8.6.2.43-R7-free.110605'}]),
+                D('gbase_gcluster_node_flag', [
+                    {'Variable_name': 'gbase_gcluster_node_flag', 'Value': '0'},
+                ]),
+            ]
+            result, _, _ = run_case(item_id, 'gbase', steps)
+            self.assertEqual(result.status, 'skip', f'{item_id}: {result.summary}')
+            self.assertIn('gbase_gcluster_node_flag=0', result.summary)
+            self.assertIn('8.6.2.43-R7-free.110605', result.summary)
+            ev = result.metrics.get('gbase_cluster_evidence') or {}
+            self.assertEqual(ev.get('view'), view_name)
+            self.assertEqual(ev.get('schema_matches'), 0)
+            self.assertEqual(ev.get('gbase_gcluster_node_flag'), '0')
+
+    def test_gbase_mpp_no_default_db_resolves_qualified_schema_and_detects(self):
+        err_1046 = RuntimeError("(1046, 'No database selected')")
+        # #69: 1046 -> information_schema.TABLES 返回 gclusterdb -> 重查命中严重倾斜
+        res_bal, _, _ = run_case('INS-GBASE-BALANCE', 'gbase', [
+            {'match': 'gcluster_v$node_info', 'error': err_1046},
+            D('information_schema.TABLES', [{'table_schema': 'gclusterdb', 'table_name': 'gcluster_v$node_info'}]),
+            D('gclusterdb.gcluster_v$node_info', _nodes([(10, 10), (90, 90)])),
+        ])
+        self.assertEqual(res_bal.status, 'critical', res_bal.summary)
+
+        # #70: 1046 -> information_schema.TABLES 返回 gclusterdb -> 重查分布均衡
+        res_dist, _, _ = run_case('INS-GBASE-DIST', 'gbase', [
+            {'match': 'gcluster_v$table_distribution', 'error': err_1046},
+            D('information_schema.TABLES', [{'table_schema': 'gclusterdb', 'table_name': 'gcluster_v$table_distribution'}]),
+            D('gclusterdb.gcluster_v$table_distribution', [
+                {'nodeid': '1', 'bytes': 100},
+                {'nodeid': '2', 'bytes': 105},
+            ]),
+        ])
+        self.assertEqual(res_dist.status, 'ok', res_dist.summary)
+
+        # #71: 1046 -> information_schema.TABLES 返回 gclusterdb -> 重查发现宕机节点
+        res_down, _, _ = run_case('INS-GBASE-NODE-DOWN', 'gbase', [
+            {'match': 'gcluster_v$node_info', 'error': err_1046},
+            D('information_schema.TABLES', [{'table_schema': 'gclusterdb', 'table_name': 'gcluster_v$node_info'}]),
+            D('gclusterdb.gcluster_v$node_info', [
+                {'nodeid': '1', 'nodename': 'n1', 'nodetype': 'DN', 'status': 'ONLINE', 'cpu_used': 20, 'mem_used': 30},
+                {'nodeid': '2', 'nodename': 'n2', 'nodetype': 'DN', 'status': 'OFFLINE', 'cpu_used': 0, 'mem_used': 0},
+            ]),
+        ])
+        self.assertEqual(res_down.status, 'warning', res_down.summary)
+        self.assertEqual(res_down.metrics.get('down_nodes'), 1.0)
+
+    def test_gbase_permission_error_still_returns_error_not_skip(self):
+        err_1142 = RuntimeError("(1142, 'SELECT command denied to user')")
+        for item_id, view_name in (
+            ('INS-GBASE-BALANCE', 'gcluster_v$node_info'),
+            ('INS-GBASE-DIST', 'gcluster_v$table_distribution'),
+            ('INS-GBASE-NODE-DOWN', 'gcluster_v$node_info'),
+        ):
+            result, _, _ = run_case(item_id, 'gbase', [{'match': view_name, 'error': err_1142}])
+            self.assertEqual(result.status, 'error', f'{item_id}: {result.summary}')
+            self.assertIn('1142', result.error or '')
