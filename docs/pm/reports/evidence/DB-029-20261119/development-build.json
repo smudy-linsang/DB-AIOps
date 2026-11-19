@@ -1,0 +1,71 @@
+{
+  "runtime": "Chromium, Django and PostgreSQL",
+  "origin": "http://127.0.0.1:3010",
+  "checks": [
+    {
+      "id": "D-01",
+      "status": "pass",
+      "details": {
+        "entry": "/alerts → 已恢复 → 详情",
+        "observedValue": 0,
+        "threshold": 80
+      }
+    },
+    {
+      "id": "D-02",
+      "status": "pass",
+      "details": {
+        "initialRequests": 1,
+        "retries": 0,
+        "observedMs": 3500
+      }
+    },
+    {
+      "id": "D-03",
+      "status": "pass",
+      "details": {
+        "loadingContainer": "div",
+        "incidentLoaded": true
+      }
+    },
+    {
+      "id": "D-04",
+      "status": "pass",
+      "details": {
+        "requiredValidation": true,
+        "continuedEditing": true,
+        "discardedInputCleared": true,
+        "editPrefilled": true,
+        "databaseWriteRequests": 0
+      }
+    },
+    {
+      "id": "D-07",
+      "status": "pass",
+      "details": {
+        "relativeTime": "9 分钟前"
+      }
+    },
+    {
+      "id": "D-06",
+      "status": "pass",
+      "details": {
+        "loginFields": 2,
+        "databaseDialogFields": 18,
+        "inspectionDialogFields": 3,
+        "pageFields": 5
+      }
+    },
+    {
+      "id": "D-05",
+      "status": "pass",
+      "details": {
+        "checkedLoginCard": true,
+        "checkedDatabaseModals": true,
+        "checkedInspectionTabs": true
+      }
+    }
+  ],
+  "pageErrors": [],
+  "targetedWarnings": []
+}
