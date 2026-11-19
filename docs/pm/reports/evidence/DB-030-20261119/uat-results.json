@@ -1,0 +1,78 @@
+{
+  "order": "DB-030",
+  "title": "独立复验 DB-029 修复 D-01 / D-02（MMMan 独立执行）",
+  "executed_by": "MMMan 落笔方会话 mvs_3eb0251f679c4b8baf72f98bf1aae579",
+  "date": "2026-11-19",
+  "tested_commit": "df5c039",
+  "fix_commit": "3fd9351",
+  "fix_is_ancestor": true,
+  "method": "自建探索流程，未执行 O 的 scripts/db029-uat.cjs；真浏览器系统 Chrome + 真实鼠标/键盘；1440x900",
+  "environment": {
+    "repo": "C:/DB-AIOps（main == origin/main, 0/0）",
+    "backend": "http://127.0.0.1:8009（Django，当前 main 代码）",
+    "frontend": "http://localhost:3000（vite 8.3.8 dev，/api 代理到 8009）",
+    "browser": "系统 Chrome（chrome-devtools MCP 驱动）",
+    "viewports": ["1440x900"],
+    "db": "真实 PostgreSQL 业务库",
+    "fixtures": "自建：实例 1 个 + 告警 4 条（活跃 / 已确认 / 已恢复含依据 / 已恢复无依据），前缀 UAT-M030-，复验后全量清理"
+  },
+  "conclusion": "通过",
+  "verdicts": {
+    "D-01": "通过",
+    "D-02": "通过",
+    "D-02-reconnect": "通过",
+    "new_defects": 0
+  },
+  "D-01": {
+    "path": "登录 → /alerts → 切 已确认/已恢复/全部 档 → 逐行点「详情」→ 读抽屉 → Esc 关闭 → 换行再点",
+    "drawer_opens": true,
+    "states": [
+      {"state": "已恢复（含恢复依据）", "alert_id": 8011, "drawer": "打开", "reading": "恢复依据：来源 采集器实测 · 依据时间 2026/11/19 15:02:50 · 指标 qps · 观测值 0 · 告警阈值 80；监控观测 已恢复", "screenshot": "R02-alert-detail-recovered.png"},
+      {"state": "已恢复（无恢复依据，边界）", "alert_id": 8012, "drawer": "打开", "reading": "恢复依据：来源 告警规则判定 · 观测值 未记录；无崩溃、无 undefined", "screenshot": "R03-alert-detail-no-evidence.png"},
+      {"state": "活跃", "alert_id": 8009, "drawer": "打开", "reading": "状态 活跃 · 监控观测 异常持续 · 确认回执 未记录确认 · 恢复时间 未记录 · 页脚含 确认告警", "screenshot": "R04-alert-detail-active.png"},
+      {"state": "已确认", "alert_id": 8010, "drawer": "打开", "reading": "状态 已知晓·异常持续 · 确认回执 admin · 2026/11/19 15:02:50（首位确认人与首次时间）", "screenshot": "R05-alert-detail-acked.png"}
+    ],
+    "keyboard": "Esc 可关闭抽屉（实测关闭后可见弹窗数归零）",
+    "console": "无未捕获异常；DB-027 的 ReferenceError: onView is not defined 已消失；仅 1 条 a11y issue（表单字段缺 id/name，count=1）"
+  },
+  "D-02": {
+    "default_config": {
+      "path": "打开 /system/health → 观察 40 秒（8 个采样点）→ 统计 /api/v1/events/ 请求数 → 读控制台",
+      "visible_prompt": "实时推送不可用 / Redis 未启用，实时事件流不可用（USE_REDIS_CACHE=False）/ 系统仍会每分钟尝试刷新顶部告警计数。",
+      "prompt_visible": true,
+      "prompt_visible_measure": "display≠none、宽高非零、在视口内",
+      "prompt_persistence": "5/10/15/20/25/30/35/40 秒共 8 个采样点全部可见",
+      "events_requests_during_window": 0,
+      "events_requests_total": 1,
+      "reconnect_spam": false,
+      "console": "无 [SSE] 重连告警；仅 1 条 a11y issue",
+      "screenshot": "R07-sse-degraded-prompt.png / R08-sse-after-40s.png"
+    },
+    "reconnect": {
+      "precondition": "默认配置下服务端立即声明 degraded，前端按修复后设计终止本会话的流（不再重连）；故本项需活流，临时以 USE_REDIS_CACHE=True 拉起 Web 作专项，测完已恢复默认配置",
+      "live_stream": "1 条 events 请求（reqid=1000，200）保持，页面无「实时推送不可用」提示",
+      "break": "停后端 → 退避重试新增 3 次（reqid=1038/1039/1040，均 502 Bad Gateway）",
+      "recovery": "reqid=1041 → 200，重连成功",
+      "page_prompts": "全程无「实时推送不可用」、无「实时连接中断」",
+      "console": "仅 3 条 502 资源日志 + 1 条 a11y issue；无 [SSE] 告警"
+    }
+  },
+  "incidental_findings": [
+    {"id": "O-01", "severity": "提醒", "title": "「系统降级」按钮文案不具区分力", "detail": "SSE 正常（活流、无降级提示）时顶部按钮仍显示「系统降级」（该状态来自后端自身健康：哨兵/ASH采样、事件流水线消费者、通知发送器从未上报心跳，与 SSE 无关）", "impact": "O 脚本以该文案作为 D-02 断言，在 SSE 修好前后都成立，不能作为判据；建议改以「实时推送不可用」提示与 events 请求计数为准"},
+    {"id": "O-02", "severity": "事实", "title": "后端重启后默认配置下旧令牌失效", "detail": "令牌存于 Django 缓存，默认 LocMemCache 不跨进程存活 → 前端跳登录页（设计内行为，非缺陷），本轮复验据此重新登录一次"},
+    {"id": "O-03", "severity": "收益登记", "title": "表单 a11y issue 计数下降", "detail": "DB-027 记录为每页 2–3 处，本轮 6 页巡检均为 count=1（复选框补了 name/aria-label）"},
+    {"id": "O-04", "severity": "边界声明", "title": "D-03～D-07 本轮未专项复验", "detail": "超出本单范围，仅在 6 个页面做控制台巡检（无其他控制台错误、无空白页），不据此下结论"}
+  ],
+  "cleanup": {
+    "fixtures_deleted": {"instances": 1, "alerts": 8, "monitor_logs": 8},
+    "residual_configs": 0,
+    "residual_alerts": 0,
+    "total_instances_after": 10,
+    "test_accounts_created": 0,
+    "temporary_redis_config": "已撤销（Web 以默认配置重启，降级提示如期回归）",
+    "frontend_dev_server": "已停止，端口 3000 已释放",
+    "platform_web_and_collector": "保持当前 main 代码运行"
+  },
+  "evidence_dir": "docs/pm/reports/evidence/DB-030-20261119/",
+  "evidence_note": "同目录 PNG 截图 9 张按仓库惯例不入库（.gitignore L161 *.png）；本 JSON 与报告入库，PNG 保留在宿主同名目录"
+}
