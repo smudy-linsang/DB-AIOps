@@ -303,7 +303,7 @@ class MySQLSlowSqlDialectTests(TransactionTestCase):
         pk = next(r for r in probe if 'COUNT' not in r['query'].upper()
                   and re.search(r'`?id`?\s*=', r['query'], re.I))
         self.assertGreater(scan['total_time_sec'], pk['total_time_sec'],
-                           '全表扫描 4 次的总耗时应大于主键点查 50 次')
+                           '全表扫描 20 次的总耗时应大于主键点查 50 次')
         self.assertLess(rows.index(scan), rows.index(pk), '按总耗时排序')
         self.assertLess(scan['avg_ms'] / 1000, 5, '单位是真实秒 / 毫秒，不是放大 1000 倍')
 
