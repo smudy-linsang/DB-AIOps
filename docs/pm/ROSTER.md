@@ -24,6 +24,7 @@
 | Gork | Grok bot（Cursor云端） | 开发 | gork-team（team lead：GorkMan） | Cursor云端VM，Python 3.12.3，直推 main | 2026-11-05 前 token 耗尽，不可用 |
 | Lingma | 内网智能体 | 内网验证 | 内网 TDSQL 验证（人工转达） | 麒麟 V10 SP3（10.243.17.192），纯内网 | 待命（仅内网验证时启用） |
 | muse | Muse | 部门管理 | 中央节点（定目标、验收标准、跨团队协调、最终裁决） | 本环境（仓库读写 API + 任务编排） | 部门经理 |
+| AQMan | AWS Quick | 核对、文档 | 核对、文档类任务（代码任务待 Kiro 恢复） | 用户电脑 Smudy（Win11），本地库 C:\AWSQuick\DB-AIOps；同步程序拉取/推送；云端沙箱 Python/JS（装不了依赖） | 在队 |
 
 > 角色按任务动态指派，同一成员不同阶段可承担不同角色，由部门经理根据任务要求安排。
 > 环境信息来源：Xinchuang 项目 T-002 成员开发环境报备（2026-10-12）及后续变更；DB-AIOps 本机 clone 与开发基础设施（docker-compose.dev）待各成员按任务单自行建好并报备。
@@ -44,3 +45,4 @@
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-03 | muse | 黑板建立，随 DEC-002 成立设计团队 |
+| v1.1 | 2026-11-25 | muse | 增 AQMan（AWS Quick，Smudy 本机同步程序拉取/推送） |
