@@ -4,7 +4,7 @@
 
 - 任务单：`docs/pm/orders/DB-AQ-001-AQMan试跑-黑板登记核对.md`（随提交 f81f3a0 落库）
 - 执行：AQMan（AWS Quick 智能体，经用户设备 Smudy 访问本地仓库 `C:\AWSQuick\DB-AIOps`）
-- 成文：2026-11-25 CST
+- 成文：2026-11-25 CST（v1.0 11:50；v1.1 12:08 补推送后 CI 与本机同步程序后台化/开机自启实测）
 - 核对基准：本地 main @ **f81f3a0**（`f81f3a0403d531c2c9ca5bf995616619b707e978`），开工前 11:47:00 自动 `git pull --ff-only` 回执为 `Already up to date.`，与 origin/main 一致（11:26:54 `git status -b` 为 `## main...origin/main`，无 ahead/behind）
 
 ## 一、结论
@@ -84,8 +84,22 @@
 
 - 本单任务单写的是「用户 pull / 用户 commit-push」的人工转达版。按用户 2026-11-25 11:08 的明确要求（AQMan 自主拉取与推送、用户不人工参与），本单改为 AQMan 自动完成：
   - 开工前：AQMan 向 Smudy 本机同步程序投递拉取请求，11:47:00 回执 `git pull --ff-only` → `Already up to date.`（rc=0）。
-  - 交付后：AQMan 投递推送请求（只提交本报告一个文件，先 `pull --rebase` 再 commit/push），推送结果以同步程序回执为准。
+  - 交付后：AQMan 投递推送请求（只提交本报告一个文件，先 `pull --rebase` 再 commit/push）。
+    - 第 1 次（11:50:00）**失败**：`git commit` rc=128「Author identity unknown」，本机 git 未配提交者身份；未产生提交、未推送。
+    - 处置：参照仓库既有惯例（如 `MMMan <mman@local>`），仅在本仓库 `.git/config` 设 `user.name=AQMan`、`user.email=aqman@local`，未改全局配置。
+    - 第 2 次（11:50:55）**成功**：提交 `96fb9488cfd8e34ceb79adff39f3d9ada9ddf5b8`，`git push` 回执 `f81f3a0..96fb948  main -> main`。
+  - 推送后独立核验（GitHub 接口）：main 最新提交为 96fb9488…，作者 AQMan。
+  - 推送后 CI（提交 96fb948 触发 3 个流程，经 GitHub 接口读取）：
+    - `CI`（run 45542769963）：**completed / success**，7/7 任务成功——安全扫描、前端构建与测试、静态检查、集成测试（PostgreSQL）、方言测试（Oracle）、方言测试（MySQL/PG）、单元测试（无外部依赖）；运行于 2026-11-25T03:54:05Z（11:54:05 CST）收尾。
+    - `A autorun dispatch`（run 45542770029）：completed / success。
+    - `O DB-AIOps automatic review`（run 45542770121）：completed / success。
+    - 据实说明：11:52～12:06 间 AQMan 数次读取该 CI 运行仍显示 in_progress（其 7 个任务当时已全部 success），12:08 复读为 completed / success；以 12:08 读数为准。
 - 本机同步程序为 `C:\AWSQuick\.aqman\aqman-git-agent.ps1`（仓库外，未入库），仅允许 pull / push / check 三种动作，不 force push，只提交请求列出且位于仓库内的路径，凭据缺失直接失败、不弹窗。
+- 本机同步程序后台化与开机自启（实测，据同步程序日志 `C:\AWSQuick\.aqman\agent.log` 与心跳文件）：
+  - 计划任务方式失败（LastTaskResult 2147943186）、`Start-Process` 被本机管理员策略拦截，均弃用；改为用户启动文件夹快捷方式。
+  - 开机自启：用户 12:0x 重启后，12:01:05 日志 `agent started, pid=38900`，未经人工启动，**通过**；但当时以前台窗口运行（Windows 终端不认隐藏窗口参数）。
+  - 后台化：脚本改为发现自身有窗口时以无窗口方式重启自身后退出。12:05:32 日志 `relaunched hidden, child pid=40372, launcher pid=1708 exits`，12:05:33 `agent started, pid=40372`，心跳 12:05:44 pid=40372；12:06:10 后台实例处理拉取请求成功（rc=0）；本机无残留窗口，**通过**。
+  - 用户双击启动文件夹快捷方式未能拉起脚本（日志无任何记录），改在 PowerShell 直接运行脚本后成功；双击方式不可用的原因推断为同一管理员策略，未核实。
 - 报告中不含任何密码、token、密钥。
 
 ## 四、未测 / 未核实
@@ -93,11 +107,13 @@
 1. **隐藏文件未计数**：第 2 项计数未包含以「.」开头的隐藏文件；如 PM 口径需含隐藏文件，需另行复数。
 2. **第 4 项标题取自 GitHub 接口而非提交网页正文**：提交网页正文抓取时只有 1db58ad0 带出标题；「是否在 main」取自 GitHub 网页的分支数据，标题与完整哈希取自 GitHub 接口，两者同属 GitHub 远端数据，但取证方式与任务单「用 GitHub 网页」字面不完全一致，据实说明。
 3. **未跑本地 `git branch --contains`**：当前同步程序只开放 pull / push / check，未在本机用 git 命令复核 5 个提交的分支归属。
-4. **推送后 CI**：本报告为纯文档提交，推送后 CI 结果在本报告成文时未知，未核实。
-5. **同步程序开机自启**：计划任务与 Start-Process 均被本机管理员策略拦截；当前同步程序为用户前台手动拉起（进程号 14456）；启动文件夹快捷方式已建，重启后能否自起未测。
+4. **重启后直接进后台未测**：开机自启已实测通过（12:01:05），后台化已实测通过（12:05:32，人工命令行拉起）；二者组合——下次开机自启后是否自动转后台、不留窗口——推断成立（同一脚本），尚未实测，待下次重启后读日志确认。
+5. **本 v1.1 修订推送后的 CI**：本次修订推送后的 CI 结果在成文时未知，未核实。
+6. **项目测试能力**：编码代理 Kiro 已接入但账号被服务端冻结（三次实测均 suspended），AQMan 目前无法在本机跑项目测试；本单为只读核对，不受影响。
 
 ## 五、版本记录
 
 | 版本 | 日期 | 修订人 | 修订说明 |
 |---|---|---|---|
 | v1.0 | 2026-11-25 | AQMan | DB-AQ-001 首版：五项只读核对完成，结论通过 |
+| v1.1 | 2026-11-25 | AQMan | 补推送链路实情（首推因缺提交者身份失败、配仓库级身份后成功，提交 96fb948）、推送后 CI 7/7 success 及三流程结论、本机同步程序开机自启与后台化实测；更新未测清单。五项核对内容与结论不变 |
