@@ -291,7 +291,7 @@ class MySQLSlowSqlDialectTests(TransactionTestCase):
     def test_live_fallback_reports_real_seconds_and_sorts_by_total(self):
         from unittest import mock
         from monitor.slow_query_engine import SlowQueryEngine
-        self._run('SELECT COUNT(*) FROM sqlstat_probe WHERE pad LIKE CONCAT(%d, "%%")', 4)
+        self._run('SELECT COUNT(*) FROM sqlstat_probe WHERE pad LIKE CONCAT(%d, "%%")', 20)
         self._run('SELECT id FROM sqlstat_probe WHERE id = %d', 50)
         eng = SlowQueryEngine(self.cfg)
         with mock.patch.object(SlowQueryEngine, '_from_sqlstat', return_value=None):
